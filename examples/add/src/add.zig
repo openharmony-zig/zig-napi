@@ -55,7 +55,7 @@ var module = napi.napi_module{
     .nm_flags = 0,
     .nm_filename = null,
     .nm_register_func = init,
-    .nm_modname = "zig_test",
+    .nm_modname = "add",
     .nm_priv = null,
     .reserved = .{ null, null, null, null },
 };
@@ -63,5 +63,11 @@ var module = napi.napi_module{
 fn module_init() callconv(.C) void {
     napi.napi_module_register(&module);
 }
+
+// It seems that the zig-0.13.0 does not support comptime export.
+// It may work with zig-0.14.0 or newer versions which syntax is reference like `&module_init`.
+// comptime {
+//     @export(module_init, .{ .linkage = .strong, .name = "init_array", .section = ".init_array" });
+// }
 
 export const init_array: [1]*const fn () callconv(.C) void linksection(".init_array") = .{&module_init};
