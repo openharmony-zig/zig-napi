@@ -106,8 +106,8 @@ pub fn nativeAddonBuild(build: *std.Build, option: std.Build.SharedLibraryOption
         arm.addIncludePath(.{ .cwd_relative = armIncludePath });
         x64.addIncludePath(.{ .cwd_relative = x64IncludePath });
 
-        const arm64DistDir: []const u8 = build.dupePath("dist/aarch64");
-        const armDistDir: []const u8 = build.dupePath("dist/arm");
+        const arm64DistDir: []const u8 = build.dupePath("dist/arm64-v8a");
+        const armDistDir: []const u8 = build.dupePath("dist/armeabi-v7a");
         const x64DistDir: []const u8 = build.dupePath("dist/x86_64");
 
         const arm64Step = build.addInstallArtifact(arm64, .{
