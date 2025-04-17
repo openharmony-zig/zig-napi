@@ -1,7 +1,8 @@
 .{
-    .name = "add",
+    .name = .add,
     .version = "0.0.1",
-    .minimum_zig_version = "0.13.0",
-    .dependencies = .{ .@"zig-addon-ohos" = .{ .path = "../.." } },
+    .minimum_zig_version = "0.14.0",
+    .fingerprint = 0xfd1a73e7f96390fb,
+    .dependencies = .{ .@"zig-addon" = .{ .path = "../.." } },
     .paths = .{ "build.zig", "build.zig.zon", "src" },
 }

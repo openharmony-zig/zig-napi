@@ -2,6 +2,7 @@ const std = @import("std");
 const napi = @cImport({
     @cInclude("napi/native_api.h");
 });
+const cc = @import("napi");
 
 // Add 函数实现
 fn add(env: napi.napi_env, info: napi.napi_callback_info) callconv(.C) napi.napi_value {
@@ -25,7 +26,7 @@ fn add(env: napi.napi_env, info: napi.napi_callback_info) callconv(.C) napi.napi
 
     // 创建返回值
     var result: napi.napi_value = undefined;
-    _ = napi.napi_create_double(env, value0 + value1, &result);
+    _ = napi.napi_create_double(env, cc.add(value0, value1), &result);
 
     return result;
 }
@@ -66,5 +67,5 @@ fn module_init() callconv(.C) void {
 
 comptime {
     const init_array = [1]*const fn () callconv(.C) void{&module_init};
-    @export(init_array, .{ .linkage = .strong, .name = "init_array", .section = ".init_array" });
+    @export(&init_array, .{ .linkage = .strong, .name = "init_array", .section = ".init_array" });
 }

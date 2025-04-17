@@ -1,8 +1,9 @@
 .{
-    .name = "zig-addon-ohos",
+    .name = .zig_addon,
     .version = "0.0.1",
-    .minimum_zig_version = "0.13.0",
+    .minimum_zig_version = "0.14.0",
     .dependencies = .{},
+    .fingerprint = 0xe84e485ea3f87a91,
     .paths = .{
         "build.zig",
         "build.zig.zon",

@@ -39,7 +39,7 @@ const targets: []const std.Target.Query = &.{
     .{ .cpu_arch = .x86_64, .os_tag = .linux, .abi = .ohos },
 };
 
-pub fn nativeAddonBuild(build: *std.Build, option: std.Build.SharedLibraryOptions) !void {
+pub fn nativeAddonBuild(build: *std.Build, option: std.Build.SharedLibraryOptions) !std.meta.Tuple(&.{ *std.Build.Step.Compile, *std.Build.Step.Compile, *std.Build.Step.Compile }) {
     var arm64Option = cloneSharedOptions(option);
     arm64Option.target = build.resolveTargetQuery(targets[0]);
 
@@ -135,6 +135,8 @@ pub fn nativeAddonBuild(build: *std.Build, option: std.Build.SharedLibraryOption
         build.getInstallStep().dependOn(&arm64Step.step);
         build.getInstallStep().dependOn(&armStep.step);
         build.getInstallStep().dependOn(&x64Step.step);
+
+        return .{ arm64, arm, x64 };
     } else {
         @panic("Environment OHOS_NDK_HOME or ohos_sdk_native not found, please set it as first.");
     }
