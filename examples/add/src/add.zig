@@ -2,41 +2,35 @@ const std = @import("std");
 const napi = @cImport({
     @cInclude("napi/native_api.h");
 });
-const cc = @import("napi");
 
-// Add 函数实现
-fn add(env: napi.napi_env, info: napi.napi_callback_info) callconv(.C) napi.napi_value {
-    var argc: usize = 2;
-    var args: [2]napi.napi_value = undefined;
+// 定义一个函数包装器，用于自动处理参数解析和类型转换
+fn wrapFn(comptime T: type, comptime func: fn (T, T) T) fn (napi.napi_env, napi.napi_callback_info) callconv(.C) napi.napi_value {
+    return struct {
+        fn wrapper(env: napi.napi_env, info: napi.napi_callback_info) callconv(.C) napi.napi_value {
+            var argc: usize = 2;
+            var args: [2]napi.napi_value = undefined;
+            _ = napi.napi_get_cb_info(env, info, &argc, &args, null, null);
 
-    // 获取参数
-    _ = napi.napi_get_cb_info(env, info, &argc, &args, null, null);
+            var value0: T = undefined;
+            var value1: T = undefined;
+            _ = napi.napi_get_value_double(env, args[0], &value0);
+            _ = napi.napi_get_value_double(env, args[1], &value1);
 
-    // 检查参数类型
-    var value_type0: napi.napi_valuetype = undefined;
-    var value_type1: napi.napi_valuetype = undefined;
-    _ = napi.napi_typeof(env, args[0], &value_type0);
-    _ = napi.napi_typeof(env, args[1], &value_type1);
-
-    // 获取参数值
-    var value0: f64 = undefined;
-    var value1: f64 = undefined;
-    _ = napi.napi_get_value_double(env, args[0], &value0);
-    _ = napi.napi_get_value_double(env, args[1], &value1);
-
-    // 创建返回值
-    var result: napi.napi_value = undefined;
-    _ = napi.napi_create_double(env, cc.add(value0, value1), &result);
-
-    return result;
+            var result: napi.napi_value = undefined;
+            _ = napi.napi_create_double(env, func(value0, value1), &result);
+            return result;
+        }
+    }.wrapper;
 }
 
-// 初始化函数
-fn init(env: napi.napi_env, exports: napi.napi_value) callconv(.C) napi.napi_value {
+// 定义一个模块注册器
+fn registerModule(comptime name: []const u8, comptime func: fn (f64, f64) f64) void {
+    const WrappedFn = wrapFn(f64, func);
+
     const desc = [_]napi.napi_property_descriptor{
         .{
-            .utf8name = "add",
-            .method = add,
+            .utf8name = name,
+            .method = WrappedFn,
             .getter = null,
             .setter = null,
             .value = null,
@@ -45,27 +39,41 @@ fn init(env: napi.napi_env, exports: napi.napi_value) callconv(.C) napi.napi_val
         },
     };
 
-    _ = napi.napi_define_properties(env, exports, 1, &desc);
+    const init = struct {
+        fn initFn(env: napi.napi_env, exports: napi.napi_value) callconv(.C) napi.napi_value {
+            _ = napi.napi_define_properties(env, exports, 1, &desc);
+            return exports;
+        }
+    }.initFn;
 
-    return exports;
+    const module = napi.napi_module{
+        .nm_version = 1,
+        .nm_flags = 0,
+        .nm_filename = null,
+        .nm_register_func = init,
+        .nm_modname = name,
+        .nm_priv = null,
+        .reserved = .{ null, null, null, null },
+    };
+
+    const module_register = struct {
+        fn register() callconv(.C) void {
+            napi.napi_module_register(&module);
+        }
+    }.register;
+
+    comptime {
+        const init_array = [1]*const fn () callconv(.C) void{&module_register};
+        @export(&init_array, .{ .linkage = .strong, .name = "init_array", .section = ".init_array" });
+    }
 }
 
-// 模块定义
-var module = napi.napi_module{
-    .nm_version = 1,
-    .nm_flags = 0,
-    .nm_filename = null,
-    .nm_register_func = init,
-    .nm_modname = "add",
-    .nm_priv = null,
-    .reserved = .{ null, null, null, null },
-};
-
-fn module_init() callconv(.C) void {
-    napi.napi_module_register(&module);
+// 定义核心函数
+fn add_impl(a: f64, b: f64) f64 {
+    return cc.add(a, b);
 }
 
+// 在编译时注册模块
 comptime {
-    const init_array = [1]*const fn () callconv(.C) void{&module_init};
-    @export(&init_array, .{ .linkage = .strong, .name = "init_array", .section = ".init_array" });
+    registerModule("add", add_impl);
 }
