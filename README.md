@@ -9,8 +9,8 @@ This project can help us to build a native module library for OpenHarmony/Harmon
 
 Our goal is to provide a zig version similar to the `node-addon-api`.
 
-[x] Out of box building system.
-[ ] Macro for napi.
+- [x] Out of box building system.
+- [ ] Macro for napi.
 
 ## Example
 
