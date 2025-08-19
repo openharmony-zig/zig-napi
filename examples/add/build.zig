@@ -1,16 +1,15 @@
 const std = @import("std");
-
-const zigAddonBuild = @import("zig-addon").zigAddonBuild;
+const napi_build = @import("zig-napi").napi_build;
 
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const zig_addon = b.dependency("zig-addon", .{});
+    const zig_napi = b.dependency("zig-napi", .{});
 
-    const napi = zig_addon.module("napi");
+    const napi = zig_napi.module("napi");
 
-    var arm64, var arm, var x64 = try zigAddonBuild.nativeAddonBuild(b, .{
+    var arm64, var arm, var x64 = try napi_build.nativeAddonBuild(b, .{
         .name = "add",
         .root_source_file = b.path("./src/add.zig"),
         .target = target,
