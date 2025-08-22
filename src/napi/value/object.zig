@@ -1,4 +1,4 @@
-const napi = @import("../../sys/api.zig").napi;
+const napi = @import("../../sys/api.zig");
 const Function = @import("../wrapper/Function.zig").Function;
 const Env = @import("../env.zig").Env;
 const CallbackInfo = @import("../wrapper/callback_info.zig").CallbackInfo;
