@@ -1,7 +1,8 @@
-const napi = @import("../sys/api.zig").napi;
+const napi = @import("../sys/api.zig");
 
 pub const Object = @import("./value/object.zig").Object;
 pub const Number = @import("./value/number.zig").Number;
+pub const String = @import("./value/string.zig").String;
 
 pub const NapiValue = struct {
     env: napi.napi_env,
@@ -22,4 +23,5 @@ pub const NapiValue = struct {
 pub const Value = union(enum) {
     Object: Object,
     Number: Number,
+    String: String,
 };

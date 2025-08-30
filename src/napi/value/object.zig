@@ -5,6 +5,8 @@ const CallbackInfo = @import("../wrapper/callback_info.zig").CallbackInfo;
 const Number = @import("./number.zig").Number;
 const std = @import("std");
 const Value = @import("../value.zig").Value;
+const Undefined = @import("./undefined.zig").Undefined;
+const Null = @import("./null.zig").Null;
 
 pub const Object = struct {
     env: napi.napi_env,
@@ -22,8 +24,8 @@ pub const Object = struct {
         const infos = @typeInfo(value_type);
 
         switch (value_type) {
-            Object => {
-                napi.napi_set_property(self.raw, key, value.raw);
+            Number, Object, Undefined, Null => {
+                napi.napi_set_property(self.raw, @ptrCast(key.ptr), value.raw);
             },
             else => {
                 switch (infos) {
@@ -46,6 +48,9 @@ pub const Object = struct {
                                             Value.Object => {
                                                 return ret.Object.raw;
                                             },
+                                            Value.String => {
+                                                return ret.String.raw;
+                                            },
                                         }
                                     } else {
                                         @compileError("unsupported function return type: " ++ @typeName(return_type.?));
@@ -61,6 +66,9 @@ pub const Object = struct {
                                             },
                                             Value.Object => {
                                                 return result.Object.raw;
+                                            },
+                                            Value.String => {
+                                                return result.String.raw;
                                             },
                                         }
                                     } else {

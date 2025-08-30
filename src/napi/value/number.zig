@@ -19,7 +19,7 @@ pub const Number = struct {
     pub fn New(env: Env, value: anytype) Number {
         const value_type = @TypeOf(value);
 
-        if (@typeInfo(value_type) != std.builtin.Type.Float and @typeInfo(value_type) != std.builtin.Type.Int) {
+        if (@typeInfo(value_type) != .float and @typeInfo(value_type) != .int) {
             @compileError("Only support float and int type, Unsupported type: " ++ @typeName(value_type));
         }
 
