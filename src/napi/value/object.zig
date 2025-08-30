@@ -7,6 +7,7 @@ const std = @import("std");
 const Value = @import("../value.zig").Value;
 const Undefined = @import("./undefined.zig").Undefined;
 const Null = @import("./null.zig").Null;
+const String = @import("./string.zig").String;
 
 pub const Object = struct {
     env: napi.napi_env,
@@ -24,8 +25,22 @@ pub const Object = struct {
         const infos = @typeInfo(value_type);
 
         switch (value_type) {
-            Number, Object, Undefined, Null => {
-                napi.napi_set_property(self.raw, @ptrCast(key.ptr), value.raw);
+            Number, Object, Undefined, Null, String => {
+                const napi_desc = [_]napi.napi_property_descriptor{
+                    .{
+                        .utf8name = @ptrCast(key.ptr),
+                        .method = null,
+                        .getter = null,
+                        .setter = null,
+                        .value = value.raw,
+                        .attributes = napi.napi_default,
+                        .data = null,
+                    },
+                };
+                const status = napi.napi_define_properties(self.env, self.raw, 1, &napi_desc);
+                if (status != napi.napi_ok) {
+                    @panic("Failed to define properties");
+                }
             },
             else => {
                 switch (infos) {
