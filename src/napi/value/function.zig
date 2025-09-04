@@ -33,17 +33,7 @@ pub const Function = struct {
                         value();
                     } else if (return_type.? == Value) {
                         const ret = value();
-                        switch (ret) {
-                            Value.Number => {
-                                return ret.Number.raw;
-                            },
-                            Value.Object => {
-                                return ret.Object.raw;
-                            },
-                            Value.String => {
-                                return ret.String.raw;
-                            },
-                        }
+                        return ret.to_napi_value();
                     } else {
                         @compileError("unsupported function return type: " ++ @typeName(return_type.?));
                     }
@@ -52,17 +42,7 @@ pub const Function = struct {
                         value(callback_info);
                     } else if (return_type.? == Value) {
                         const result = value(callback_info);
-                        switch (result) {
-                            Value.Number => {
-                                return result.Number.raw;
-                            },
-                            Value.Object => {
-                                return result.Object.raw;
-                            },
-                            Value.String => {
-                                return result.String.raw;
-                            },
-                        }
+                        return result.to_napi_value();
                     } else {
                         @compileError("unsupported function return type: " ++ @typeName(return_type.?));
                     }

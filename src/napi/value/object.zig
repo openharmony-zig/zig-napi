@@ -8,6 +8,8 @@ const Value = @import("../value.zig").Value;
 const Undefined = @import("./undefined.zig").Undefined;
 const Null = @import("./null.zig").Null;
 const String = @import("./string.zig").String;
+const helper = @import("../util/helper.zig");
+const Napi = @import("../util/napi.zig").Napi;
 
 pub const Object = struct {
     env: napi.napi_env,
@@ -67,5 +69,29 @@ pub const Object = struct {
                 }
             },
         }
+    }
+
+    /// Get a property from the object
+    /// If key is []u8 or likely, key will marked as a string, it will try to get a named property
+    /// Otherwise, key will be marked as a NapiValue and get a property by napi_get_property
+    pub fn Get(self: Object, comptime key: type, comptime T: type) T {
+        const is_string = helper.isString(key);
+
+        switch (is_string) {
+            .true => {
+                var raw: napi.napi_value = undefined;
+                _ = napi.napi_get_named_property(self.env, self.raw, @ptrCast(key.ptr), &raw);
+                return Value.from_raw(self.env, raw);
+            },
+            .false => {
+                return Napi.to_napi_value(self.env, key);
+            },
+        }
+    }
+
+    pub fn Has(self: Object, comptime key: []const u8) bool {
+        var result: bool = false;
+        _ = napi.napi_has_property(self.env, self.raw, @ptrCast(key.ptr), &result);
+        return result;
     }
 };

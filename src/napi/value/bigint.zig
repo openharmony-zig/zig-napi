@@ -1,0 +1,52 @@
+const napi = @import("../../sys/api.zig");
+const Env = @import("../env.zig").Env;
+
+pub const BigInt = struct {
+    env: napi.napi_env,
+    raw: napi.napi_value,
+    type: napi.napi_valuetype,
+
+    pub fn from_raw(env: napi.napi_env, raw: napi.napi_value) BigInt {
+        return BigInt{ .env = env, .raw = raw, .type = napi.napi_bigint };
+    }
+
+    pub fn New(env: Env, value: anytype) BigInt {
+        const value_type = @TypeOf(value);
+        const infos = @typeInfo(value_type);
+
+        switch (infos) {
+            .float, .int => {
+                switch (value_type) {
+                    u128 => {
+                        var result: napi.napi_value = undefined;
+                        var words: [2]u64 = undefined;
+                        words[0] = @truncate(value);
+                        words[1] = @truncate(value >> 64);
+
+                        const word_count: usize = if (words[1] != 0) 2 else 1;
+
+                        _ = napi.napi_create_bigint_words(env.raw, 0, word_count, @ptrCast(words.ptr), &result);
+                        return BigInt.from_raw(env.raw, result);
+                    },
+                    i128 => {
+                        var result: napi.napi_value = undefined;
+
+                        const is_negative = value < 0;
+                        const abs_value: u128 = if (is_negative) @bitCast(-value) else @bitCast(value);
+
+                        var words: [2]u64 = undefined;
+                        words[0] = @truncate(abs_value);
+                        words[1] = @truncate(abs_value >> 64);
+
+                        const word_count: usize = if (words[1] != 0) 2 else 1;
+
+                        _ = napi.napi_create_bigint_words(env.raw, if (is_negative) @as(c_int, 1) else @as(c_int, 0), word_count, @ptrCast(words.ptr), &result);
+                        return BigInt.from_raw(env.raw, result);
+                    },
+                    else => {},
+                }
+            },
+            else => {},
+        }
+    }
+};
