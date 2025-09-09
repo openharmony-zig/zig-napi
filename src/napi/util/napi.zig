@@ -1,60 +1,115 @@
 const napi = @import("../../sys/api.zig");
 const NapiValue = @import("../value.zig");
 const helper = @import("./helper.zig");
+const Env = @import("../env.zig").Env;
 
 pub const Napi = struct {
-    pub fn from_napi_value(env: napi.napi_env, raw: napi.napi_value) NapiValue {
-        return NapiValue.from_raw(env, raw);
+    pub fn from_napi_value(env: napi.napi_env, raw: napi.napi_value, comptime T: type) T {
+        const infos = @typeInfo(T);
+        switch (T) {
+            NapiValue.BigInt, NapiValue.Number, NapiValue.String, NapiValue.Function, NapiValue.Object, NapiValue.Promise => {
+                return T.from_raw(env, raw);
+            },
+            else => {
+                const stringMode = comptime helper.stringLike(T);
+                switch (stringMode) {
+                    .Utf8 => {
+                        return NapiValue.String.from_napi_value(env, raw, T);
+                    },
+                    .Utf16 => {
+                        return NapiValue.String.from_napi_value(env, raw, T);
+                    },
+                    else => {
+                        switch (infos) {
+                            .@"fn" => {
+                                @compileError("Please use Function directly");
+                            },
+                            .null => {
+                                return NapiValue.Null.New(Env.from_raw(env)).raw;
+                            },
+                            .undefined => {
+                                return NapiValue.Undefined.New(Env.from_raw(env)).raw;
+                            },
+                            .float, .int => {
+                                return NapiValue.Number.from_napi_value(env, raw, T);
+                            },
+                            else => {
+                                const hasFromRaw = @hasField(T, "from_raw");
+                                if (!hasFromRaw) {
+                                    @compileError("Type " ++ @typeName(T) ++ " does not have a from_raw method");
+                                }
+                            },
+                        }
+                    },
+                }
+            },
+        }
     }
 
-    pub fn to_napi_value(env: napi.napi_env, value: anytype) NapiValue.Value {
+    pub fn to_napi_value(env: napi.napi_env, value: anytype) napi.napi_value {
         const value_type = @TypeOf(value);
         const infos = @typeInfo(value_type);
 
         switch (value_type) {
-            .NapiValue.NapiValue.BigInt => {
-                return NapiValue.Value{ .BigInt = value };
+            NapiValue.BigInt => {
+                return value.raw;
             },
-            .NapiValue.NapiValue.Number => {
-                return NapiValue.Value{ .Number = value };
+            NapiValue.Number => {
+                return value.raw;
             },
-            .NapiValue.NapiValue.String => {
-                return NapiValue.Value{ .String = value };
+            NapiValue.String => {
+                return value.raw;
             },
-            .NapiValue.NapiValue.Function => {
-                return NapiValue.Value{ .Function = value };
+            NapiValue.Function => {
+                return value.raw;
             },
-            .NapiValue.NapiValue.Object => {
-                return NapiValue.Value{ .Object = value };
+            NapiValue.Object => {
+                return value.raw;
+            },
+            NapiValue.Promise => {
+                return value.raw;
+            },
+            // If value is already a napi_value, return it directly
+            napi.napi_value => {
+                return value;
             },
             else => {
                 switch (infos) {
                     .@"fn" => {
-                        return NapiValue.Value{ .Function = NapiValue.Function.New(env, value) };
+                        return NapiValue.Function.New(Env.from_raw(env), value).raw;
                     },
                     .null => {
-                        return NapiValue.Value{ .Null = NapiValue.Null.New(env) };
+                        return NapiValue.Null.New(Env.from_raw(env)).raw;
                     },
-                    .undefined => {
-                        return NapiValue.Value{ .Undefined = NapiValue.Undefined.New(env) };
+                    .undefined, .void => {
+                        return NapiValue.Undefined.New(Env.from_raw(env)).raw;
                     },
                     .float, .int => {
                         switch (value_type) {
                             u128, i128 => {
-                                return NapiValue.Value{ .BigInt = NapiValue.BigInt.New(env, value) };
+                                return NapiValue.BigInt.New(Env.from_raw(env), value).raw;
                             },
                             else => {
-                                return NapiValue.Value{ .Number = NapiValue.Number.New(env, value) };
+                                return NapiValue.Number.New(Env.from_raw(env), value).raw;
                             },
                         }
                     },
+                    .@"struct" => {
+                        return NapiValue.Object.New(Env.from_raw(env), value).raw;
+                    },
                     else => {
-                        const isString = helper.isString(value);
-                        switch (isString) {
-                            .true => {
-                                return NapiValue.Value{ .String = NapiValue.String.New(env, value) };
+                        const stringMode = comptime helper.stringLike(value_type);
+                        switch (stringMode) {
+                            .Utf8 => {
+                                return NapiValue.String.New(Env.from_raw(env), value).raw;
                             },
-                            .false => {},
+                            .Utf16 => {
+                                return NapiValue.String.New(Env.from_raw(env), value).raw;
+                            },
+                            else => {
+                                // TODO: Implement this
+                                @compileError("Unsupported type: " ++ @typeName(value_type));
+                            },
                         }
                     },
                 }

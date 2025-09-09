@@ -22,6 +22,13 @@ pub const Object = struct {
         };
     }
 
+    pub fn New(env: Env, _: anytype) Object {
+        var raw: napi.napi_value = undefined;
+        _ = napi.napi_create_object(env.raw, &raw);
+
+        return Object.from_raw(env.raw, raw);
+    }
+
     pub fn Set(self: Object, comptime key: []const u8, value: anytype) void {
         const value_type = @TypeOf(value);
         const infos = @typeInfo(value_type);
@@ -84,14 +91,26 @@ pub const Object = struct {
                 return Value.from_raw(self.env, raw);
             },
             .false => {
-                return Napi.to_napi_value(self.env, key);
+                return Napi.ToNapiValue(self.env, key);
             },
         }
     }
 
+    /// Check if the object has a property
+    /// If key is []u8 or likely, key will marked as a string, it will try to get a named property
+    /// Otherwise, key will be marked as a NapiValue and check a property by napi_has_property
     pub fn Has(self: Object, comptime key: []const u8) bool {
         var result: bool = false;
-        _ = napi.napi_has_property(self.env, self.raw, @ptrCast(key.ptr), &result);
+
+        const is_string = helper.isString(key);
+        switch (is_string) {
+            .true => {
+                _ = napi.napi_has_named_property(self.env, self.raw, @ptrCast(key.ptr), &result);
+            },
+            .false => {
+                _ = napi.napi_has_property(self.env, self.raw, @ptrCast(key.ptr), &result);
+            },
+        }
         return result;
     }
 };

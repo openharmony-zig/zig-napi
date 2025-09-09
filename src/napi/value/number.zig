@@ -1,7 +1,6 @@
 const std = @import("std");
 const napi = @import("../../sys/api.zig");
 const Env = @import("../env.zig").Env;
-const Value = @import("../value.zig").Value;
 
 pub const Number = struct {
     env: napi.napi_env,
@@ -14,6 +13,29 @@ pub const Number = struct {
             .raw = raw,
             .type = napi.napi_number,
         };
+    }
+
+    pub fn from_napi_value(env: napi.napi_env, raw: napi.napi_value, comptime T: type) T {
+        switch (T) {
+            f16, f32, f64, f128 => {
+                var result: T = undefined;
+                _ = napi.napi_get_value_double(env, raw, @ptrCast(&result));
+                return result;
+            },
+            isize, i8, i16, i32, i64, i128 => {
+                var result: T = undefined;
+                _ = napi.napi_get_value_int32(env, raw, @ptrCast(&result));
+                return result;
+            },
+            usize, u8, u16, u32, u64, u128 => {
+                var result: T = undefined;
+                _ = napi.napi_get_value_uint32(env, raw, @ptrCast(&result));
+                return result;
+            },
+            else => {
+                @compileError("Unsupported type: " ++ @typeName(T));
+            },
+        }
     }
 
     pub fn New(env: Env, value: anytype) Number {
@@ -57,15 +79,5 @@ pub const Number = struct {
                 @compileError("For u128, i128, f128 please use BigInt instead");
             },
         }
-    }
-
-    pub fn ToValue(self: Number) Value {
-        return Value{ .Number = self };
-    }
-
-    pub fn FloatValue(self: Number) f64 {
-        var result: f64 = undefined;
-        _ = napi.napi_get_value_double(self.env, self.raw, &result);
-        return result;
     }
 };

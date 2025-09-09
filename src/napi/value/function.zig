@@ -2,7 +2,7 @@ const std = @import("std");
 const napi = @import("../../sys/api.zig");
 const Env = @import("../env.zig").Env;
 const CallbackInfo = @import("../wrapper/callback_info.zig").CallbackInfo;
-const Value = @import("../value.zig").Value;
+const Napi = @import("../util/napi.zig").Napi;
 
 pub const Function = struct {
     env: napi.napi_env,
@@ -31,20 +31,18 @@ pub const Function = struct {
                 if (params.len == 0) {
                     if (return_type == null or return_type.? == void) {
                         value();
-                    } else if (return_type.? == Value) {
-                        const ret = value();
-                        return ret.to_napi_value();
+                        return Napi.to_napi_value(inner_env, undefined);
                     } else {
-                        @compileError("unsupported function return type: " ++ @typeName(return_type.?));
+                        const ret = value();
+                        return Napi.to_napi_value(inner_env, ret) orelse @panic("Failed to convert result to napi_value");
                     }
                 } else if (params.len == 1 and params[0].type.? == CallbackInfo) {
                     if (return_type == null or return_type.? == void) {
                         value(callback_info);
-                    } else if (return_type.? == Value) {
-                        const result = value(callback_info);
-                        return result.to_napi_value();
+                        return Napi.to_napi_value(inner_env, undefined);
                     } else {
-                        @compileError("unsupported function return type: " ++ @typeName(return_type.?));
+                        const result = value(callback_info);
+                        return Napi.to_napi_value(inner_env, result) orelse @panic("Failed to convert result to napi_value");
                     }
                 } else {
                     @compileError("unsupported function signature");

@@ -1,13 +1,27 @@
-fn isString(comptime T: type) bool {
+pub const StringMode = enum {
+    Utf8,
+    Utf16,
+    Unknown,
+};
+
+pub fn stringLike(comptime T: type) StringMode {
     const info = @typeInfo(T);
 
     switch (info) {
-        .Pointer => |ptr| {
-            return ptr.child == u8;
+        .pointer => |ptr| {
+            switch (ptr.child) {
+                u8 => return StringMode.Utf8,
+                u16 => return StringMode.Utf16,
+                else => return StringMode.Unknown,
+            }
         },
-        .Array => |arr| {
-            return arr.child == u8;
+        .array => |arr| {
+            switch (arr.child) {
+                u8 => return StringMode.Utf8,
+                u16 => return StringMode.Utf16,
+                else => return StringMode.Unknown,
+            }
         },
-        else => return false,
+        else => return StringMode.Unknown,
     }
 }
