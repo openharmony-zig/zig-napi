@@ -25,3 +25,13 @@ pub fn stringLike(comptime T: type) StringMode {
         else => return StringMode.Unknown,
     }
 }
+
+pub fn isTuple(comptime T: type) bool {
+    const info = @typeInfo(T);
+    return info == .@"struct" and info.@"struct".is_tuple;
+}
+
+pub fn isSlice(comptime T: type) bool {
+    const info = @typeInfo(T);
+    return info == .pointer and info.pointer.size == .slice;
+}

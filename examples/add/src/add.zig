@@ -12,16 +12,12 @@ fn fibonacci_execute(_: napi.Env, data: f64) void {
     const allocator = std.heap.page_allocator;
     const message = std.fmt.allocPrint(allocator, "Fibonacci result: {d}", .{result}) catch @panic("OOM");
     defer allocator.free(message);
-
-    std.debug.print("{s}\n", .{message});
 }
 
 fn fibonacci_on_complete(_: napi.Env, _: napi.Status, data: f64) void {
     const allocator = std.heap.page_allocator;
     const message = std.fmt.allocPrint(allocator, "Fibonacci result: {d}", .{data}) catch @panic("OOM");
     defer allocator.free(message);
-
-    std.debug.print("{s}\n", .{message});
 }
 
 fn add(callback_info: napi.CallbackInfo) f64 {
@@ -60,6 +56,29 @@ fn fib_async(callback_info: napi.CallbackInfo) napi.Promise {
     return promise;
 }
 
+fn get_and_return_array(callback_info: napi.CallbackInfo) []f32 {
+    const array = callback_info.Get(0).As([]f32);
+
+    const pg = std.heap.page_allocator;
+    const message = std.fmt.allocPrint(pg, "Array length: {d}", .{array.len}) catch @panic("OOM");
+    const message2 = std.fmt.allocPrint(pg, "Array content: {any}", .{array}) catch @panic("OOM");
+    defer pg.free(message);
+    defer pg.free(message2);
+
+    return array;
+}
+
+const array_type = struct { f32, bool, []u8 };
+
+fn get_named_array(callback_info: napi.CallbackInfo) array_type {
+    const array: array_type = callback_info.Get(0).As(array_type);
+    const pg = std.heap.page_allocator;
+    const message = std.fmt.allocPrint(pg, "content: {any}", .{array}) catch @panic("OOM");
+    defer pg.free(message);
+
+    return array;
+}
+
 fn init(env: napi.Env, exports: napi.Object) napi.Object {
     exports.Set("add", add);
     exports.Set("hello", hello);
@@ -68,6 +87,8 @@ fn init(env: napi.Env, exports: napi.Object) napi.Object {
     exports.Set("text", hello_string);
     exports.Set("fib", fib);
     exports.Set("fib_async", fib_async);
+    exports.Set("get_and_return_array", get_and_return_array);
+    exports.Set("get_named_array", get_named_array);
 
     return exports;
 }
