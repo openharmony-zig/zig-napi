@@ -9,8 +9,6 @@ pub const BigInt = @import("./value/bigint.zig").BigInt;
 pub const Null = @import("./value/null.zig").Null;
 pub const Undefined = @import("./value/undefined.zig").Undefined;
 pub const Promise = @import("./value/promise.zig").Promise;
-pub const Bool = @import("./value/bool.zig").Bool;
-pub const Array = @import("./value/array.zig").Array;
 
 pub const NapiValue = struct {
     env: napi.napi_env,
