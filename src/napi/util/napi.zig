@@ -7,7 +7,7 @@ pub const Napi = struct {
     pub fn from_napi_value(env: napi.napi_env, raw: napi.napi_value, comptime T: type) T {
         const infos = @typeInfo(T);
         switch (T) {
-            NapiValue.BigInt, NapiValue.Number, NapiValue.String, NapiValue.Function, NapiValue.Object, NapiValue.Promise => {
+            NapiValue.BigInt, NapiValue.Number, NapiValue.String, NapiValue.Function, NapiValue.Object, NapiValue.Promise, NapiValue.Array => {
                 return T.from_raw(env, raw);
             },
             else => {
@@ -33,6 +33,18 @@ pub const Napi = struct {
                             .float, .int => {
                                 return NapiValue.Number.from_napi_value(env, raw, T);
                             },
+                            .array, .pointer => {
+                                return NapiValue.Array.from_napi_value(env, raw, T);
+                            },
+                            .@"struct" => {
+                                if (comptime helper.isTuple(T)) {
+                                    return NapiValue.Array.from_napi_value(env, raw, T);
+                                }
+                                return NapiValue.Object.from_napi_value(env, raw, T);
+                            },
+                            .bool => {
+                                return NapiValue.Bool.from_napi_value(env, raw, T);
+                            },
                             else => {
                                 const hasFromRaw = @hasField(T, "from_raw");
                                 if (!hasFromRaw) {
@@ -51,22 +63,7 @@ pub const Napi = struct {
         const infos = @typeInfo(value_type);
 
         switch (value_type) {
-            NapiValue.BigInt => {
-                return value.raw;
-            },
-            NapiValue.Number => {
-                return value.raw;
-            },
-            NapiValue.String => {
-                return value.raw;
-            },
-            NapiValue.Function => {
-                return value.raw;
-            },
-            NapiValue.Object => {
-                return value.raw;
-            },
-            NapiValue.Promise => {
+            NapiValue.BigInt, NapiValue.Bool, NapiValue.Number, NapiValue.String, NapiValue.Function, NapiValue.Object, NapiValue.Promise, NapiValue.Array => {
                 return value.raw;
             },
             // If value is already a napi_value, return it directly
@@ -94,8 +91,29 @@ pub const Napi = struct {
                             },
                         }
                     },
+                    .array, .pointer => {
+                        const stringMode = comptime helper.stringLike(value_type);
+
+                        switch (stringMode) {
+                            .Utf8 => {
+                                return NapiValue.String.New(Env.from_raw(env), value).raw;
+                            },
+                            .Utf16 => {
+                                return NapiValue.String.New(Env.from_raw(env), value).raw;
+                            },
+                            else => {
+                                return NapiValue.Array.New(Env.from_raw(env), value).raw;
+                            },
+                        }
+                    },
                     .@"struct" => {
+                        if (comptime helper.isTuple(value_type)) {
+                            return NapiValue.Array.New(Env.from_raw(env), value).raw;
+                        }
                         return NapiValue.Object.New(Env.from_raw(env), value).raw;
+                    },
+                    .bool => {
+                        return NapiValue.Bool.New(Env.from_raw(env), value).raw;
                     },
                     else => {
                         const stringMode = comptime helper.stringLike(value_type);

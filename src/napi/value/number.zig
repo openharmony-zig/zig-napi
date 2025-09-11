@@ -17,21 +17,28 @@ pub const Number = struct {
 
     pub fn from_napi_value(env: napi.napi_env, raw: napi.napi_value, comptime T: type) T {
         switch (T) {
-            f16, f32, f64, f128 => {
+            f16, f32, f64 => {
                 var result: T = undefined;
-                _ = napi.napi_get_value_double(env, raw, @ptrCast(&result));
+                var temp: f64 = undefined;
+                _ = napi.napi_get_value_double(env, raw, &temp);
+                result = @floatCast(temp);
                 return result;
             },
-            isize, i8, i16, i32, i64, i128 => {
+            isize, i8, i16, i32 => {
                 var result: T = undefined;
-                _ = napi.napi_get_value_int32(env, raw, @ptrCast(&result));
+                var temp: i32 = undefined;
+                _ = napi.napi_get_value_int32(env, raw, &temp);
+                result = @intCast(temp);
                 return result;
             },
-            usize, u8, u16, u32, u64, u128 => {
+            usize, u8, u16, u32 => {
                 var result: T = undefined;
-                _ = napi.napi_get_value_uint32(env, raw, @ptrCast(&result));
+                var temp: u32 = undefined;
+                _ = napi.napi_get_value_uint32(env, raw, &temp);
+                result = @intCast(temp);
                 return result;
             },
+
             else => {
                 @compileError("Unsupported type: " ++ @typeName(T));
             },
