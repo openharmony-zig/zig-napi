@@ -22,6 +22,28 @@ pub const Object = struct {
         };
     }
 
+    pub fn from_napi_value(env: napi.napi_env, raw: napi.napi_value, comptime T: type) T {
+        const infos = @typeInfo(T);
+        switch (infos) {
+            .@"struct" => {
+                if (comptime helper.isTuple(T)) {
+                    @compileError("Object does not support tuple type");
+                }
+
+                var result: T = undefined;
+                inline for (infos.@"struct".fields) |field| {
+                    var element: napi.napi_value = undefined;
+                    _ = napi.napi_get_named_property(env, raw, @ptrCast(field.name.ptr), &element);
+                    @field(result, field.name) = Napi.from_napi_value(env, element, field.type);
+                }
+                return result;
+            },
+            else => {
+                @compileError("Unsupported type: " ++ @typeName(infos));
+            },
+        }
+    }
+
     pub fn New(env: Env, _: anytype) Object {
         var raw: napi.napi_value = undefined;
         _ = napi.napi_create_object(env.raw, &raw);
