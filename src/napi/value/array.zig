@@ -3,6 +3,7 @@ const napi = @import("../../sys/api.zig");
 const Env = @import("../env.zig").Env;
 const Napi = @import("../util/napi.zig").Napi;
 const helper = @import("../util/helper.zig");
+const ArrayList = std.ArrayList;
 
 pub const Array = struct {
     env: napi.napi_env,
@@ -48,7 +49,7 @@ pub const Array = struct {
                     }
                     return buf;
                 }
-                @compileError("Only support slice type, Unsupported type: " ++ @typeName(infos));
+                @compileError("Only support slice type, Unsupported type: " ++ @typeName(T));
             },
             .@"struct" => {
                 if (comptime helper.isTuple(T)) {
@@ -61,7 +62,22 @@ pub const Array = struct {
                     }
                     return result;
                 }
-                @compileError("Only support array, slice, and tuple type, Unsupported type: " ++ @typeName(infos));
+                if (comptime helper.isGenericType(T, "ArrayList")) {
+                    // Get Array List's items type
+                    const child = comptime helper.getArrayListElementType(T);
+
+                    var result: T = ArrayList(child).init(std.heap.page_allocator);
+                    var len: u32 = undefined;
+                    _ = napi.napi_get_array_length(env, raw, &len);
+                    result.ensureTotalCapacity(len) catch @panic("OOM");
+                    for (0..len) |i| {
+                        var element: napi.napi_value = undefined;
+                        _ = napi.napi_get_element(env, raw, @intCast(i), &element);
+                        result.append(Napi.from_napi_value(env, element, child)) catch @panic("OOM");
+                    }
+                    return result;
+                }
+                @compileError("Only support array, slice, and tuple type, Unsupported type: " ++ @typeName(T));
             },
             else => {
                 @compileError("Only support array, slice, and tuple type, Unsupported type: " ++ @typeName(infos));
@@ -73,8 +89,8 @@ pub const Array = struct {
         const array_type = @TypeOf(array);
         const infos = @typeInfo(array_type);
 
-        if (infos != .array and (comptime !helper.isSlice(array_type)) and (comptime !helper.isTuple(array_type))) {
-            @compileError("Array.New only support array , slice or tuple type, Unsupported type: " ++ @typeName(array_type));
+        if (infos != .array and (comptime !helper.isSlice(array_type)) and (comptime !helper.isTuple(array_type)) and (comptime !helper.isGenericType(array_type, "ArrayList"))) {
+            @compileError("Array.New only support array,ArrayList,slice or tuple type, Unsupported type: " ++ @typeName(array_type));
         }
         var len: u32 = undefined;
         if (infos == .array) {
@@ -83,6 +99,8 @@ pub const Array = struct {
             len = @intCast(array.len);
         } else if (comptime helper.isTuple(array_type)) {
             len = infos.@"struct".fields.len;
+        } else if (comptime helper.isGenericType(array_type, "ArrayList")) {
+            len = @intCast(array.capacity);
         }
 
         var raw: napi.napi_value = undefined;
@@ -97,6 +115,11 @@ pub const Array = struct {
             inline for (infos.@"struct".fields, 0..) |item, i| {
                 const value = @field(array, item.name);
                 const napi_value = Napi.to_napi_value(env.raw, value);
+                _ = napi.napi_set_element(env.raw, raw, @intCast(i), napi_value);
+            }
+        } else if (comptime helper.isGenericType(array_type, "ArrayList")) {
+            for (array.items, 0..) |item, i| {
+                const napi_value = Napi.to_napi_value(env.raw, item);
                 _ = napi.napi_set_element(env.raw, raw, @intCast(i), napi_value);
             }
         }

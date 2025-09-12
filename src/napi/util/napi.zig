@@ -40,6 +40,9 @@ pub const Napi = struct {
                                 if (comptime helper.isTuple(T)) {
                                     return NapiValue.Array.from_napi_value(env, raw, T);
                                 }
+                                if (comptime helper.isGenericType(T, "ArrayList")) {
+                                    return NapiValue.Array.from_napi_value(env, raw, T);
+                                }
                                 return NapiValue.Object.from_napi_value(env, raw, T);
                             },
                             .bool => {
@@ -123,6 +126,9 @@ pub const Napi = struct {
                         if (comptime helper.isTuple(value_type)) {
                             return NapiValue.Array.New(Env.from_raw(env), value).raw;
                         }
+                        if (comptime helper.isGenericType(value_type, "ArrayList")) {
+                            return NapiValue.Array.New(Env.from_raw(env), value).raw;
+                        }
                         return NapiValue.Object.New(Env.from_raw(env), value).raw;
                     },
                     .bool => {
@@ -144,6 +150,7 @@ pub const Napi = struct {
                                 return NapiValue.String.New(Env.from_raw(env), value).raw;
                             },
                             else => {
+
                                 // TODO: Implement this
                                 @compileError("Unsupported type: " ++ @typeName(value_type));
                             },
