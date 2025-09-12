@@ -45,6 +45,19 @@ pub const Napi = struct {
                             .bool => {
                                 return NapiValue.Bool.from_napi_value(env, raw, T);
                             },
+                            .optional => {
+                                switch (T.child) {
+                                    .null => {
+                                        return NapiValue.Null.New(Env.from_raw(env)).raw;
+                                    },
+                                    .undefined, .void => {
+                                        return NapiValue.Undefined.New(Env.from_raw(env)).raw;
+                                    },
+                                    else => {
+                                        return Napi.from_napi_value(env, raw, T.child);
+                                    },
+                                }
+                            },
                             else => {
                                 const hasFromRaw = @hasField(T, "from_raw");
                                 if (!hasFromRaw) {
@@ -114,6 +127,12 @@ pub const Napi = struct {
                     },
                     .bool => {
                         return NapiValue.Bool.New(Env.from_raw(env), value).raw;
+                    },
+                    .optional => {
+                        if (value == null) {
+                            return NapiValue.Undefined.New(Env.from_raw(env)).raw;
+                        }
+                        return Napi.to_napi_value(env, value);
                     },
                     else => {
                         const stringMode = comptime helper.stringLike(value_type);
