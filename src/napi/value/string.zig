@@ -24,7 +24,7 @@ pub const String = struct {
                 const buf = allocator.alloc(u8, len + 1) catch @panic("OOM");
 
                 _ = napi.napi_get_value_string_utf8(env, raw, buf.ptr, len + 1, null);
-                return @as(T, buf);
+                return @as(T, buf[0..len]);
             },
             .Utf16 => {
                 var len: usize = 0;
@@ -34,7 +34,7 @@ pub const String = struct {
                 const buf = allocator.alloc(u16, len + 1) catch @panic("OOM");
 
                 _ = napi.napi_get_value_string_utf16(env, raw, buf.ptr, len + 1, null);
-                return @as(T, buf);
+                return @as(T, buf[0..len]);
             },
             else => {
                 @compileError("Unsupported string type");

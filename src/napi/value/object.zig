@@ -44,26 +44,45 @@ pub const Object = struct {
         }
     }
 
-    pub fn New(env: Env, _: anytype) Object {
+    pub fn New(env: Env, obj: anytype) Object {
+        const obj_type = @TypeOf(obj);
+        const obj_infos = @typeInfo(obj_type);
+        if (obj_infos != .@"struct") {
+            @compileError("Object.New only support struct type, Unsupported type: " ++ @typeName(obj_type));
+        }
+
+        if (comptime helper.isTuple(obj_type)) {
+            @compileError("Object.New does not support tuple type");
+        }
+
         var raw: napi.napi_value = undefined;
         _ = napi.napi_create_object(env.raw, &raw);
 
-        return Object.from_raw(env.raw, raw);
+        var self = Object.from_raw(env.raw, raw);
+
+        const obj_fields = obj_infos.@"struct".fields;
+
+        inline for (obj_fields) |field| {
+            self.Set(field.name, Napi.to_napi_value(env.raw, @field(obj, field.name)));
+        }
+
+        return self;
     }
 
     pub fn Set(self: Object, comptime key: []const u8, value: anytype) void {
         const value_type = @TypeOf(value);
         const infos = @typeInfo(value_type);
 
-        switch (value_type) {
-            Number, Object, Undefined, Null, String => {
+        switch (infos) {
+            .@"fn" => {
+                const fn_impl = Function.New(Env.from_raw(self.env), key, value);
                 const napi_desc = [_]napi.napi_property_descriptor{
                     .{
                         .utf8name = @ptrCast(key.ptr),
-                        .method = null,
+                        .method = fn_impl.inner_fn,
                         .getter = null,
                         .setter = null,
-                        .value = value.raw,
+                        .value = null,
                         .attributes = napi.napi_default,
                         .data = null,
                     },
@@ -74,27 +93,21 @@ pub const Object = struct {
                 }
             },
             else => {
-                switch (infos) {
-                    .@"fn" => {
-                        const FnImpl = Function.New(Env.from_raw(self.env), key, value);
-
-                        const desc = [_]napi.napi_property_descriptor{
-                            .{
-                                .utf8name = @ptrCast(key.ptr),
-                                .method = FnImpl.inner_fn,
-                                .getter = null,
-                                .setter = null,
-                                .value = null,
-                                .attributes = napi.napi_default,
-                                .data = null,
-                            },
-                        };
-                        const status = napi.napi_define_properties(self.env, self.raw, 1, &desc);
-                        if (status != napi.napi_ok) {
-                            @panic("Failed to define properties");
-                        }
+                const n_value = Napi.to_napi_value(self.env, value);
+                const napi_desc = [_]napi.napi_property_descriptor{
+                    .{
+                        .utf8name = @ptrCast(key.ptr),
+                        .method = null,
+                        .getter = null,
+                        .setter = null,
+                        .value = n_value,
+                        .attributes = napi.napi_default,
+                        .data = null,
                     },
-                    else => {},
+                };
+                const status = napi.napi_define_properties(self.env, self.raw, 1, &napi_desc);
+                if (status != napi.napi_ok) {
+                    @panic("Failed to define properties");
                 }
             },
         }
