@@ -1,19 +1,64 @@
-# zig-addon
+# zig-napi
 
 This project can help us to build a native module library for OpenHarmony/HarmonyNext with zig-lang.
 
 > Note: This project is still in the early stage of development and is not ready for use. You can use it as a toy.
 
+## Install
+
+We recommend you use ZON(Zig Package Manager) to install it.
+
+```zon
+// build.zig.zon
+.{
+    .name = "appname",
+    .version = "0.0.0",
+    .dependencies = .{
+        .network = .{
+            .url = "https://github.com/openharmony-zig/zig-napi/archive/refs/tags/<COMMIT_HASH_HERE>.tar.gz",
+            .hash = "HASH_GOES_HERE",
+        },
+    },
+}
+```
+
+(To aquire the hash, please remove the line containing .hash, the compiler will then tell you which line to put back)
+
+```zig
+// build.zig
+const std = @import("std");
+const napi_build = @import("zig-napi").napi_build;
+
+pub fn build(b: *std.Build) !void {
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
+
+    const zig_napi = b.dependency("zig-napi", .{});
+
+    const napi = zig_napi.module("napi");
+
+    var arm64, var arm, var x64 = try napi_build.nativeAddonBuild(b, .{
+        .name = "hello",
+        .root_source_file = b.path("./src/hello.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    _ = arm64.root_module.addImport("napi", napi);
+    _ = arm.root_module.addImport("napi", napi);
+    _ = x64.root_module.addImport("napi", napi);
+}
+```
+
+## Usage
 
 ```zig
 const napi = @import("napi");
 
-fn add(callback_info: napi.CallbackInfo) napi.Value {
-    const a = callback_info.Get(0).As(napi.Number);
-    const b = callback_info.Get(1).As(napi.Number);
-    const result = a.FloatValue() + b.FloatValue();
-    const result_number = napi.Number.New(callback_info.Env(), result);
-    return result_number.ToValue();
+fn add(callback_info: napi.CallbackInfo) f32 {
+    const left = callback_info.Get(0).As(f32);
+    const right = callback_info.Get(1).As(f32);
+    return left + right;
 }
 
 fn init(_: napi.Env, exports: napi.Object) napi.Object {
@@ -25,7 +70,6 @@ comptime {
     napi.NODE_API_MODULE("hello", init);
 }
 ```
-
 
 ## Goal
 
@@ -45,7 +89,6 @@ zig build
 ```
 
 And you can get `libadd.so` in `zig-out/dist`.
-
 
 ## LICENSE
 
