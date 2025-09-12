@@ -9,14 +9,14 @@ pub fn build(b: *std.Build) !void {
 
     const napi = zig_napi.module("napi");
 
-    var arm64, var arm, var x64 = try napi_build.nativeAddonBuild(b, .{
+    const result = try napi_build.nativeAddonBuild(b, .{
         .name = "hello",
         .root_source_file = b.path("./src/hello.zig"),
         .target = target,
         .optimize = optimize,
     });
 
-    _ = arm64.root_module.addImport("napi", napi);
-    _ = arm.root_module.addImport("napi", napi);
-    _ = x64.root_module.addImport("napi", napi);
+    _ = result.arm64.?.root_module.addImport("napi", napi);
+    _ = result.arm.?.root_module.addImport("napi", napi);
+    _ = result.x64.?.root_module.addImport("napi", napi);
 }
