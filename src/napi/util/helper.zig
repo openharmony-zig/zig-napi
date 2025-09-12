@@ -1,3 +1,5 @@
+const std = @import("std");
+
 pub const StringMode = enum {
     Utf8,
     Utf16,
@@ -34,4 +36,27 @@ pub fn isTuple(comptime T: type) bool {
 pub fn isSlice(comptime T: type) bool {
     const info = @typeInfo(T);
     return info == .pointer and info.pointer.size == .slice;
+}
+
+pub fn isGenericType(comptime T: type, comptime name: []const u8) bool {
+    const info = @typeName(T);
+    return std.mem.indexOf(u8, info, name) != null;
+}
+
+pub fn getArrayListElementType(comptime T: type) type {
+    const info = @typeInfo(T);
+    if (info != .@"struct") {
+        @compileError("Expected struct type for ArrayList");
+    }
+
+    for (info.@"struct".fields) |field| {
+        if (std.mem.eql(u8, field.name, "items")) {
+            const items_type_info = @typeInfo(field.type);
+            if (items_type_info == .pointer and items_type_info.pointer.size == .slice) {
+                return items_type_info.pointer.child;
+            }
+        }
+    }
+
+    @compileError("Could not extract element type from ArrayList: " ++ @typeName(T));
 }

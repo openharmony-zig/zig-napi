@@ -1,5 +1,6 @@
 const napi = @import("napi");
 const std = @import("std");
+const ArrayList = std.ArrayList;
 
 fn fibonacci(n: f64) f64 {
     if (n <= 1) return n;
@@ -79,6 +80,15 @@ fn get_named_array(callback_info: napi.CallbackInfo) array_type {
     return array;
 }
 
+fn get_arraylist(callback_info: napi.CallbackInfo) ArrayList(f32) {
+    const array = callback_info.Get(0).As(ArrayList(f32));
+
+    const pg = std.heap.page_allocator;
+    const message = std.fmt.allocPrint(pg, "Array length: {any}", .{array}) catch @panic("OOM");
+    defer pg.free(message);
+    return array;
+}
+
 fn init(env: napi.Env, exports: napi.Object) napi.Object {
     exports.Set("add", add);
     exports.Set("hello", hello);
@@ -89,6 +99,7 @@ fn init(env: napi.Env, exports: napi.Object) napi.Object {
     exports.Set("fib_async", fib_async);
     exports.Set("get_and_return_array", get_and_return_array);
     exports.Set("get_named_array", get_named_array);
+    exports.Set("get_arraylist", get_arraylist);
 
     return exports;
 }
