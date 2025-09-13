@@ -33,10 +33,8 @@ fn cloneSharedOptions(option: std.Build.SharedLibraryOptions) std.Build.SharedLi
     };
 }
 
-pub fn resolveNdkPath() ![]const u8 {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+pub fn resolveNdkPath(build: *std.Build) ![]const u8 {
+    const allocator = build.allocator;
 
     var ndkRoot: ?[]const u8 = null;
 
@@ -49,7 +47,7 @@ pub fn resolveNdkPath() ![]const u8 {
             ndkRoot = v;
         }
     }
-    return ndkRoot orelse @panic("Environment OHOS_NDK_HOME or ohos_sdk_native not found, please set it as first.");
+    return ndkRoot orelse "";
 }
 
 const targets: []const std.Target.Query = &.{
@@ -58,15 +56,13 @@ const targets: []const std.Target.Query = &.{
     .{ .cpu_arch = .x86_64, .os_tag = .linux, .abi = .ohos },
 };
 
-fn linkNapi(compile: *std.Build.Step.Compile, target: std.Target.Query) !void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+fn linkNapi(build: *std.Build, compile: *std.Build.Step.Compile, target: std.Target.Query) !void {
+    const allocator = build.allocator;
 
     compile.linkSystemLibrary("ace_napi.z");
     compile.linkage = .dynamic;
 
-    const rootPath = try resolveNdkPath();
+    const rootPath = try resolveNdkPath(build);
 
     const includePath = try std.fs.path.join(allocator, &[_][]const u8{ rootPath, "sysroot", "usr", "include" });
     const libPath = try std.fs.path.join(allocator, &[_][]const u8{ rootPath, "sysroot", "usr", "lib" });
@@ -74,18 +70,20 @@ fn linkNapi(compile: *std.Build.Step.Compile, target: std.Target.Query) !void {
     compile.addLibraryPath(.{ .cwd_relative = libPath });
     compile.addIncludePath(.{ .cwd_relative = includePath });
 
-    const platform = switch (target.cpu_arch.?) {
+    const platform: []const u8 = switch (target.cpu_arch.?) {
         .aarch64 => "aarch64-linux-ohos",
         .arm => "arm-linux-ohos",
         .x86_64 => "x86_64-linux-ohos",
-        else => @panic("Unsupported platform"),
+        else => "",
     };
 
-    const platformIncludePath = try std.fs.path.join(allocator, &[_][]const u8{ includePath, platform });
-    const platformLibPath = try std.fs.path.join(allocator, &[_][]const u8{ libPath, platform });
+    if (platform.len > 0) {
+        const platformIncludePath = try std.fs.path.join(allocator, &[_][]const u8{ includePath, platform });
+        const platformLibPath = try std.fs.path.join(allocator, &[_][]const u8{ libPath, platform });
 
-    compile.addIncludePath(.{ .cwd_relative = platformIncludePath });
-    compile.addLibraryPath(.{ .cwd_relative = platformLibPath });
+        compile.addIncludePath(.{ .cwd_relative = platformIncludePath });
+        compile.addLibraryPath(.{ .cwd_relative = platformLibPath });
+    }
 }
 
 pub const NativeAddonBuildResult = struct {
@@ -118,7 +116,7 @@ pub fn nativeAddonBuild(build: *std.Build, option: std.Build.SharedLibraryOption
             arm64Option.target = build.resolveTargetQuery(targets[0]);
             arm64 = build.addSharedLibrary(arm64Option);
 
-            try linkNapi(arm64, targets[0]);
+            try linkNapi(build, arm64, targets[0]);
 
             const arm64DistDir: []const u8 = build.dupePath("arm64-v8a");
             const arm64Step = build.addInstallArtifact(arm64, .{
@@ -134,7 +132,7 @@ pub fn nativeAddonBuild(build: *std.Build, option: std.Build.SharedLibraryOption
             var armOption = cloneSharedOptions(option);
             armOption.target = build.resolveTargetQuery(targets[1]);
             arm = build.addSharedLibrary(armOption);
-            try linkNapi(arm, targets[1]);
+            try linkNapi(build, arm, targets[1]);
 
             const armDistDir: []const u8 = build.dupePath("armeabi-v7a");
             const armStep = build.addInstallArtifact(arm, .{
@@ -150,7 +148,7 @@ pub fn nativeAddonBuild(build: *std.Build, option: std.Build.SharedLibraryOption
             var x64Option = cloneSharedOptions(option);
             x64Option.target = build.resolveTargetQuery(targets[2]);
             x64 = build.addSharedLibrary(x64Option);
-            try linkNapi(x64, targets[2]);
+            try linkNapi(build, x64, targets[2]);
 
             const x64DistDir: []const u8 = build.dupePath("x86_64");
             const x64Step = build.addInstallArtifact(x64, .{
@@ -162,10 +160,6 @@ pub fn nativeAddonBuild(build: *std.Build, option: std.Build.SharedLibraryOption
             });
 
             build.getInstallStep().dependOn(&x64Step.step);
-        } else {
-            const allocator = std.heap.page_allocator;
-            const msg = try std.fmt.allocPrint(allocator, "Unsupported target: {s}", .{value});
-            @panic(msg);
         }
     }
 
