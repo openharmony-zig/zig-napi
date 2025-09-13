@@ -1,3 +1,3 @@
 pub usingnamespace @cImport({
-    @cInclude("napi/native_api.h");
+    @cInclude("native_api.h");
 });

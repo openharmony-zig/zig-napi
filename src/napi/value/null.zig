@@ -1,4 +1,4 @@
-const napi = @import("../../sys/api.zig");
+const napi = @import("napi-sys");
 const Env = @import("../env.zig").Env;
 
 pub const Null = struct {

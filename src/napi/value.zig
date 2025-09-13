@@ -1,4 +1,4 @@
-const napi = @import("../sys/api.zig");
+const napi = @import("napi-sys");
 const Napi = @import("./util/napi.zig").Napi;
 
 pub const Object = @import("./value/object.zig").Object;

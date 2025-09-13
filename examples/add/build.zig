@@ -16,7 +16,13 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
 
-    _ = result.arm64.?.root_module.addImport("napi", napi);
-    _ = result.arm.?.root_module.addImport("napi", napi);
-    _ = result.x64.?.root_module.addImport("napi", napi);
+    if (result.arm64) |arm64| {
+        arm64.root_module.addImport("napi", napi);
+    }
+    if (result.arm) |arm| {
+        arm.root_module.addImport("napi", napi);
+    }
+    if (result.x64) |x64| {
+        x64.root_module.addImport("napi", napi);
+    }
 }

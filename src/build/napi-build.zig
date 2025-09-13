@@ -93,7 +93,7 @@ pub const NativeAddonBuildResult = struct {
 };
 
 pub fn nativeAddonBuild(build: *std.Build, option: std.Build.SharedLibraryOptions) !NativeAddonBuildResult {
-    const currentTarget = option.target.?.result;
+    const currentTarget = if (option.target) |target| target.result else build.graph.host.result;
 
     // Respect the target platform for command line.
     const buildTargets: []const []const u8 = switch (currentTarget.abi.isOpenHarmony()) {
@@ -106,9 +106,9 @@ pub fn nativeAddonBuild(build: *std.Build, option: std.Build.SharedLibraryOption
         false => &[_][]const u8{ "arm64", "arm", "x64" },
     };
 
-    var arm64: *std.Build.Step.Compile = undefined;
-    var arm: *std.Build.Step.Compile = undefined;
-    var x64: *std.Build.Step.Compile = undefined;
+    var arm64: ?*std.Build.Step.Compile = null;
+    var arm: ?*std.Build.Step.Compile = null;
+    var x64: ?*std.Build.Step.Compile = null;
 
     for (buildTargets) |value| {
         if (std.mem.eql(u8, value, "arm64")) {
@@ -116,10 +116,10 @@ pub fn nativeAddonBuild(build: *std.Build, option: std.Build.SharedLibraryOption
             arm64Option.target = build.resolveTargetQuery(targets[0]);
             arm64 = build.addSharedLibrary(arm64Option);
 
-            try linkNapi(build, arm64, targets[0]);
+            try linkNapi(build, arm64.?, targets[0]);
 
             const arm64DistDir: []const u8 = build.dupePath("arm64-v8a");
-            const arm64Step = build.addInstallArtifact(arm64, .{
+            const arm64Step = build.addInstallArtifact(arm64.?, .{
                 .dest_dir = .{
                     .override = .{
                         .custom = arm64DistDir,
@@ -132,10 +132,10 @@ pub fn nativeAddonBuild(build: *std.Build, option: std.Build.SharedLibraryOption
             var armOption = cloneSharedOptions(option);
             armOption.target = build.resolveTargetQuery(targets[1]);
             arm = build.addSharedLibrary(armOption);
-            try linkNapi(build, arm, targets[1]);
+            try linkNapi(build, arm.?, targets[1]);
 
             const armDistDir: []const u8 = build.dupePath("armeabi-v7a");
-            const armStep = build.addInstallArtifact(arm, .{
+            const armStep = build.addInstallArtifact(arm.?, .{
                 .dest_dir = .{
                     .override = .{
                         .custom = armDistDir,
@@ -148,10 +148,10 @@ pub fn nativeAddonBuild(build: *std.Build, option: std.Build.SharedLibraryOption
             var x64Option = cloneSharedOptions(option);
             x64Option.target = build.resolveTargetQuery(targets[2]);
             x64 = build.addSharedLibrary(x64Option);
-            try linkNapi(build, x64, targets[2]);
+            try linkNapi(build, x64.?, targets[2]);
 
             const x64DistDir: []const u8 = build.dupePath("x86_64");
-            const x64Step = build.addInstallArtifact(x64, .{
+            const x64Step = build.addInstallArtifact(x64.?, .{
                 .dest_dir = .{
                     .override = .{
                         .custom = x64DistDir,

@@ -1,5 +1,5 @@
 const std = @import("std");
-const napi = @import("../../sys/api.zig");
+const napi = @import("napi-sys");
 const Env = @import("../env.zig").Env;
 const CallbackInfo = @import("../wrapper/callback_info.zig").CallbackInfo;
 const Napi = @import("../util/napi.zig").Napi;
