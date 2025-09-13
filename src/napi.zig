@@ -5,4 +5,4 @@ pub usingnamespace @import("./prelude/module.zig");
 pub usingnamespace @import("./napi/wrapper/status.zig");
 pub usingnamespace @import("./napi/wrapper/worker.zig");
 
-pub const napi_sys = @import("./sys/api.zig");
+pub const napi_sys = @import("napi-sys");

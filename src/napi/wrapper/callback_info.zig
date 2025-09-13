@@ -1,5 +1,5 @@
 const std = @import("std");
-const napi = @import("../../sys/api.zig");
+const napi = @import("napi-sys");
 const value = @import("../value.zig");
 const NapiEnv = @import("../env.zig").Env;
 

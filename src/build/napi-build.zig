@@ -33,145 +33,135 @@ fn cloneSharedOptions(option: std.Build.SharedLibraryOptions) std.Build.SharedLi
     };
 }
 
+pub fn resolveNdkPath(build: *std.Build) ![]const u8 {
+    const allocator = build.allocator;
+
+    var ndkRoot: ?[]const u8 = null;
+
+    const home = try getEnvVarOptional(allocator, "OHOS_NDK_HOME");
+    if (home) |v| {
+        ndkRoot = try std.fs.path.join(allocator, &[_][]const u8{ v, "native" });
+    } else {
+        const ohos_sdk_native = try getEnvVarOptional(allocator, "ohos_sdk_native");
+        if (ohos_sdk_native) |v| {
+            ndkRoot = v;
+        }
+    }
+    return ndkRoot orelse "";
+}
+
 const targets: []const std.Target.Query = &.{
     .{ .cpu_arch = .aarch64, .os_tag = .linux, .abi = .ohos },
     .{ .cpu_arch = .arm, .os_tag = .linux, .abi = .ohos },
     .{ .cpu_arch = .x86_64, .os_tag = .linux, .abi = .ohos },
 };
 
-pub fn linkNapi(module: *std.Build.Module) !void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+fn linkNapi(build: *std.Build, compile: *std.Build.Step.Compile, target: std.Target.Query) !void {
+    const allocator = build.allocator;
 
-    var ndkRoot: ?[]const u8 = null;
+    compile.linkSystemLibrary("ace_napi.z");
+    compile.linkage = .dynamic;
 
-    const home = try getEnvVarOptional(allocator, "OHOS_NDK_HOME");
-    if (home) |v| {
-        ndkRoot = try std.fs.path.join(allocator, &[_][]const u8{ v, "native" });
-    } else {
-        const ohos_sdk_native = try getEnvVarOptional(allocator, "ohos_sdk_native");
-        if (ohos_sdk_native) |v| {
-            ndkRoot = v;
-        }
-    }
+    const rootPath = try resolveNdkPath(build);
 
-    if (ndkRoot) |rootPath| {
-        const includePath = try std.fs.path.join(allocator, &[_][]const u8{ rootPath, "sysroot", "usr", "include" });
-        const libPath = try std.fs.path.join(allocator, &[_][]const u8{ rootPath, "sysroot", "usr", "lib" });
+    const includePath = try std.fs.path.join(allocator, &[_][]const u8{ rootPath, "sysroot", "usr", "include" });
+    const libPath = try std.fs.path.join(allocator, &[_][]const u8{ rootPath, "sysroot", "usr", "lib" });
 
-        module.addLibraryPath(.{ .cwd_relative = libPath });
-        module.addIncludePath(.{ .cwd_relative = includePath });
+    compile.addLibraryPath(.{ .cwd_relative = libPath });
+    compile.addIncludePath(.{ .cwd_relative = includePath });
 
-        const arm64IncludePath = try std.fs.path.join(allocator, &[_][]const u8{ includePath, "aarch64-linux-ohos" });
-        const arm64LibPath = try std.fs.path.join(allocator, &[_][]const u8{ libPath, "aarch64-linux-ohos" });
+    const platform: []const u8 = switch (target.cpu_arch.?) {
+        .aarch64 => "aarch64-linux-ohos",
+        .arm => "arm-linux-ohos",
+        .x86_64 => "x86_64-linux-ohos",
+        else => "",
+    };
 
-        module.addIncludePath(.{ .cwd_relative = arm64IncludePath });
-        module.addLibraryPath(.{ .cwd_relative = arm64LibPath });
-    } else {
-        @panic("Environment OHOS_NDK_HOME or ohos_sdk_native not found, please set it as first.");
+    if (platform.len > 0) {
+        const platformIncludePath = try std.fs.path.join(allocator, &[_][]const u8{ includePath, platform });
+        const platformLibPath = try std.fs.path.join(allocator, &[_][]const u8{ libPath, platform });
+
+        compile.addIncludePath(.{ .cwd_relative = platformIncludePath });
+        compile.addLibraryPath(.{ .cwd_relative = platformLibPath });
     }
 }
 
-pub fn nativeAddonBuild(build: *std.Build, option: std.Build.SharedLibraryOptions) !std.meta.Tuple(&.{ *std.Build.Step.Compile, *std.Build.Step.Compile, *std.Build.Step.Compile }) {
-    var arm64Option = cloneSharedOptions(option);
-    arm64Option.target = build.resolveTargetQuery(targets[0]);
+pub const NativeAddonBuildResult = struct {
+    arm64: ?*std.Build.Step.Compile,
+    arm: ?*std.Build.Step.Compile,
+    x64: ?*std.Build.Step.Compile,
+};
 
-    var armOption = cloneSharedOptions(option);
-    armOption.target = build.resolveTargetQuery(targets[1]);
+pub fn nativeAddonBuild(build: *std.Build, option: std.Build.SharedLibraryOptions) !NativeAddonBuildResult {
+    const currentTarget = if (option.target) |target| target.result else build.graph.host.result;
 
-    var x64Option = cloneSharedOptions(option);
-    x64Option.target = build.resolveTargetQuery(targets[2]);
+    // Respect the target platform for command line.
+    const buildTargets: []const []const u8 = switch (currentTarget.abi.isOpenHarmony()) {
+        true => switch (currentTarget.cpu.arch) {
+            .aarch64 => &[_][]const u8{"arm64"},
+            .arm => &[_][]const u8{"arm"},
+            .x86_64 => &[_][]const u8{"x64"},
+            else => &[_][]const u8{ "arm64", "arm", "x64" },
+        },
+        false => &[_][]const u8{ "arm64", "arm", "x64" },
+    };
 
-    const arm64 = build.addSharedLibrary(arm64Option);
-    const arm = build.addSharedLibrary(armOption);
-    const x64 = build.addSharedLibrary(x64Option);
+    var arm64: ?*std.Build.Step.Compile = null;
+    var arm: ?*std.Build.Step.Compile = null;
+    var x64: ?*std.Build.Step.Compile = null;
 
-    // link N-API
-    arm64.linkSystemLibrary("ace_napi.z");
-    arm.linkSystemLibrary("ace_napi.z");
-    x64.linkSystemLibrary("ace_napi.z");
+    for (buildTargets) |value| {
+        if (std.mem.eql(u8, value, "arm64")) {
+            var arm64Option = cloneSharedOptions(option);
+            arm64Option.target = build.resolveTargetQuery(targets[0]);
+            arm64 = build.addSharedLibrary(arm64Option);
 
-    arm64.linkage = .dynamic;
-    arm.linkage = .dynamic;
-    x64.linkage = .dynamic;
+            try linkNapi(build, arm64.?, targets[0]);
 
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+            const arm64DistDir: []const u8 = build.dupePath("arm64-v8a");
+            const arm64Step = build.addInstallArtifact(arm64.?, .{
+                .dest_dir = .{
+                    .override = .{
+                        .custom = arm64DistDir,
+                    },
+                },
+            });
 
-    var ndkRoot: ?[]const u8 = null;
+            build.getInstallStep().dependOn(&arm64Step.step);
+        } else if (std.mem.eql(u8, value, "arm")) {
+            var armOption = cloneSharedOptions(option);
+            armOption.target = build.resolveTargetQuery(targets[1]);
+            arm = build.addSharedLibrary(armOption);
+            try linkNapi(build, arm.?, targets[1]);
 
-    const home = try getEnvVarOptional(allocator, "OHOS_NDK_HOME");
-    if (home) |v| {
-        ndkRoot = try std.fs.path.join(allocator, &[_][]const u8{ v, "native" });
-    } else {
-        const ohos_sdk_native = try getEnvVarOptional(allocator, "ohos_sdk_native");
-        if (ohos_sdk_native) |v| {
-            ndkRoot = v;
+            const armDistDir: []const u8 = build.dupePath("armeabi-v7a");
+            const armStep = build.addInstallArtifact(arm.?, .{
+                .dest_dir = .{
+                    .override = .{
+                        .custom = armDistDir,
+                    },
+                },
+            });
+
+            build.getInstallStep().dependOn(&armStep.step);
+        } else if (std.mem.eql(u8, value, "x64")) {
+            var x64Option = cloneSharedOptions(option);
+            x64Option.target = build.resolveTargetQuery(targets[2]);
+            x64 = build.addSharedLibrary(x64Option);
+            try linkNapi(build, x64.?, targets[2]);
+
+            const x64DistDir: []const u8 = build.dupePath("x86_64");
+            const x64Step = build.addInstallArtifact(x64.?, .{
+                .dest_dir = .{
+                    .override = .{
+                        .custom = x64DistDir,
+                    },
+                },
+            });
+
+            build.getInstallStep().dependOn(&x64Step.step);
         }
     }
 
-    if (ndkRoot) |rootPath| {
-        const includePath = try std.fs.path.join(allocator, &[_][]const u8{ rootPath, "sysroot", "usr", "include" });
-        const libPath = try std.fs.path.join(allocator, &[_][]const u8{ rootPath, "sysroot", "usr", "lib" });
-
-        arm64.addLibraryPath(.{ .cwd_relative = libPath });
-        arm.addLibraryPath(.{ .cwd_relative = libPath });
-        x64.addLibraryPath(.{ .cwd_relative = libPath });
-
-        arm64.addIncludePath(.{ .cwd_relative = includePath });
-        arm.addIncludePath(.{ .cwd_relative = includePath });
-        x64.addIncludePath(.{ .cwd_relative = includePath });
-
-        const arm64IncludePath = try std.fs.path.join(allocator, &[_][]const u8{ includePath, "aarch64-linux-ohos" });
-        const armIncludePath = try std.fs.path.join(allocator, &[_][]const u8{ includePath, "arm-linux-ohos" });
-        const x64IncludePath = try std.fs.path.join(allocator, &[_][]const u8{ includePath, "x86_64-linux-ohos" });
-
-        const arm64LibPath = try std.fs.path.join(allocator, &[_][]const u8{ libPath, "aarch64-linux-ohos" });
-        const armLibPath = try std.fs.path.join(allocator, &[_][]const u8{ libPath, "arm-linux-ohos" });
-        const x64LibPath = try std.fs.path.join(allocator, &[_][]const u8{ libPath, "x86_64-linux-ohos" });
-
-        arm64.addLibraryPath(.{ .cwd_relative = arm64LibPath });
-        arm.addLibraryPath(.{ .cwd_relative = armLibPath });
-        x64.addLibraryPath(.{ .cwd_relative = x64LibPath });
-
-        arm64.addIncludePath(.{ .cwd_relative = arm64IncludePath });
-        arm.addIncludePath(.{ .cwd_relative = armIncludePath });
-        x64.addIncludePath(.{ .cwd_relative = x64IncludePath });
-
-        const arm64DistDir: []const u8 = build.dupePath("dist/arm64-v8a");
-        const armDistDir: []const u8 = build.dupePath("dist/armeabi-v7a");
-        const x64DistDir: []const u8 = build.dupePath("dist/x86_64");
-
-        const arm64Step = build.addInstallArtifact(arm64, .{
-            .dest_dir = .{
-                .override = .{
-                    .custom = arm64DistDir,
-                },
-            },
-        });
-        const armStep = build.addInstallArtifact(arm, .{
-            .dest_dir = .{
-                .override = .{
-                    .custom = armDistDir,
-                },
-            },
-        });
-        const x64Step = build.addInstallArtifact(x64, .{
-            .dest_dir = .{
-                .override = .{
-                    .custom = x64DistDir,
-                },
-            },
-        });
-
-        build.getInstallStep().dependOn(&arm64Step.step);
-        build.getInstallStep().dependOn(&armStep.step);
-        build.getInstallStep().dependOn(&x64Step.step);
-
-        return .{ arm64, arm, x64 };
-    } else {
-        @panic("Environment OHOS_NDK_HOME or ohos_sdk_native not found, please set it as first.");
-    }
+    return .{ .arm64 = arm64, .arm = arm, .x64 = x64 };
 }

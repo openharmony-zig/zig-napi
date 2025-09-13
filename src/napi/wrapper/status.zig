@@ -1,4 +1,4 @@
-const napi = @import("../../sys/api.zig");
+const napi = @import("napi-sys");
 
 // Copy from napi-rs
 pub const Status = enum(u32) {
