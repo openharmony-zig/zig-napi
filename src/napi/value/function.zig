@@ -19,7 +19,6 @@ pub const Function = struct {
         const value_type = @TypeOf(value);
         const infos = @typeInfo(value_type);
         const params = infos.@"fn".params;
-        const return_type = infos.@"fn".return_type;
 
         if (infos != .@"fn") {
             @compileError("Function.New only support function type, Unsupported type: " ++ @typeName(value_type));
@@ -27,26 +26,28 @@ pub const Function = struct {
 
         const FnImpl = struct {
             fn inner_fn(inner_env: napi.napi_env, info: napi.napi_callback_info) callconv(.C) napi.napi_value {
-                const callback_info = CallbackInfo.from_raw(inner_env, info);
-                if (params.len == 0) {
-                    if (return_type == null or return_type.? == void) {
-                        value();
-                        return Napi.to_napi_value(inner_env, undefined);
-                    } else {
-                        const ret = value();
-                        return Napi.to_napi_value(inner_env, ret) orelse @panic("Failed to convert result to napi_value");
-                    }
-                } else if (params.len == 1 and params[0].type.? == CallbackInfo) {
-                    if (return_type == null or return_type.? == void) {
-                        value(callback_info);
-                        return Napi.to_napi_value(inner_env, undefined);
-                    } else {
-                        const result = value(callback_info);
-                        return Napi.to_napi_value(inner_env, result) orelse @panic("Failed to convert result to napi_value");
-                    }
-                } else {
-                    @compileError("unsupported function signature");
+                var init_argc: usize = params.len;
+
+                const allocator = std.heap.page_allocator;
+                const args_raw = allocator.alloc(napi.napi_value, init_argc) catch @panic("OOM");
+                defer allocator.free(args_raw);
+
+                _ = napi.napi_get_cb_info(inner_env, info, &init_argc, args_raw.ptr, null, null);
+
+                const has_env = comptime params[0].type.? == Env;
+                const env_index = if (has_env) 1 else 0;
+
+                var napi_params: std.meta.ArgsTuple(value_type) = undefined;
+                if (comptime has_env) {
+                    napi_params[0] = Env.from_raw(inner_env);
                 }
+
+                inline for (params[env_index..], env_index..) |param_index, i| {
+                    napi_params[i] = Napi.from_napi_value(inner_env, args_raw[i - env_index], param_index.type.?);
+                }
+
+                const ret = @call(.auto, value, napi_params);
+                return Napi.to_napi_value(inner_env, ret);
             }
         };
 

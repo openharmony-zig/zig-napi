@@ -21,17 +21,12 @@ fn fibonacci_on_complete(_: napi.Env, _: napi.Status, data: f64) void {
     defer allocator.free(message);
 }
 
-fn add(callback_info: napi.CallbackInfo) f64 {
-    const a = callback_info.Get(0).As(f64);
-    const b = callback_info.Get(1).As(f64);
-    const result = a + b;
+fn add(left: f64, right: f64) f64 {
+    const result = left + right;
     return result;
 }
 
-fn hello(callback_info: napi.CallbackInfo) []u8 {
-    const value = callback_info.Get(0);
-    const name = value.As([]u8);
-
+fn hello(name: []u8) []u8 {
     const allocator = std.heap.page_allocator;
 
     const message = std.fmt.allocPrint(allocator, "Hello, {s}!", .{name}) catch @panic("OOM");
@@ -40,26 +35,18 @@ fn hello(callback_info: napi.CallbackInfo) []u8 {
     return message;
 }
 
-fn fib(callback_info: napi.CallbackInfo) void {
-    const env = callback_info.Env();
-    const n = callback_info.Get(0).As(f64);
-
+fn fib(env: napi.Env, n: f64) void {
     const worker = napi.Worker(env, .{ .data = n, .Execute = fibonacci_execute, .OnComplete = fibonacci_on_complete });
     worker.Queue();
 }
 
-fn fib_async(callback_info: napi.CallbackInfo) napi.Promise {
-    const env = callback_info.Env();
-    const n = callback_info.Get(0).As(f64);
-
+fn fib_async(env: napi.Env, n: f64) napi.Promise {
     const worker = napi.Worker(env, .{ .data = n, .Execute = fibonacci_execute, .OnComplete = fibonacci_on_complete });
     const promise = worker.AsyncQueue();
     return promise;
 }
 
-fn get_and_return_array(callback_info: napi.CallbackInfo) []f32 {
-    const array = callback_info.Get(0).As([]f32);
-
+fn get_and_return_array(array: []f32) []f32 {
     const pg = std.heap.page_allocator;
     const message = std.fmt.allocPrint(pg, "Array length: {d}", .{array.len}) catch @panic("OOM");
     const message2 = std.fmt.allocPrint(pg, "Array content: {any}", .{array}) catch @panic("OOM");
@@ -71,8 +58,7 @@ fn get_and_return_array(callback_info: napi.CallbackInfo) []f32 {
 
 const array_type = struct { f32, bool, []u8 };
 
-fn get_named_array(callback_info: napi.CallbackInfo) array_type {
-    const array: array_type = callback_info.Get(0).As(array_type);
+fn get_named_array(array: array_type) array_type {
     const pg = std.heap.page_allocator;
     const message = std.fmt.allocPrint(pg, "content: {any}", .{array}) catch @panic("OOM");
     defer pg.free(message);
@@ -80,9 +66,7 @@ fn get_named_array(callback_info: napi.CallbackInfo) array_type {
     return array;
 }
 
-fn get_arraylist(callback_info: napi.CallbackInfo) ArrayList(f32) {
-    const array = callback_info.Get(0).As(ArrayList(f32));
-
+fn get_arraylist(array: ArrayList(f32)) ArrayList(f32) {
     const pg = std.heap.page_allocator;
     const message = std.fmt.allocPrint(pg, "Array length: {any}", .{array}) catch @panic("OOM");
     defer pg.free(message);

@@ -49,7 +49,9 @@ pub const Napi = struct {
                                 return NapiValue.Bool.from_napi_value(env, raw, T);
                             },
                             .optional => {
-                                switch (T.child) {
+                                const optional_info = @typeInfo(T).optional;
+                                const child_info = @typeInfo(optional_info.child);
+                                switch (child_info) {
                                     .null => {
                                         return NapiValue.Null.New(Env.from_raw(env)).raw;
                                     },
@@ -57,7 +59,7 @@ pub const Napi = struct {
                                         return NapiValue.Undefined.New(Env.from_raw(env)).raw;
                                     },
                                     else => {
-                                        return Napi.from_napi_value(env, raw, T.child);
+                                        return Napi.from_napi_value(env, raw, optional_info.child);
                                     },
                                 }
                             },
