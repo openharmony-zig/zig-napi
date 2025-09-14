@@ -61,9 +61,7 @@ pub fn build(b: *std.Build) !void {
 ```zig
 const napi = @import("napi");
 
-fn add(callback_info: napi.CallbackInfo) f32 {
-    const left = callback_info.Get(0).As(f32);
-    const right = callback_info.Get(1).As(f32);
+fn add(left: f32, right: f32) f32 {
     return left + right;
 }
 
