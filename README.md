@@ -65,8 +65,8 @@ fn add(left: f32, right: f32) f32 {
     return left + right;
 }
 
-fn init(_: napi.Env, exports: napi.Object) napi.Object {
-    exports.Set("add", add);
+fn init(_: napi.Env, exports: napi.Object) !napi.Object {
+    try exports.Set("add", add);
     return exports;
 }
 
