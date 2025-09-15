@@ -32,4 +32,37 @@ pub const Status = enum(u32) {
     pub fn from_raw(raw: napi.napi_status) Status {
         return @as(Status, @enumFromInt(@as(u32, raw)));
     }
+
+    pub fn New(status: anytype) Status {
+        return @as(Status, @enumFromInt(@as(u32, status)));
+    }
+
+    pub fn ToString(self: Status) []const u8 {
+        return switch (self) {
+            .Ok => "Ok",
+            .InvalidArg => "InvalidArg",
+            .ObjectExpected => "ObjectExpected",
+            .StringExpected => "StringExpected",
+            .NameExpected => "NameExpected",
+            .FunctionExpected => "FunctionExpected",
+            .NumberExpected => "NumberExpected",
+            .BooleanExpected => "BooleanExpected",
+            .ArrayExpected => "ArrayExpected",
+            .GenericFailure => "GenericFailure",
+            .PendingException => "PendingException",
+            .Cancelled => "Cancelled",
+            .EscapeCalledTwice => "EscapeCalledTwice",
+            .HandleScopeMismatch => "HandleScopeMismatch",
+            .CallbackScopeMismatch => "CallbackScopeMismatch",
+            .QueueFull => "QueueFull",
+            .Closing => "Closing",
+            .BigintExpected => "BigintExpected",
+            .DateExpected => "DateExpected",
+            .ArrayBufferExpected => "ArrayBufferExpected",
+            .DetachableArraybufferExpected => "DetachableArraybufferExpected",
+            .WouldDeadlock => "WouldDeadlock",
+            .NoExternalBuffersAllowed => "NoExternalBuffersAllowed",
+            else => "Unknown",
+        };
+    }
 };

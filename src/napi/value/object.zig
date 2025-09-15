@@ -10,6 +10,7 @@ const Null = @import("./null.zig").Null;
 const String = @import("./string.zig").String;
 const helper = @import("../util/helper.zig");
 const Napi = @import("../util/napi.zig").Napi;
+const NapiError = @import("../wrapper/error.zig");
 
 pub const Object = struct {
     env: napi.napi_env,
@@ -69,13 +70,13 @@ pub const Object = struct {
         return self;
     }
 
-    pub fn Set(self: Object, comptime key: []const u8, value: anytype) void {
+    pub fn Set(self: Object, comptime key: []const u8, value: anytype) !void {
         const value_type = @TypeOf(value);
         const infos = @typeInfo(value_type);
 
         switch (infos) {
             .@"fn" => {
-                const fn_impl = Function.New(Env.from_raw(self.env), key, value);
+                const fn_impl = try Function.New(Env.from_raw(self.env), key, value);
                 const napi_desc = [_]napi.napi_property_descriptor{
                     .{
                         .utf8name = @ptrCast(key.ptr),
@@ -89,7 +90,7 @@ pub const Object = struct {
                 };
                 const status = napi.napi_define_properties(self.env, self.raw, 1, &napi_desc);
                 if (status != napi.napi_ok) {
-                    @panic("Failed to define properties");
+                    return NapiError.Error.fromStatus(NapiError.Status.New(status));
                 }
             },
             else => {
@@ -107,7 +108,7 @@ pub const Object = struct {
                 };
                 const status = napi.napi_define_properties(self.env, self.raw, 1, &napi_desc);
                 if (status != napi.napi_ok) {
-                    @panic("Failed to define properties");
+                    return NapiError.Error.fromStatus(NapiError.Status.New(status));
                 }
             },
         }

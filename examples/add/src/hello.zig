@@ -73,17 +73,22 @@ fn get_arraylist(array: ArrayList(f32)) ArrayList(f32) {
     return array;
 }
 
-fn init(env: napi.Env, exports: napi.Object) napi.Object {
-    exports.Set("add", add);
-    exports.Set("hello", hello);
+fn throw_error() !void {
+    return napi.Error.fromReason("test");
+}
+
+fn init(env: napi.Env, exports: napi.Object) !napi.Object {
+    try exports.Set("add", add);
+    try exports.Set("hello", hello);
 
     const hello_string = napi.String.New(env, "Hello");
-    exports.Set("text", hello_string);
-    exports.Set("fib", fib);
-    exports.Set("fib_async", fib_async);
-    exports.Set("get_and_return_array", get_and_return_array);
-    exports.Set("get_named_array", get_named_array);
-    exports.Set("get_arraylist", get_arraylist);
+    try exports.Set("text", hello_string);
+    try exports.Set("fib", fib);
+    try exports.Set("fib_async", fib_async);
+    try exports.Set("get_and_return_array", get_and_return_array);
+    try exports.Set("get_named_array", get_named_array);
+    try exports.Set("get_arraylist", get_arraylist);
+    try exports.Set("throw_error", throw_error);
 
     return exports;
 }
