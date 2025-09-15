@@ -3,6 +3,7 @@ const napi = @import("napi-sys");
 const Env = @import("../env.zig").Env;
 const CallbackInfo = @import("../wrapper/callback_info.zig").CallbackInfo;
 const Napi = @import("../util/napi.zig").Napi;
+const NapiError = @import("../wrapper/error.zig");
 
 pub const Function = struct {
     env: napi.napi_env,
@@ -15,7 +16,7 @@ pub const Function = struct {
         return Function{ .env = env, .raw = raw, .type = napi.napi_function, .inner_fn = null };
     }
 
-    pub fn New(env: Env, comptime name: []const u8, value: anytype) Function {
+    pub fn New(env: Env, comptime name: []const u8, value: anytype) !Function {
         const value_type = @TypeOf(value);
         const infos = @typeInfo(value_type);
         const params = infos.@"fn".params;
@@ -32,9 +33,12 @@ pub const Function = struct {
                 const args_raw = allocator.alloc(napi.napi_value, init_argc) catch @panic("OOM");
                 defer allocator.free(args_raw);
 
-                _ = napi.napi_get_cb_info(inner_env, info, &init_argc, args_raw.ptr, null, null);
+                const cb_status = napi.napi_get_cb_info(inner_env, info, &init_argc, args_raw.ptr, null, null);
+                if (cb_status != napi.napi_ok) {
+                    return NapiError.checkNapiStatus(inner_env, NapiError.Status.New(cb_status));
+                }
 
-                const has_env = comptime params[0].type.? == Env;
+                const has_env = comptime params.len > 0 and params[0].type.? == Env;
                 const env_index = if (has_env) 1 else 0;
 
                 var napi_params: std.meta.ArgsTuple(value_type) = undefined;
@@ -46,13 +50,37 @@ pub const Function = struct {
                     napi_params[i] = Napi.from_napi_value(inner_env, args_raw[i - env_index], param_index.type.?);
                 }
 
-                const ret = @call(.auto, value, napi_params);
-                return Napi.to_napi_value(inner_env, ret);
+                const return_info = infos.@"fn".return_type.?;
+
+                if (@typeInfo(return_info) == .error_union) {
+                    const ret = @call(.auto, value, napi_params) catch |err| {
+                        switch (err) {
+                            error.GenericFailure, error.PendingException, error.Cancelled, error.EscapeCalledTwice, error.HandleScopeMismatch, error.CallbackScopeMismatch, error.QueueFull, error.Closing, error.BigintExpected, error.DateExpected, error.ArrayBufferExpected, error.DetachableArraybufferExpected, error.WouldDeadlock, error.NoExternalBuffersAllowed, error.Unknown, error.InvalidArg, error.ObjectExpected, error.StringExpected, error.NameExpected, error.FunctionExpected, error.NumberExpected, error.BooleanExpected, error.ArrayExpected => {
+                                if (NapiError.last_error) |last_err| {
+                                    last_err.throwInto(Env.from_raw(inner_env));
+                                }
+                            },
+                            else => {
+                                if (NapiError.last_error) |last_err| {
+                                    last_err.throwInto(Env.from_raw(inner_env));
+                                }
+                            },
+                        }
+                        return Napi.to_napi_value(inner_env, undefined);
+                    };
+                    return Napi.to_napi_value(inner_env, ret);
+                } else {
+                    const ret = @call(.auto, value, napi_params);
+                    return Napi.to_napi_value(inner_env, ret);
+                }
             }
         };
 
         var result: napi.napi_value = undefined;
-        _ = napi.napi_create_function(env.raw, @ptrCast(name.ptr), 0, FnImpl.inner_fn, null, &result);
+        const fn_status = napi.napi_create_function(env.raw, @ptrCast(name.ptr), 0, FnImpl.inner_fn, null, &result);
+        if (fn_status != napi.napi_ok) {
+            return NapiError.Error.fromStatus(NapiError.Status.New(fn_status));
+        }
         var func = Function.from_raw(env.raw, result);
         func.inner_fn = FnImpl.inner_fn;
         return func;
