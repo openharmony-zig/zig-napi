@@ -61,17 +61,12 @@ pub fn build(b: *std.Build) !void {
 ```zig
 const napi = @import("napi");
 
-fn add(left: f32, right: f32) f32 {
+pub fn add(left: f32, right: f32) f32 {
     return left + right;
 }
 
-fn init(_: napi.Env, exports: napi.Object) !napi.Object {
-    try exports.Set("add", add);
-    return exports;
-}
-
 comptime {
-    napi.NODE_API_MODULE("hello", init);
+    napi.NODE_API_MODULE("hello", @This());
 }
 ```
 
@@ -97,6 +92,14 @@ zig build -Dtarget=aarch64-linux-ohos
 ```
 
 And you can get `libhello.so` in `zig-out`.
+
+## Credits
+
+This zig-napi project is heavily inspired by:
+
+- [napi-rs](https://github.com/napi-rs/napi-rs)
+- [node-addon-api](https://github.com/nodejs/node-addon-api)
+- [tokota](https://github.com/kofi-q/tokota)
 
 ## LICENSE
 
