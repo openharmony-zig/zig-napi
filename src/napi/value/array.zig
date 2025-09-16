@@ -4,6 +4,7 @@ const Env = @import("../env.zig").Env;
 const Napi = @import("../util/napi.zig").Napi;
 const helper = @import("../util/helper.zig");
 const ArrayList = std.ArrayList;
+const NapiError = @import("../wrapper/error.zig");
 
 pub const Array = struct {
     env: napi.napi_env,
@@ -85,7 +86,7 @@ pub const Array = struct {
         }
     }
 
-    pub fn New(env: Env, array: anytype) Array {
+    pub fn New(env: Env, array: anytype) !Array {
         const array_type = @TypeOf(array);
         const infos = @typeInfo(array_type);
 
@@ -104,22 +105,25 @@ pub const Array = struct {
         }
 
         var raw: napi.napi_value = undefined;
-        _ = napi.napi_create_array(env.raw, &raw);
+        const status = napi.napi_create_array(env.raw, &raw);
+        if (status != napi.napi_ok) {
+            return NapiError.Error.fromStatus(NapiError.Status.New(status));
+        }
 
         if (infos == .array or comptime helper.isSlice(array_type)) {
             for (array, 0..) |item, i| {
-                const napi_value = Napi.to_napi_value(env.raw, item);
+                const napi_value = try Napi.to_napi_value(env.raw, item, null);
                 _ = napi.napi_set_element(env.raw, raw, @intCast(i), napi_value);
             }
         } else if (comptime helper.isTuple(array_type)) {
             inline for (infos.@"struct".fields, 0..) |item, i| {
                 const value = @field(array, item.name);
-                const napi_value = Napi.to_napi_value(env.raw, value);
+                const napi_value = try Napi.to_napi_value(env.raw, value, null);
                 _ = napi.napi_set_element(env.raw, raw, @intCast(i), napi_value);
             }
         } else if (comptime helper.isGenericType(array_type, "ArrayList")) {
             for (array.items, 0..) |item, i| {
-                const napi_value = Napi.to_napi_value(env.raw, item);
+                const napi_value = try Napi.to_napi_value(env.raw, item, null);
                 _ = napi.napi_set_element(env.raw, raw, @intCast(i), napi_value);
             }
         }

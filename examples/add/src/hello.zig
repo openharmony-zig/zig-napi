@@ -73,11 +73,11 @@ fn get_arraylist(array: ArrayList(f32)) ArrayList(f32) {
     return array;
 }
 
-fn throw_error() !void {
+pub fn throw_error() !void {
     return napi.Error.fromReason("test");
 }
 
-fn init(env: napi.Env, exports: napi.Object) !napi.Object {
+fn init(env: napi.Env, exports: napi.Object) !?napi.Object {
     try exports.Set("add", add);
     try exports.Set("hello", hello);
 
@@ -88,11 +88,10 @@ fn init(env: napi.Env, exports: napi.Object) !napi.Object {
     try exports.Set("get_and_return_array", get_and_return_array);
     try exports.Set("get_named_array", get_named_array);
     try exports.Set("get_arraylist", get_arraylist);
-    try exports.Set("throw_error", throw_error);
 
     return exports;
 }
 
 comptime {
-    napi.NODE_API_MODULE("hello", init);
+    napi.NODE_API_MODULE("hello", @This(), init);
 }

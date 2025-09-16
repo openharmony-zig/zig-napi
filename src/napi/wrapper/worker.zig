@@ -6,6 +6,7 @@ const napi_status = @import("./status.zig");
 const Value = @import("../value.zig").Value;
 const Promise = @import("../value/promise.zig").Promise;
 const Napi = @import("../util/napi.zig").Napi;
+const NapiError = @import("./error.zig");
 
 const WorkerStatus = enum {
     Pending,
@@ -93,16 +94,31 @@ pub fn WorkerContext(comptime T: type) type {
             const Complete = struct {
                 fn inner_complete(inner_env: napi.napi_env, status: napi.napi_status, data: ?*anyopaque) callconv(.C) void {
                     const inner_self: *Self = @ptrCast(@alignCast(data));
-                    const napi_data = Napi.to_napi_value(inner_env, inner_self.result);
+                    const napi_data = Napi.to_napi_value(inner_env, inner_self.result, null) catch {
+                        if (NapiError.last_error) |last_err| {
+                            last_err.throwInto(napi_env.Env.from_raw(inner_env));
+                        }
+                        return;
+                    };
                     switch (inner_self.status) {
                         .Rejected => {
                             if (inner_self.promise) |promise| {
-                                promise.Reject(napi_data);
+                                promise.Reject(napi_data) catch {
+                                    if (NapiError.last_error) |last_err| {
+                                        last_err.throwInto(napi_env.Env.from_raw(inner_env));
+                                    }
+                                    return;
+                                };
                             }
                         },
                         .Resolved => {
                             if (inner_self.promise) |promise| {
-                                promise.Resolve(napi_data);
+                                promise.Resolve(napi_data) catch {
+                                    if (NapiError.last_error) |last_err| {
+                                        last_err.throwInto(napi_env.Env.from_raw(inner_env));
+                                    }
+                                    return;
+                                };
                             }
                         },
                         else => {},
