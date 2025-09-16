@@ -72,14 +72,14 @@ comptime {
 
 ## Goal
 
-Our goal is to provide a zig version similar to the `node-addon-api`.
+Our goal is to provide a zig version similar to the `node-addon-api` and `napi-rs`.
 
 - [x] Out of box building system.
-- [ ] Macro for napi.
+- [x] Macro for napi.
 
 ## Example
 
-We provide a simple example to help you get started in `examples/add`.
+We provide a simple example to help you get started in `examples/basic`.
 
 Just run the following command to build the example:
 

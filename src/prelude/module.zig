@@ -5,10 +5,10 @@ const NapiError = @import("../napi/wrapper/error.zig");
 const Napi = @import("../napi/util/napi.zig").Napi;
 const Undefined = @import("../napi/value/undefined.zig").Undefined;
 
-pub fn NODE_API_MODULE(
+pub fn NODE_API_MODULE_WITH_INIT(
     comptime name: []const u8,
     comptime root: type,
-    comptime init: ?fn (env: Env, exports: Object) anyerror!?Object,
+    init: ?fn (env: Env, exports: Object) anyerror!?Object,
 ) void {
     const root_infos = @typeInfo(root);
 
@@ -98,4 +98,12 @@ pub fn NODE_API_MODULE(
         const init_array = [1]*const fn () callconv(.C) void{&ModuleImpl.module_init};
         @export(&init_array, .{ .linkage = .strong, .name = "init_array", .section = ".init_array" });
     }
+}
+
+/// This function is used to register a module without an init function.
+pub fn NODE_API_MODULE(
+    comptime name: []const u8,
+    comptime root: type,
+) void {
+    NODE_API_MODULE_WITH_INIT(name, root, null);
 }
