@@ -11,9 +11,22 @@ pub fn stringLike(comptime T: type) StringMode {
 
     switch (info) {
         .pointer => |ptr| {
-            switch (ptr.child) {
-                u8 => return StringMode.Utf8,
-                u16 => return StringMode.Utf16,
+            const child_info = @typeInfo(ptr.child);
+            switch (child_info) {
+                .array => |arr| {
+                    switch (arr.child) {
+                        u8 => return StringMode.Utf8,
+                        u16 => return StringMode.Utf16,
+                        else => return StringMode.Unknown,
+                    }
+                },
+                .int => |int| {
+                    switch (int.bits) {
+                        8 => return StringMode.Utf8,
+                        16 => return StringMode.Utf16,
+                        else => return StringMode.Unknown,
+                    }
+                },
                 else => return StringMode.Unknown,
             }
         },

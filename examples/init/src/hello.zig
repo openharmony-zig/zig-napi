@@ -1,6 +1,9 @@
 const napi = @import("napi");
 const std = @import("std");
 const ArrayList = std.ArrayList;
+const number = @import("number.zig");
+
+pub usingnamespace number;
 
 fn fibonacci(n: f64) f64 {
     if (n <= 1) return n;
@@ -77,7 +80,7 @@ fn throw_error() !void {
     return napi.Error.fromReason("test");
 }
 
-fn init(env: napi.Env, exports: napi.Object) !napi.Object {
+fn init(env: napi.Env, exports: napi.Object) !?napi.Object {
     try exports.Set("add", add);
     try exports.Set("hello", hello);
 
@@ -94,5 +97,5 @@ fn init(env: napi.Env, exports: napi.Object) !napi.Object {
 }
 
 comptime {
-    napi.NODE_API_MODULE("hello", init);
+    napi.NODE_API_MODULE_WITH_INIT("hello", @This(), init);
 }

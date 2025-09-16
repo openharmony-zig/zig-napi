@@ -44,15 +44,15 @@ pub const Promise = struct {
         };
     }
 
-    pub fn Resolve(self: *Self, value: anytype) void {
+    pub fn Resolve(self: *Self, value: anytype) !void {
         self.status = .Resolved;
-        const napi_value = Napi.to_napi_value(self.env, value);
+        const napi_value = try Napi.to_napi_value(self.env, value, null);
         _ = napi.napi_resolve_deferred(self.env, self.deferred, napi_value);
     }
 
-    pub fn Reject(self: *Self, reason: anytype) void {
+    pub fn Reject(self: *Self, reason: anytype) !void {
         self.status = .Rejected;
-        const napi_value = Napi.to_napi_value(self.env, reason);
+        const napi_value = try Napi.to_napi_value(self.env, reason, null);
         _ = napi.napi_reject_deferred(self.env, self.deferred, napi_value);
     }
 };

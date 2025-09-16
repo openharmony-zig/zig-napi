@@ -4,6 +4,7 @@ const Env = @import("../env.zig").Env;
 const CallbackInfo = @import("../wrapper/callback_info.zig").CallbackInfo;
 const Napi = @import("../util/napi.zig").Napi;
 const NapiError = @import("../wrapper/error.zig");
+const Undefined = @import("./undefined.zig").Undefined;
 
 pub const Function = struct {
     env: napi.napi_env,
@@ -27,6 +28,7 @@ pub const Function = struct {
 
         const FnImpl = struct {
             fn inner_fn(inner_env: napi.napi_env, info: napi.napi_callback_info) callconv(.C) napi.napi_value {
+                const undefined_value = Undefined.New(Env.from_raw(inner_env));
                 var init_argc: usize = params.len;
 
                 const allocator = std.heap.page_allocator;
@@ -53,25 +55,28 @@ pub const Function = struct {
                 const return_info = infos.@"fn".return_type.?;
 
                 if (@typeInfo(return_info) == .error_union) {
-                    const ret = @call(.auto, value, napi_params) catch |err| {
-                        switch (err) {
-                            error.GenericFailure, error.PendingException, error.Cancelled, error.EscapeCalledTwice, error.HandleScopeMismatch, error.CallbackScopeMismatch, error.QueueFull, error.Closing, error.BigintExpected, error.DateExpected, error.ArrayBufferExpected, error.DetachableArraybufferExpected, error.WouldDeadlock, error.NoExternalBuffersAllowed, error.Unknown, error.InvalidArg, error.ObjectExpected, error.StringExpected, error.NameExpected, error.FunctionExpected, error.NumberExpected, error.BooleanExpected, error.ArrayExpected => {
-                                if (NapiError.last_error) |last_err| {
-                                    last_err.throwInto(Env.from_raw(inner_env));
-                                }
-                            },
-                            else => {
-                                if (NapiError.last_error) |last_err| {
-                                    last_err.throwInto(Env.from_raw(inner_env));
-                                }
-                            },
+                    const ret = @call(.auto, value, napi_params) catch {
+                        if (NapiError.last_error) |last_err| {
+                            last_err.throwInto(Env.from_raw(inner_env));
                         }
-                        return Napi.to_napi_value(inner_env, undefined);
+                        return undefined_value.raw;
                     };
-                    return Napi.to_napi_value(inner_env, ret);
+                    const n_value = Napi.to_napi_value(inner_env, ret, null) catch {
+                        if (NapiError.last_error) |last_err| {
+                            last_err.throwInto(Env.from_raw(inner_env));
+                        }
+                        return undefined_value.raw;
+                    };
+                    return n_value;
                 } else {
                     const ret = @call(.auto, value, napi_params);
-                    return Napi.to_napi_value(inner_env, ret);
+                    const n_value = Napi.to_napi_value(inner_env, ret, null) catch {
+                        if (NapiError.last_error) |last_err| {
+                            last_err.throwInto(Env.from_raw(inner_env));
+                        }
+                        return undefined_value.raw;
+                    };
+                    return n_value;
                 }
             }
         };

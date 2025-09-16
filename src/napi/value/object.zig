@@ -45,7 +45,7 @@ pub const Object = struct {
         }
     }
 
-    pub fn New(env: Env, obj: anytype) Object {
+    pub fn New(env: Env, obj: anytype) !Object {
         const obj_type = @TypeOf(obj);
         const obj_infos = @typeInfo(obj_type);
         if (obj_infos != .@"struct") {
@@ -64,7 +64,7 @@ pub const Object = struct {
         const obj_fields = obj_infos.@"struct".fields;
 
         inline for (obj_fields) |field| {
-            self.Set(field.name, Napi.to_napi_value(env.raw, @field(obj, field.name)));
+            try self.Set(field.name, Napi.to_napi_value(env.raw, @field(obj, field.name)));
         }
 
         return self;
@@ -94,7 +94,7 @@ pub const Object = struct {
                 }
             },
             else => {
-                const n_value = Napi.to_napi_value(self.env, value);
+                const n_value = try Napi.to_napi_value(self.env, value, null);
                 const napi_desc = [_]napi.napi_property_descriptor{
                     .{
                         .utf8name = @ptrCast(key.ptr),
