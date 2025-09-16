@@ -8,7 +8,7 @@ pub const Napi = struct {
     pub fn from_napi_value(env: napi.napi_env, raw: napi.napi_value, comptime T: type) T {
         const infos = @typeInfo(T);
         switch (T) {
-            NapiValue.BigInt, NapiValue.Number, NapiValue.String, NapiValue.Function, NapiValue.Object, NapiValue.Promise, NapiValue.Array => {
+            NapiValue.BigInt, NapiValue.Number, NapiValue.String, NapiValue.Function, NapiValue.Object, NapiValue.Promise, NapiValue.Array, NapiValue.Undefined, NapiValue.Null => {
                 return T.from_raw(env, raw);
             },
             else => {
@@ -26,10 +26,10 @@ pub const Napi = struct {
                                 @compileError("Please use Function directly");
                             },
                             .null => {
-                                return NapiValue.Null.New(Env.from_raw(env)).raw;
+                                return null;
                             },
                             .undefined => {
-                                return NapiValue.Undefined.New(Env.from_raw(env)).raw;
+                                return undefined;
                             },
                             .float, .int => {
                                 return NapiValue.Number.from_napi_value(env, raw, T);
@@ -50,17 +50,16 @@ pub const Napi = struct {
                                 return NapiValue.Bool.from_napi_value(env, raw, T);
                             },
                             .optional => {
-                                const optional_info = @typeInfo(T).optional;
-                                const child_info = @typeInfo(optional_info.child);
-                                switch (child_info) {
-                                    .null => {
-                                        return NapiValue.Null.New(Env.from_raw(env)).raw;
-                                    },
-                                    .undefined, .void => {
-                                        return NapiValue.Undefined.New(Env.from_raw(env)).raw;
+                                var value_type: napi.napi_valuetype = undefined;
+
+                                _ = napi.napi_typeof(env, raw, &value_type);
+
+                                switch (value_type) {
+                                    napi.napi_null, napi.napi_undefined => {
+                                        return null;
                                     },
                                     else => {
-                                        return Napi.from_napi_value(env, raw, optional_info.child);
+                                        return Napi.from_napi_value(env, raw, T);
                                     },
                                 }
                             },
@@ -82,7 +81,7 @@ pub const Napi = struct {
         const infos = @typeInfo(value_type);
 
         switch (value_type) {
-            NapiValue.BigInt, NapiValue.Bool, NapiValue.Number, NapiValue.String, NapiValue.Function, NapiValue.Object, NapiValue.Promise, NapiValue.Array => {
+            NapiValue.BigInt, NapiValue.Bool, NapiValue.Number, NapiValue.String, NapiValue.Function, NapiValue.Object, NapiValue.Promise, NapiValue.Array, NapiValue.Undefined, NapiValue.Null => {
                 return value.raw;
             },
             // If value is already a napi_value, return it directly
@@ -144,10 +143,13 @@ pub const Napi = struct {
                         return NapiValue.Bool.New(Env.from_raw(env), value).raw;
                     },
                     .optional => {
-                        if (value == null) {
-                            return NapiValue.Undefined.New(Env.from_raw(env)).raw;
+                        if (value) |v| {
+                            if (@typeInfo(@TypeOf(v)) == .null) {
+                                return NapiValue.Undefined.New(Env.from_raw(env)).raw;
+                            }
+                            return Napi.to_napi_value(env, v, name);
                         }
-                        return Napi.to_napi_value(env, value, name);
+                        return NapiValue.Undefined.New(Env.from_raw(env)).raw;
                     },
                     else => {
                         const stringMode = comptime helper.stringLike(value_type);

@@ -57,14 +57,21 @@ pub const Object = struct {
         }
 
         var raw: napi.napi_value = undefined;
-        _ = napi.napi_create_object(env.raw, &raw);
+        const status = napi.napi_create_object(env.raw, &raw);
+        if (status != napi.napi_ok) {
+            return NapiError.Error.fromStatus(NapiError.Status.New(status));
+        }
 
         var self = Object.from_raw(env.raw, raw);
 
         const obj_fields = obj_infos.@"struct".fields;
 
         inline for (obj_fields) |field| {
-            try self.Set(field.name, Napi.to_napi_value(env.raw, @field(obj, field.name)));
+            const n_value = try Napi.to_napi_value(env.raw, @field(obj, field.name), field.name);
+            try self.Set(
+                field.name,
+                n_value,
+            );
         }
 
         return self;
