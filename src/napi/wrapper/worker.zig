@@ -18,6 +18,7 @@ const WorkerStatus = enum {
 pub fn WorkerContext(comptime T: type) type {
     const hasData = comptime @hasField(T, "data");
     const hasExecute = comptime @hasField(T, "Execute");
+    const hasOnComplete = comptime @hasField(T, "OnComplete");
 
     if (!hasData) {
         @compileError("Worker must init with data field");
@@ -35,16 +36,21 @@ pub fn WorkerContext(comptime T: type) type {
     const DataType = @TypeOf(@as(T, undefined).data);
     const ExecuteFn = @TypeOf(@as(T, undefined).Execute);
     const ExecuteFnInfos = @typeInfo(ExecuteFn);
-    const OnComplete = @TypeOf(@as(T, undefined).OnComplete);
+    const OnComplete = if (hasOnComplete) @TypeOf(@as(T, undefined).OnComplete) else void;
     const OnCompleteInfos = @typeInfo(OnComplete);
 
     const ExecuteResult = ExecuteFnInfos.@"fn".return_type.?;
+
+    const ExecuteResultType = switch (@typeInfo(ExecuteResult)) {
+        .error_union => |eu| eu.payload,
+        else => ExecuteResult,
+    };
 
     if (ExecuteFnInfos != .@"fn") {
         @compileError("Execute must be a function");
     }
 
-    if (OnCompleteInfos != .@"fn") {
+    if (hasOnComplete and OnCompleteInfos != .@"fn") {
         @compileError("OnComplete must be a function");
     }
 
@@ -53,7 +59,8 @@ pub fn WorkerContext(comptime T: type) type {
         env: napi.napi_env,
         raw: napi.napi_async_work,
         allocator: std.mem.Allocator,
-        result: ExecuteResult,
+        result: ExecuteResultType,
+        err: ?NapiError.Error,
         status: WorkerStatus,
         promise: ?*Promise,
 
@@ -64,13 +71,24 @@ pub fn WorkerContext(comptime T: type) type {
                 fn inner_execute(inner_env: napi.napi_env, data: ?*anyopaque) callconv(.C) void {
                     const inner_self: *Self = @ptrCast(@alignCast(data));
                     const params = ExecuteFnInfos.@"fn".params;
+                    const return_type = @typeInfo(ExecuteFnInfos.@"fn".return_type.?);
 
                     switch (params.len) {
                         1 => {
                             if (params[0].type.? != DataType) {
                                 @compileError("Execute's first parameter must be " ++ @typeName(DataType));
                             } else {
-                                inner_self.result = inner_self.data.Execute(inner_self.data.data);
+                                @compileLog(return_type);
+                                if (return_type == .error_union) {
+                                    inner_self.result = inner_self.data.Execute(inner_self.data.data) catch {
+                                        inner_self.status = .Rejected;
+                                        // transfer the last error from the worker thread to the main thread
+                                        inner_self.err = NapiError.last_error;
+                                        return;
+                                    };
+                                } else {
+                                    inner_self.result = inner_self.data.Execute(inner_self.data.data);
+                                }
                                 inner_self.status = .Resolved;
                             }
                         },
@@ -80,7 +98,15 @@ pub fn WorkerContext(comptime T: type) type {
                             } else if (params[1].type.? != DataType) {
                                 @compileError("Execute's second parameter must be " ++ @typeName(DataType));
                             } else {
-                                inner_self.result = inner_self.data.Execute(napi_env.Env.from_raw(inner_env), inner_self.data.data);
+                                if (return_type == .error_union) {
+                                    inner_self.result = inner_self.data.Execute(napi_env.Env.from_raw(inner_env), inner_self.data.data) catch {
+                                        inner_self.status = .Rejected;
+                                        inner_self.err = NapiError.last_error;
+                                        return;
+                                    };
+                                } else {
+                                    inner_self.result = inner_self.data.Execute(napi_env.Env.from_raw(inner_env), inner_self.data.data);
+                                }
                                 inner_self.status = .Resolved;
                             }
                         },
@@ -92,27 +118,30 @@ pub fn WorkerContext(comptime T: type) type {
             };
 
             const Complete = struct {
-                fn inner_complete(inner_env: napi.napi_env, status: napi.napi_status, data: ?*anyopaque) callconv(.C) void {
+                fn inner_complete(inner_env: napi.napi_env, _: napi.napi_status, data: ?*anyopaque) callconv(.C) void {
                     const inner_self: *Self = @ptrCast(@alignCast(data));
-                    const napi_data = Napi.to_napi_value(inner_env, inner_self.result, null) catch {
-                        if (NapiError.last_error) |last_err| {
-                            last_err.throwInto(napi_env.Env.from_raw(inner_env));
-                        }
-                        return;
-                    };
+
                     switch (inner_self.status) {
                         .Rejected => {
                             if (inner_self.promise) |promise| {
-                                promise.Reject(napi_data) catch {
+                                if (inner_self.err) |err| {
+                                    promise.Reject(err) catch {
+                                        if (NapiError.last_error) |last_err| {
+                                            last_err.throwInto(napi_env.Env.from_raw(inner_env));
+                                        }
+                                        return;
+                                    };
+                                }
+                            }
+                        },
+                        .Resolved => {
+                            if (inner_self.promise) |promise| {
+                                const napi_data = Napi.to_napi_value(inner_env, inner_self.result, null) catch {
                                     if (NapiError.last_error) |last_err| {
                                         last_err.throwInto(napi_env.Env.from_raw(inner_env));
                                     }
                                     return;
                                 };
-                            }
-                        },
-                        .Resolved => {
-                            if (inner_self.promise) |promise| {
                                 promise.Resolve(napi_data) catch {
                                     if (NapiError.last_error) |last_err| {
                                         last_err.throwInto(napi_env.Env.from_raw(inner_env));
@@ -143,17 +172,6 @@ pub fn WorkerContext(comptime T: type) type {
                                     inner_self.data.OnComplete(napi_env.Env.from_raw(inner_env), inner_self.data.data);
                                 }
                             },
-                            3 => {
-                                if (params[0].type.? != napi_env.Env) {
-                                    @compileError("OnComplete's first parameter must be napi.Env");
-                                } else if (params[1].type.? != napi_status.Status) {
-                                    @compileError("OnComplete's second parameter must be napi_status.Status");
-                                } else if (params[2].type.? != DataType) {
-                                    @compileError("OnComplete's third parameter must be " ++ @typeName(DataType));
-                                } else {
-                                    inner_self.data.OnComplete(napi_env.Env.from_raw(inner_env), napi_status.Status.from_raw(status), inner_self.data.data);
-                                }
-                            },
                             else => {
                                 @compileError("OnComplete must have 1 or 2 parameters, but got " ++ std.fmt.comptimePrint("{d}", .{params.len}));
                             },
@@ -174,6 +192,7 @@ pub fn WorkerContext(comptime T: type) type {
                 .result = undefined,
                 .status = .Pending,
                 .promise = null,
+                .err = null,
             };
 
             const async_resource_name = String.New(env, "AsyncWorkerCallback");

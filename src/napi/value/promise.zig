@@ -3,6 +3,7 @@ const napi = @import("napi-sys");
 const Env = @import("../env.zig").Env;
 const Napi = @import("../util/napi.zig").Napi;
 const NapiValue = @import("../value.zig").NapiValue;
+const NapiError = @import("../wrapper/error.zig");
 
 pub const PromiseStatus = enum {
     Pending,
@@ -45,14 +46,20 @@ pub const Promise = struct {
     }
 
     pub fn Resolve(self: *Self, value: anytype) !void {
-        self.status = .Resolved;
         const napi_value = try Napi.to_napi_value(self.env, value, null);
-        _ = napi.napi_resolve_deferred(self.env, self.deferred, napi_value);
+        const s = napi.napi_resolve_deferred(self.env, self.deferred, napi_value);
+        if (s != napi.napi_ok) {
+            return NapiError.Error.fromStatus(NapiError.Status.New(s));
+        }
+        self.status = .Resolved;
     }
 
-    pub fn Reject(self: *Self, reason: anytype) !void {
+    pub fn Reject(self: *Self, err: NapiError.Error) !void {
+        const napi_value = err.to_napi_error(Env.from_raw(self.env));
+        const s = napi.napi_reject_deferred(self.env, self.deferred, napi_value);
+        if (s != napi.napi_ok) {
+            return NapiError.Error.fromStatus(NapiError.Status.New(s));
+        }
         self.status = .Rejected;
-        const napi_value = try Napi.to_napi_value(self.env, reason, null);
-        _ = napi.napi_reject_deferred(self.env, self.deferred, napi_value);
     }
 };
