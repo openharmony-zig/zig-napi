@@ -74,6 +74,20 @@ fn napiError(comptime T: type) type {
 
         const Self = @This();
 
+        pub fn to_napi_error(self: Self, env: Env) napi.napi_value {
+            var e: napi.napi_value = undefined;
+            const code: napi.napi_value = String.New(env, self.status.ToString()).raw;
+            const message: napi.napi_value = String.New(env, self.message).raw;
+            const create_status = switch (T) {
+                JsErrorType => napi.napi_create_error(env.raw, code, message, &e),
+                JsTypeErrorType => napi.napi_create_type_error(env.raw, code, message, &e),
+                JsRangeErrorType => napi.napi_create_range_error(env.raw, code, message, &e),
+                else => unreachable,
+            };
+            std.debug.assert(create_status == napi.napi_ok);
+            return e;
+        }
+
         pub fn fromMessage(message: []const u8) Self {
             return Self{
                 .message = message,
@@ -150,6 +164,14 @@ pub const Error = union(enum) {
     JsError: JsError,
     JsTypeError: JsTypeError,
     JsRangeError: JsRangeError,
+
+    pub fn to_napi_error(self: Error, env: Env) napi.napi_value {
+        return switch (self) {
+            .JsError => self.JsError.to_napi_error(env),
+            .JsTypeError => self.JsTypeError.to_napi_error(env),
+            .JsRangeError => self.JsRangeError.to_napi_error(env),
+        };
+    }
 
     pub fn fromReason(reason: []const u8) anyerror {
         last_error = Error{ .JsError = JsError.fromMessage(reason) };
