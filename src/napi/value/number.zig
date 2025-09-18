@@ -1,6 +1,7 @@
 const std = @import("std");
 const napi = @import("napi-sys");
 const Env = @import("../env.zig").Env;
+const helper = @import("../util/helper.zig");
 
 pub const Number = struct {
     env: napi.napi_env,
@@ -48,11 +49,17 @@ pub const Number = struct {
     pub fn New(env: Env, value: anytype) Number {
         const value_type = @TypeOf(value);
 
-        if (@typeInfo(value_type) != .float and @typeInfo(value_type) != .int) {
-            @compileError("Only support float and int type, Unsupported type: " ++ @typeName(value_type));
+        if (@typeInfo(value_type) != .float and @typeInfo(value_type) != .int and @typeInfo(value_type) != .comptime_int and @typeInfo(value_type) != .comptime_float) {
+            @compileError("Only support float, int, comptime_int and comptime_float type, Unsupported type: " ++ @typeName(value_type));
         }
 
-        switch (value_type) {
+        const merge_type = switch (value_type) {
+            comptime_int => comptime helper.comptimeIntMode(value),
+            comptime_float => comptime helper.comptimeFloatMode(value),
+            else => value_type,
+        };
+
+        switch (merge_type) {
             f16, f32, f64 => {
                 var result: napi.napi_value = undefined;
                 _ = napi.napi_create_double(env.raw, @floatCast(value), &result);

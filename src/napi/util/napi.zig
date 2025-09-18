@@ -101,8 +101,14 @@ pub const Napi = struct {
                     .undefined, .void => {
                         return NapiValue.Undefined.New(Env.from_raw(env)).raw;
                     },
-                    .float, .int => {
-                        switch (value_type) {
+                    .float, .int, .comptime_int, .comptime_float => {
+                        const merge_type = switch (value_type) {
+                            comptime_int => comptime helper.comptimeIntMode(value),
+                            comptime_float => comptime helper.comptimeFloatMode(value),
+                            else => value_type,
+                        };
+
+                        switch (merge_type) {
                             u128, i128 => {
                                 return NapiValue.BigInt.New(Env.from_raw(env), value).raw;
                             },
@@ -163,7 +169,7 @@ pub const Napi = struct {
                             else => {
 
                                 // TODO: Implement this
-                                @compileError("Unsupported type: " ++ @typeName(value_type));
+                                @compileError("Unsupported type: " ++ @typeName(value));
                             },
                         }
                     },
