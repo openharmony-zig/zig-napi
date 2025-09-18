@@ -1,14 +1,16 @@
+const std = @import("std");
 const napi = @import("napi-sys");
 const NapiValue = @import("../value.zig");
 const helper = @import("./helper.zig");
 const Env = @import("../env.zig").Env;
 const NapiError = @import("../wrapper/error.zig");
+const Function = @import("../value/function.zig").Function;
 
 pub const Napi = struct {
     pub fn from_napi_value(env: napi.napi_env, raw: napi.napi_value, comptime T: type) T {
         const infos = @typeInfo(T);
         switch (T) {
-            NapiValue.BigInt, NapiValue.Number, NapiValue.String, NapiValue.Function, NapiValue.Object, NapiValue.Promise, NapiValue.Array, NapiValue.Undefined, NapiValue.Null => {
+            NapiValue.BigInt, NapiValue.Number, NapiValue.String, NapiValue.Object, NapiValue.Promise, NapiValue.Array, NapiValue.Undefined, NapiValue.Null => {
                 return T.from_raw(env, raw);
             },
             else => {
@@ -38,6 +40,20 @@ pub const Napi = struct {
                                 return NapiValue.Array.from_napi_value(env, raw, T);
                             },
                             .@"struct" => {
+                                if (comptime helper.isNapiFunction(T)) {
+                                    const fn_infos = @typeInfo(T);
+                                    comptime var args_type = void;
+                                    comptime var return_type = void;
+                                    inline for (fn_infos.@"struct".fields) |field| {
+                                        if (comptime std.mem.eql(u8, field.name, "args")) {
+                                            args_type = field.type;
+                                        }
+                                        if (comptime std.mem.eql(u8, field.name, "return_type")) {
+                                            return_type = field.type;
+                                        }
+                                    }
+                                    return Function(args_type, return_type).from_raw(env, raw);
+                                }
                                 if (comptime helper.isTuple(T)) {
                                     return NapiValue.Array.from_napi_value(env, raw, T);
                                 }
@@ -68,6 +84,7 @@ pub const Napi = struct {
                                 if (!hasFromRaw) {
                                     @compileError("Type " ++ @typeName(T) ++ " does not have a from_raw method");
                                 }
+                                return T.from_raw(env, raw);
                             },
                         }
                     },
@@ -81,7 +98,7 @@ pub const Napi = struct {
         const infos = @typeInfo(value_type);
 
         switch (value_type) {
-            NapiValue.BigInt, NapiValue.Bool, NapiValue.Number, NapiValue.String, NapiValue.Function, NapiValue.Object, NapiValue.Promise, NapiValue.Array, NapiValue.Undefined, NapiValue.Null => {
+            NapiValue.BigInt, NapiValue.Bool, NapiValue.Number, NapiValue.String, NapiValue.Object, NapiValue.Promise, NapiValue.Array, NapiValue.Undefined, NapiValue.Null => {
                 return value.raw;
             },
             // If value is already a napi_value, return it directly
@@ -92,7 +109,9 @@ pub const Napi = struct {
                 switch (infos) {
                     .@"fn" => {
                         const fn_name = name orelse @typeName(value_type);
-                        const fn_value = try NapiValue.Function.New(Env.from_raw(env), fn_name, value);
+                        const return_type = infos.@"fn".return_type.?;
+                        const args_type = comptime helper.collectFunctionArgs(value_type);
+                        const fn_value = try Function(args_type, return_type).New(Env.from_raw(env), fn_name, value);
                         return fn_value.raw;
                     },
                     .null => {
@@ -134,6 +153,9 @@ pub const Napi = struct {
                         }
                     },
                     .@"struct" => {
+                        if (comptime helper.isNapiFunction(value_type)) {
+                            return value.raw;
+                        }
                         if (comptime helper.isTuple(value_type)) {
                             const array = try NapiValue.Array.New(Env.from_raw(env), value);
                             return array.raw;

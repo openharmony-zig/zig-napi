@@ -4,7 +4,6 @@ const Napi = @import("./util/napi.zig").Napi;
 pub const Object = @import("./value/object.zig").Object;
 pub const Number = @import("./value/number.zig").Number;
 pub const String = @import("./value/string.zig").String;
-pub const Function = @import("./value/function.zig").Function;
 pub const BigInt = @import("./value/bigint.zig").BigInt;
 pub const Null = @import("./value/null.zig").Null;
 pub const Undefined = @import("./value/undefined.zig").Undefined;
