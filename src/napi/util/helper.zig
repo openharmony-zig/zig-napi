@@ -1,4 +1,5 @@
 const std = @import("std");
+const math = std.math;
 
 pub const StringMode = enum {
     Utf8,
@@ -72,4 +73,46 @@ pub fn getArrayListElementType(comptime T: type) type {
     }
 
     @compileError("Could not extract element type from ArrayList: " ++ @typeName(T));
+}
+
+pub fn comptimeFloatMode(comptime value: comptime_float) type {
+    const f32_min = math.floatMin(f32);
+    const f32_max = math.floatMax(f32);
+    const f64_min = math.floatMin(f64);
+    const f64_max = math.floatMax(f64);
+
+    // Check if it can be converted to f32 without loss
+    if (value >= f32_min and value <= f32_max) {
+        const as_f32: f32 = value;
+        const back_to_comptime: f64 = as_f32; // 通过 f64 来比较
+        if (@abs(back_to_comptime - @as(f64, value)) < 1e-6) {
+            return f32;
+        }
+    }
+
+    // Check if it can be converted to f64 without loss
+    if (value >= f64_min and value <= f64_max) {
+        const as_f64: f64 = value;
+        const back_to_comptime: f128 = as_f64;
+        if (@abs(back_to_comptime - @as(f128, value)) < 1e-15) {
+            return f64;
+        }
+    }
+
+    // Otherwise, it needs f128
+    return f128;
+}
+
+pub fn comptimeIntMode(comptime value: comptime_int) type {
+    // Check if it can be converted to i32 without loss
+    if (value >= math.minInt(i32) and value <= math.maxInt(i32)) {
+        return i32;
+    }
+
+    // Check if it can be converted to i64 without loss
+    if (value >= math.minInt(i64) and value <= math.maxInt(i64)) {
+        return i64;
+    }
+
+    return i128;
 }

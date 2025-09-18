@@ -90,4 +90,42 @@ pub const Function = struct {
         func.inner_fn = FnImpl.inner_fn;
         return func;
     }
+
+    /// Call the function with the given arguments
+    /// ```zig
+    /// const fns = Function.New(env, "fn", fn (a: i32, b: i32) i32 {
+    ///     return a + b;
+    /// });
+    /// const result = try fns.Call(.{1, 2});
+    /// std.debug.print("result: {}\n", .{result});
+    /// ```
+    /// Args should be a tuple.
+    pub fn Call(self: Function, args: anytype, comptime T: type) !T {
+        const args_type = @typeInfo(@TypeOf(args));
+
+        if (args_type != .@"struct" and !args_type.@"struct".is_tuple) {
+            @compileError("Function.Call only support tuple type");
+        }
+
+        const args_len = args_type.@"struct".fields.len;
+
+        const allocator = std.heap.page_allocator;
+        const args_raw = allocator.alloc(napi.napi_value, args_len) catch @panic("OOM");
+        defer allocator.free(args_raw);
+
+        inline for (args_type.@"struct".fields, 0..) |arg, i| {
+            args_raw[i] = try Napi.to_napi_value(self.env, @field(args, arg.name), null);
+        }
+
+        const this = Undefined.New(Env.from_raw(self.env));
+
+        var result: napi.napi_value = undefined;
+
+        const status = napi.napi_call_function(self.env, this.raw, self.raw, args_len, args_raw.ptr, &result);
+        if (status != napi.napi_ok) {
+            return NapiError.Error.fromStatus(NapiError.Status.New(status));
+        }
+
+        return Napi.from_napi_value(self.env, result, T);
+    }
 };

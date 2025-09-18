@@ -1,5 +1,6 @@
 const napi = @import("napi-sys");
 const Env = @import("../env.zig").Env;
+const helper = @import("../util/helper.zig");
 
 pub const BigInt = struct {
     env: napi.napi_env,
@@ -13,6 +14,7 @@ pub const BigInt = struct {
     pub fn from_napi_value(env: napi.napi_env, raw: napi.napi_value, comptime T: type) T {
         const value_type = @TypeOf(T);
         const infos = @typeInfo(value_type);
+
         switch (infos) {
             .i64 => {
                 var result: T = undefined;
@@ -34,9 +36,15 @@ pub const BigInt = struct {
         const value_type = @TypeOf(value);
         const infos = @typeInfo(value_type);
 
+        const merge_type = switch (value_type) {
+            comptime_int => comptime helper.comptimeIntMode(value),
+            comptime_float => comptime helper.comptimeFloatMode(value),
+            else => value_type,
+        };
+
         switch (infos) {
-            .float, .int => {
-                switch (value_type) {
+            .float, .int, .comptime_int, .comptime_float => {
+                switch (merge_type) {
                     u128 => {
                         var result: napi.napi_value = undefined;
                         var words: [2]u64 = undefined;
