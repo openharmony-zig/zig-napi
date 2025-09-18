@@ -83,7 +83,9 @@ pub const Object = struct {
 
         switch (infos) {
             .@"fn" => {
-                const fn_impl = try Function.New(Env.from_raw(self.env), key, value);
+                const args_type = comptime helper.collectFunctionArgs(value_type);
+                const return_type = infos.@"fn".return_type.?;
+                const fn_impl = try Function(args_type, return_type).New(Env.from_raw(self.env), key, value);
                 const napi_desc = [_]napi.napi_property_descriptor{
                     .{
                         .utf8name = @ptrCast(key.ptr),

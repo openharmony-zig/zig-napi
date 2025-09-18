@@ -1,4 +1,5 @@
 const std = @import("std");
+const napi = @import("napi-sys");
 const math = std.math;
 
 pub const StringMode = enum {
@@ -55,6 +56,19 @@ pub fn isSlice(comptime T: type) bool {
 pub fn isGenericType(comptime T: type, comptime name: []const u8) bool {
     const info = @typeName(T);
     return std.mem.indexOf(u8, info, name) != null;
+}
+
+pub fn isNapiFunction(comptime T: type) bool {
+    const info = @typeInfo(T);
+    if (info != .@"struct") {
+        return false;
+    }
+    inline for (info.@"struct".fields) |field| {
+        if (std.mem.eql(u8, field.name, "inner_fn")) {
+            return true;
+        }
+    }
+    return false;
 }
 
 pub fn getArrayListElementType(comptime T: type) type {
@@ -115,4 +129,40 @@ pub fn comptimeIntMode(comptime value: comptime_int) type {
     }
 
     return i128;
+}
+
+pub fn collectFunctionArgs(comptime functions: anytype) type {
+    const infos = @typeInfo(functions);
+    if (infos != .@"fn") {
+        @compileError("Expected function type for collectFunctionArgs");
+    }
+
+    if (infos.@"fn".params.len == 0) {
+        return void;
+    }
+
+    if (infos.@"fn".params.len == 1) {
+        return infos.@"fn".params[0].type.?;
+    }
+
+    const args_len = infos.@"fn".params.len;
+
+    var fields: [args_len]std.builtin.Type.StructField = undefined;
+
+    inline for (0..args_len) |i| {
+        fields[i] = std.builtin.Type.StructField{
+            .name = std.fmt.comptimePrint("{d}", .{i}),
+            .type = infos.@"fn".params[i].type.?,
+            .default_value_ptr = null,
+            .is_comptime = false,
+            .alignment = @alignOf(infos.@"fn".params[i].type.?),
+        };
+    }
+
+    return @Type(std.builtin.Type{ .@"struct" = std.builtin.Type.Struct{
+        .layout = .auto,
+        .fields = &fields,
+        .decls = &[_]std.builtin.Type.Declaration{},
+        .is_tuple = true,
+    } });
 }
