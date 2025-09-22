@@ -7,6 +7,7 @@ const worker = @import("worker.zig");
 const array = @import("array.zig");
 const object = @import("object.zig");
 const function = @import("function.zig");
+const thread_safe_function = @import("thread_safe_function.zig");
 
 pub usingnamespace number;
 pub usingnamespace string;
@@ -15,6 +16,7 @@ pub usingnamespace worker;
 pub usingnamespace array;
 pub usingnamespace object;
 pub usingnamespace function;
+pub usingnamespace thread_safe_function;
 
 comptime {
     napi.NODE_API_MODULE("hello", @This());

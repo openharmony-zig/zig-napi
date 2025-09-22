@@ -5,6 +5,7 @@ const helper = @import("./helper.zig");
 const Env = @import("../env.zig").Env;
 const NapiError = @import("../wrapper/error.zig");
 const Function = @import("../value/function.zig").Function;
+const ThreadSafeFunction = @import("../wrapper/thread_safe_function.zig").ThreadSafeFunction;
 
 pub const Napi = struct {
     pub fn from_napi_value(env: napi.napi_env, raw: napi.napi_value, comptime T: type) T {
@@ -36,7 +37,40 @@ pub const Napi = struct {
                             .float, .int => {
                                 return NapiValue.Number.from_napi_value(env, raw, T);
                             },
-                            .array, .pointer => {
+                            .array => {
+                                return NapiValue.Array.from_napi_value(env, raw, T);
+                            },
+                            .pointer => {
+                                if (comptime helper.isSinglePointer(T)) {
+                                    const child_info = @typeInfo(T).pointer.child;
+                                    if (comptime helper.isThreadSafeFunction(child_info)) {
+                                        const fn_infos = @typeInfo(child_info);
+                                        comptime var args_type = void;
+                                        comptime var return_type = void;
+                                        comptime var thread_safe_function_call_variant = false;
+                                        comptime var max_queue_size = 0;
+
+                                        inline for (fn_infos.@"struct".fields) |field| {
+                                            if (comptime std.mem.eql(u8, field.name, "args")) {
+                                                args_type = field.type;
+                                            }
+                                            if (comptime std.mem.eql(u8, field.name, "return_type")) {
+                                                return_type = field.type;
+                                            }
+                                            if (comptime std.mem.eql(u8, field.name, "thread_safe_function_call_variant")) {
+                                                const temp_instance = @as(child_info, undefined);
+                                                thread_safe_function_call_variant = @field(temp_instance, "thread_safe_function_call_variant");
+                                            }
+                                            if (comptime std.mem.eql(u8, field.name, "max_queue_size")) {
+                                                const temp_instance = @as(child_info, undefined);
+                                                max_queue_size = @field(temp_instance, "max_queue_size");
+                                            }
+                                        }
+                                        return ThreadSafeFunction(args_type, return_type, thread_safe_function_call_variant, max_queue_size).from_raw(env, raw);
+                                    }
+
+                                    @compileError("Unsupported type: " ++ @typeName(T));
+                                }
                                 return NapiValue.Array.from_napi_value(env, raw, T);
                             },
                             .@"struct" => {
@@ -54,6 +88,7 @@ pub const Napi = struct {
                                     }
                                     return Function(args_type, return_type).from_raw(env, raw);
                                 }
+
                                 if (comptime helper.isTuple(T)) {
                                     return NapiValue.Array.from_napi_value(env, raw, T);
                                 }
@@ -155,6 +190,9 @@ pub const Napi = struct {
                     .@"struct" => {
                         if (comptime helper.isNapiFunction(value_type)) {
                             return value.raw;
+                        }
+                        if (comptime helper.isThreadSafeFunction(value_type)) {
+                            @compileError("ThreadSafeFunction is not supported for to_napi_value");
                         }
                         if (comptime helper.isTuple(value_type)) {
                             const array = try NapiValue.Array.New(Env.from_raw(env), value);
