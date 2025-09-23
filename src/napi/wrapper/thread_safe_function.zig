@@ -1,5 +1,5 @@
 const std = @import("std");
-const napi = @import("napi-sys");
+const napi = @import("napi-sys").napi_sys;
 const Napi = @import("../util/napi.zig").Napi;
 const Undefined = @import("../value/undefined.zig").Undefined;
 const Null = @import("../value/null.zig").Null;
@@ -47,12 +47,12 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
 
         pub fn from_raw(env: napi.napi_env, raw: napi.napi_value) *Self {
             const ThreadSafe = struct {
-                fn finalize(_: napi.napi_env, data: ?*anyopaque, _: ?*anyopaque) callconv(.C) void {
+                fn finalize(_: napi.napi_env, data: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
                     const self: *Self = @ptrCast(@alignCast(data));
                     self.deinit();
                 }
 
-                fn cb(inner_env: napi.napi_env, js_callback: napi.napi_value, context: ?*anyopaque, data: ?*anyopaque) callconv(.C) void {
+                fn cb(inner_env: napi.napi_env, js_callback: napi.napi_value, context: ?*anyopaque, data: ?*anyopaque) callconv(.c) void {
                     const self: *Self = @ptrCast(@alignCast(context));
                     const args: *CallData(Args) = @ptrCast(@alignCast(data));
 

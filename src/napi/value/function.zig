@@ -1,5 +1,5 @@
 const std = @import("std");
-const napi = @import("napi-sys");
+const napi = @import("napi-sys").napi_sys;
 const Env = @import("../env.zig").Env;
 const CallbackInfo = @import("../wrapper/callback_info.zig").CallbackInfo;
 const Napi = @import("../util/napi.zig").Napi;
@@ -15,7 +15,7 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
         args: Args,
         return_type: Return,
 
-        inner_fn: ?*const fn (inner_env: napi.napi_env, info: napi.napi_callback_info) callconv(.C) napi.napi_value,
+        inner_fn: ?*const fn (inner_env: napi.napi_env, info: napi.napi_callback_info) callconv(.c) napi.napi_value,
 
         const Self = @This();
 
@@ -33,7 +33,7 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
             }
 
             const FnImpl = struct {
-                fn inner_fn(inner_env: napi.napi_env, info: napi.napi_callback_info) callconv(.C) napi.napi_value {
+                fn inner_fn(inner_env: napi.napi_env, info: napi.napi_callback_info) callconv(.c) napi.napi_value {
                     const undefined_value = Undefined.New(Env.from_raw(inner_env));
                     var init_argc: usize = params.len;
 

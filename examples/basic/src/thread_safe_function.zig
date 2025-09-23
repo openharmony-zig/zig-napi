@@ -6,7 +6,7 @@ const Return = i32;
 
 fn execute_thread_safe_function(f: *const f32) void {
     std.debug.print("f: {}\n", .{f.*});
-    std.time.sleep(5_000_000_000);
+    std.Thread.sleep(5_000_000_000);
     // tsfn.Ok(.{ 1, 2 }, .Blocking);
 }
 

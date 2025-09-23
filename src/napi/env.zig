@@ -1,4 +1,4 @@
-const napi = @import("napi-sys");
+const napi = @import("napi-sys").napi_sys;
 const Undefined = @import("./value/undefined.zig").Undefined;
 const Null = @import("./value/null.zig").Null;
 

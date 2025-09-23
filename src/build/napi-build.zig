@@ -9,27 +9,42 @@ fn getEnvVarOptional(allocator: std.mem.Allocator, name: []const u8) !?[]const u
     };
 }
 
-fn cloneSharedOptions(option: std.Build.SharedLibraryOptions) std.Build.SharedLibraryOptions {
-    return std.Build.SharedLibraryOptions{
-        .code_model = option.code_model,
+pub fn cloneLibraryOptions(build: *std.Build, option: NativeAddonBuildOptionsWithModule, target: std.Build.ResolvedTarget) std.Build.LibraryOptions {
+    const root_module = build.createModule(.{
+        .root_source_file = option.root_module_options.root_source_file,
+        .target = target,
+        .optimize = option.root_module_options.optimize,
+        .imports = option.root_module_options.imports,
+        .link_libc = option.root_module_options.link_libc,
+        .link_libcpp = option.root_module_options.link_libcpp,
+        .single_threaded = option.root_module_options.single_threaded,
+        .strip = option.root_module_options.strip,
+        .unwind_tables = option.root_module_options.unwind_tables,
+        .dwarf_format = option.root_module_options.dwarf_format,
+        .code_model = option.root_module_options.code_model,
+        .stack_protector = option.root_module_options.stack_protector,
+        .stack_check = option.root_module_options.stack_check,
+        .sanitize_c = option.root_module_options.sanitize_c,
+        .sanitize_thread = option.root_module_options.sanitize_thread,
+        .fuzz = option.root_module_options.fuzz,
+        .valgrind = option.root_module_options.valgrind,
+        .pic = option.root_module_options.pic,
+        .red_zone = option.root_module_options.red_zone,
+        .omit_frame_pointer = option.root_module_options.omit_frame_pointer,
+        .error_tracing = option.root_module_options.error_tracing,
+        .no_builtin = option.root_module_options.no_builtin,
+    });
+    return std.Build.LibraryOptions{
         .name = option.name,
-        .pic = option.pic,
-        .error_tracing = option.error_tracing,
-        .root_source_file = option.root_source_file,
-        .optimize = option.optimize,
-        .target = option.target,
-        .link_libc = option.link_libc,
-        .max_rss = option.max_rss,
-        .omit_frame_pointer = option.omit_frame_pointer,
-        .sanitize_thread = option.sanitize_thread,
-        .single_threaded = option.single_threaded,
-        .strip = option.strip,
-        .zig_lib_dir = option.zig_lib_dir,
-        .win32_manifest = option.win32_manifest,
+        .root_module = root_module,
+        // Keep the linkage as dynami
+        .linkage = .dynamic,
         .version = option.version,
+        .max_rss = option.max_rss,
         .use_llvm = option.use_llvm,
         .use_lld = option.use_lld,
-        .unwind_tables = option.unwind_tables,
+        .zig_lib_dir = option.zig_lib_dir,
+        .win32_manifest = option.win32_manifest,
     };
 }
 
@@ -52,7 +67,7 @@ pub fn resolveNdkPath(build: *std.Build) ![]const u8 {
 
 const targets: []const std.Target.Query = &.{
     .{ .cpu_arch = .aarch64, .os_tag = .linux, .abi = .ohos },
-    .{ .cpu_arch = .arm, .os_tag = .linux, .abi = .ohos },
+    .{ .cpu_arch = .arm, .os_tag = .linux, .abi = .ohoseabi },
     .{ .cpu_arch = .x86_64, .os_tag = .linux, .abi = .ohos },
 };
 
@@ -62,13 +77,15 @@ fn linkNapi(build: *std.Build, compile: *std.Build.Step.Compile, target: std.Tar
     compile.linkSystemLibrary("ace_napi.z");
     compile.linkage = .dynamic;
 
+    // compile.linkSystemLibrary("c++");
+
     const rootPath = try resolveNdkPath(build);
 
     const includePath = try std.fs.path.join(allocator, &[_][]const u8{ rootPath, "sysroot", "usr", "include" });
     const libPath = try std.fs.path.join(allocator, &[_][]const u8{ rootPath, "sysroot", "usr", "lib" });
 
-    compile.addLibraryPath(.{ .cwd_relative = libPath });
-    compile.addIncludePath(.{ .cwd_relative = includePath });
+    compile.root_module.addLibraryPath(.{ .cwd_relative = libPath });
+    compile.root_module.addIncludePath(.{ .cwd_relative = includePath });
 
     const platform: []const u8 = switch (target.cpu_arch.?) {
         .aarch64 => "aarch64-linux-ohos",
@@ -81,8 +98,8 @@ fn linkNapi(build: *std.Build, compile: *std.Build.Step.Compile, target: std.Tar
         const platformIncludePath = try std.fs.path.join(allocator, &[_][]const u8{ includePath, platform });
         const platformLibPath = try std.fs.path.join(allocator, &[_][]const u8{ libPath, platform });
 
-        compile.addIncludePath(.{ .cwd_relative = platformIncludePath });
-        compile.addLibraryPath(.{ .cwd_relative = platformLibPath });
+        compile.root_module.addIncludePath(.{ .cwd_relative = platformIncludePath });
+        compile.root_module.addLibraryPath(.{ .cwd_relative = platformLibPath });
     }
 }
 
@@ -92,8 +109,19 @@ pub const NativeAddonBuildResult = struct {
     x64: ?*std.Build.Step.Compile,
 };
 
-pub fn nativeAddonBuild(build: *std.Build, option: std.Build.SharedLibraryOptions) !NativeAddonBuildResult {
-    const currentTarget = if (option.target) |target| target.result else build.graph.host.result;
+pub const NativeAddonBuildOptionsWithModule = struct {
+    name: []const u8,
+    root_module_options: std.Build.Module.CreateOptions,
+    version: ?std.SemanticVersion = null,
+    max_rss: usize = 0,
+    use_llvm: ?bool = null,
+    use_lld: ?bool = null,
+    zig_lib_dir: ?std.Build.LazyPath = null,
+    win32_manifest: ?std.Build.LazyPath = null,
+};
+
+pub fn nativeAddonBuild(build: *std.Build, option: NativeAddonBuildOptionsWithModule) !NativeAddonBuildResult {
+    const currentTarget = if (option.root_module_options.target) |target| target.result else build.graph.host.result;
 
     // Respect the target platform for command line.
     const buildTargets: []const []const u8 = switch (currentTarget.abi.isOpenHarmony()) {
@@ -112,11 +140,11 @@ pub fn nativeAddonBuild(build: *std.Build, option: std.Build.SharedLibraryOption
 
     for (buildTargets) |value| {
         if (std.mem.eql(u8, value, "arm64")) {
-            var arm64Option = cloneSharedOptions(option);
-            arm64Option.target = build.resolveTargetQuery(targets[0]);
-            arm64 = build.addSharedLibrary(arm64Option);
+            const target = build.resolveTargetQuery(targets[0]);
 
-            try linkNapi(build, arm64.?, targets[0]);
+            const arm64Option = cloneLibraryOptions(build, option, target);
+            arm64 = build.addLibrary(arm64Option);
+            try linkNapi(build, arm64.?, target.query);
 
             const arm64DistDir: []const u8 = build.dupePath("arm64-v8a");
             const arm64Step = build.addInstallArtifact(arm64.?, .{
@@ -129,10 +157,10 @@ pub fn nativeAddonBuild(build: *std.Build, option: std.Build.SharedLibraryOption
 
             build.getInstallStep().dependOn(&arm64Step.step);
         } else if (std.mem.eql(u8, value, "arm")) {
-            var armOption = cloneSharedOptions(option);
-            armOption.target = build.resolveTargetQuery(targets[1]);
-            arm = build.addSharedLibrary(armOption);
-            try linkNapi(build, arm.?, targets[1]);
+            const target = build.resolveTargetQuery(targets[1]);
+            const armOption = cloneLibraryOptions(build, option, target);
+            arm = build.addLibrary(armOption);
+            try linkNapi(build, arm.?, target.query);
 
             const armDistDir: []const u8 = build.dupePath("armeabi-v7a");
             const armStep = build.addInstallArtifact(arm.?, .{
@@ -145,10 +173,12 @@ pub fn nativeAddonBuild(build: *std.Build, option: std.Build.SharedLibraryOption
 
             build.getInstallStep().dependOn(&armStep.step);
         } else if (std.mem.eql(u8, value, "x64")) {
-            var x64Option = cloneSharedOptions(option);
-            x64Option.target = build.resolveTargetQuery(targets[2]);
-            x64 = build.addSharedLibrary(x64Option);
-            try linkNapi(build, x64.?, targets[2]);
+            const target = build.resolveTargetQuery(targets[2]);
+            var x64Option = cloneLibraryOptions(build, option, target);
+            // TODO: https://github.com/ziglang/zig/issues/25335
+            x64Option.use_llvm = true;
+            x64 = build.addLibrary(x64Option);
+            try linkNapi(build, x64.?, target.query);
 
             const x64DistDir: []const u8 = build.dupePath("x86_64");
             const x64Step = build.addInstallArtifact(x64.?, .{
