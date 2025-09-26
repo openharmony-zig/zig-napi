@@ -1,5 +1,5 @@
 const std = @import("std");
-const napi = @import("napi-sys");
+const napi = @import("napi-sys").napi_sys;
 const napi_env = @import("../env.zig");
 const String = @import("../value/string.zig").String;
 const napi_status = @import("./status.zig");
@@ -68,7 +68,7 @@ pub fn WorkerContext(comptime T: type) type {
 
         pub fn New(env: napi_env.Env, init_data: anytype) *Self {
             const Execute = struct {
-                fn inner_execute(inner_env: napi.napi_env, data: ?*anyopaque) callconv(.C) void {
+                fn inner_execute(inner_env: napi.napi_env, data: ?*anyopaque) callconv(.c) void {
                     const inner_self: *Self = @ptrCast(@alignCast(data));
                     const params = ExecuteFnInfos.@"fn".params;
                     const return_type = @typeInfo(ExecuteFnInfos.@"fn".return_type.?);
@@ -118,7 +118,7 @@ pub fn WorkerContext(comptime T: type) type {
             };
 
             const Complete = struct {
-                fn inner_complete(inner_env: napi.napi_env, _: napi.napi_status, data: ?*anyopaque) callconv(.C) void {
+                fn inner_complete(inner_env: napi.napi_env, _: napi.napi_status, data: ?*anyopaque) callconv(.c) void {
                     const inner_self: *Self = @ptrCast(@alignCast(data));
 
                     switch (inner_self.status) {

@@ -1,4 +1,4 @@
-const napi = @import("napi-sys");
+const napi = @import("napi-sys").napi_sys;
 const Env = @import("../napi/env.zig").Env;
 const Object = @import("../napi/value.zig").Object;
 const NapiError = @import("../napi/wrapper/error.zig");
@@ -17,7 +17,7 @@ pub fn NODE_API_MODULE_WITH_INIT(
     }
 
     const InitFn = struct {
-        fn inner_init(env: napi.napi_env, exports: napi.napi_value) callconv(.C) napi.napi_value {
+        fn inner_init(env: napi.napi_env, exports: napi.napi_value) callconv(.c) napi.napi_value {
             const export_obj = Object.from_raw(env, exports);
             const undefined_value = Undefined.New(Env.from_raw(env));
 
@@ -89,13 +89,13 @@ pub fn NODE_API_MODULE_WITH_INIT(
             .reserved = .{ null, null, null, null },
         };
 
-        fn module_init() callconv(.C) void {
+        fn module_init() callconv(.c) void {
             napi.napi_module_register(@constCast(&module));
         }
     };
 
     comptime {
-        const init_array = [1]*const fn () callconv(.C) void{&ModuleImpl.module_init};
+        const init_array = [1]*const fn () callconv(.c) void{&ModuleImpl.module_init};
         @export(&init_array, .{ .linkage = .strong, .name = "init_array", .section = ".init_array" });
     }
 }

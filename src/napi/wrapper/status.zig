@@ -1,4 +1,4 @@
-const napi = @import("napi-sys");
+const napi = @import("napi-sys").napi_sys;
 
 // Copy from napi-rs
 pub const Status = enum(u32) {
