@@ -1,7 +1,7 @@
 .{
     .name = .add,
     .version = "0.0.1",
-    .minimum_zig_version = "0.14.0",
+    .minimum_zig_version = "0.15.1",
     .fingerprint = 0xfd1a73e7f96390fb,
     .dependencies = .{ .@"zig-napi" = .{ .path = "../.." } },
     .paths = .{ "build.zig", "build.zig.zon", "src" },
