@@ -92,7 +92,7 @@ pub const Napi = struct {
                                 if (comptime helper.isTuple(T)) {
                                     return NapiValue.Array.from_napi_value(env, raw, T);
                                 }
-                                if (comptime helper.isGenericType(T, "ArrayList")) {
+                                if (comptime helper.isArrayList(T)) {
                                     return NapiValue.Array.from_napi_value(env, raw, T);
                                 }
                                 return NapiValue.Object.from_napi_value(env, raw, T);
@@ -198,7 +198,7 @@ pub const Napi = struct {
                             const array = try NapiValue.Array.New(Env.from_raw(env), value);
                             return array.raw;
                         }
-                        if (comptime helper.isGenericType(value_type, "ArrayList")) {
+                        if (comptime helper.isArrayList(value_type)) {
                             const array = try NapiValue.Array.New(Env.from_raw(env), value);
                             return array.raw;
                         }

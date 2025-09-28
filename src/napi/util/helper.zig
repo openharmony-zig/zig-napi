@@ -58,11 +58,6 @@ pub fn isSinglePointer(comptime T: type) bool {
     return info == .pointer and info.pointer.size == .one;
 }
 
-pub fn isGenericType(comptime T: type, comptime name: []const u8) bool {
-    const info = @typeName(T);
-    return std.mem.indexOf(u8, info, name) != null;
-}
-
 pub fn isNapiFunction(comptime T: type) bool {
     const info = @typeInfo(T);
     if (info != .@"struct") {
@@ -83,6 +78,19 @@ pub fn isThreadSafeFunction(comptime T: type) bool {
     }
     inline for (info.@"struct".fields) |field| {
         if (std.mem.eql(u8, field.name, "tsfn_raw")) {
+            return true;
+        }
+    }
+    return false;
+}
+
+pub fn isArrayList(comptime T: type) bool {
+    const info = @typeInfo(T);
+    if (info != .@"struct") {
+        return false;
+    }
+    inline for (info.@"struct".fields) |field| {
+        if (std.mem.eql(u8, field.name, "items")) {
             return true;
         }
     }
