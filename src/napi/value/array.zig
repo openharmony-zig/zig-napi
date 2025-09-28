@@ -63,18 +63,20 @@ pub const Array = struct {
                     }
                     return result;
                 }
-                if (comptime helper.isGenericType(T, "ArrayList")) {
+                if (comptime helper.isArrayList(T)) {
                     // Get Array List's items type
                     const child = comptime helper.getArrayListElementType(T);
 
-                    var result: T = ArrayList(child).init(std.heap.page_allocator);
+                    const gpa = std.heap.page_allocator;
+
+                    var result: T = ArrayList(child).empty;
                     var len: u32 = undefined;
                     _ = napi.napi_get_array_length(env, raw, &len);
-                    result.ensureTotalCapacity(len) catch @panic("OOM");
+                    result.ensureTotalCapacity(gpa, len) catch @panic("OOM");
                     for (0..len) |i| {
                         var element: napi.napi_value = undefined;
                         _ = napi.napi_get_element(env, raw, @intCast(i), &element);
-                        result.append(Napi.from_napi_value(env, element, child)) catch @panic("OOM");
+                        result.append(gpa, Napi.from_napi_value(env, element, child)) catch @panic("OOM");
                     }
                     return result;
                 }
@@ -90,7 +92,7 @@ pub const Array = struct {
         const array_type = @TypeOf(array);
         const infos = @typeInfo(array_type);
 
-        if (infos != .array and (comptime !helper.isSlice(array_type)) and (comptime !helper.isTuple(array_type)) and (comptime !helper.isGenericType(array_type, "ArrayList"))) {
+        if (infos != .array and (comptime !helper.isSlice(array_type)) and (comptime !helper.isTuple(array_type)) and (comptime !helper.isArrayList(array_type))) {
             @compileError("Array.New only support array,ArrayList,slice or tuple type, Unsupported type: " ++ @typeName(array_type));
         }
         var len: u32 = undefined;
@@ -100,7 +102,7 @@ pub const Array = struct {
             len = @intCast(array.len);
         } else if (comptime helper.isTuple(array_type)) {
             len = infos.@"struct".fields.len;
-        } else if (comptime helper.isGenericType(array_type, "ArrayList")) {
+        } else if (comptime helper.isArrayList(array_type)) {
             len = @intCast(array.capacity);
         }
 
@@ -121,7 +123,7 @@ pub const Array = struct {
                 const napi_value = try Napi.to_napi_value(env.raw, value, null);
                 _ = napi.napi_set_element(env.raw, raw, @intCast(i), napi_value);
             }
-        } else if (comptime helper.isGenericType(array_type, "ArrayList")) {
+        } else if (comptime helper.isArrayList(array_type)) {
             for (array.items, 0..) |item, i| {
                 const napi_value = try Napi.to_napi_value(env.raw, item, null);
                 _ = napi.napi_set_element(env.raw, raw, @intCast(i), napi_value);

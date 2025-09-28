@@ -20,11 +20,14 @@ pub fn build(b: *std.Build) !void {
 
     if (result.arm64) |arm64| {
         arm64.root_module.addImport("napi", napi);
+        arm64.root_module.linkSystemLibrary("hilog_ndk.z", .{});
     }
     if (result.arm) |arm| {
         arm.root_module.addImport("napi", napi);
+        arm.root_module.linkSystemLibrary("hilog_ndk.z", .{});
     }
     if (result.x64) |x64| {
         x64.root_module.addImport("napi", napi);
+        x64.root_module.linkSystemLibrary("hilog_ndk.z", .{});
     }
 }

@@ -74,7 +74,7 @@ const targets: []const std.Target.Query = &.{
 fn linkNapi(build: *std.Build, compile: *std.Build.Step.Compile, target: std.Target.Query) !void {
     const allocator = build.allocator;
 
-    compile.root_module.linkSystemLibrary("ace_napi.z");
+    compile.root_module.linkSystemLibrary("ace_napi.z", .{});
     compile.linkage = .dynamic;
 
     compile.root_module.link_libc = true;

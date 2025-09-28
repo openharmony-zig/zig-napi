@@ -78,7 +78,6 @@ pub fn WorkerContext(comptime T: type) type {
                             if (params[0].type.? != DataType) {
                                 @compileError("Execute's first parameter must be " ++ @typeName(DataType));
                             } else {
-                                @compileLog(return_type);
                                 if (return_type == .error_union) {
                                     inner_self.result = inner_self.data.Execute(inner_self.data.data) catch {
                                         inner_self.status = .Rejected;
