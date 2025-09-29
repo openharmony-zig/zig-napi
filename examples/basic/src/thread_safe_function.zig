@@ -11,10 +11,10 @@ fn execute_thread_safe_function(tsfn: *napi.ThreadSafeFunction(Args, Return, tru
 
 fn execute_thread_safe_function_with_error(tsfn: *napi.ThreadSafeFunction(Args, Return, true, 0)) void {
     std.Thread.sleep(5_000_000_000);
-    tsfn.Err(napi.Error.fromReason("TSFN Error"), .NonBlocking);
+    tsfn.Err(napi.Error.withReason("TSFN Error"), .NonBlocking);
 }
 
 pub fn call_thread_safe_function(tsfn: *napi.ThreadSafeFunction(Args, Return, true, 0)) void {
     _ = std.Thread.spawn(.{}, execute_thread_safe_function, .{tsfn}) catch @panic("Failed to spawn thread");
-    // _ = std.Thread.spawn(.{}, execute_thread_safe_function_with_error, .{tsfn}) catch @panic("Failed to spawn thread");
+    _ = std.Thread.spawn(.{}, execute_thread_safe_function_with_error, .{tsfn}) catch @panic("Failed to spawn thread");
 }
