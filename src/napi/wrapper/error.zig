@@ -7,6 +7,7 @@ pub const Status = @import("status.zig").Status;
 
 // Save the last error to the threadlocal variable and throw it when the error is not null
 pub threadlocal var last_error: ?Error = null;
+pub threadlocal var last_error_status: ?Status = null;
 
 pub const ErrorStatus = error{
     InvalidArg,
@@ -34,7 +35,6 @@ pub const ErrorStatus = error{
     WouldDeadlock,
     NoExternalBuffersAllowed,
     Unknown,
-    CustomStatus,
 };
 
 fn toError(status: Status) anyerror {
@@ -61,22 +61,23 @@ fn toError(status: Status) anyerror {
         .DetachableArraybufferExpected => error.DetachableArraybufferExpected,
         .WouldDeadlock => error.WouldDeadlock,
         .NoExternalBuffersAllowed => error.NoExternalBuffersAllowed,
-        .Unknown => error.Unknown,
-        else => error.CustomStatus,
+        else => error.Unknown,
     };
 }
 
 fn napiError(comptime T: type) type {
     return struct {
-        status: Status,
+        status: ?Status,
         message: []const u8,
         mode: T,
+        custom_status: ?[]const u8,
 
         const Self = @This();
 
         pub fn to_napi_error(self: Self, env: Env) napi.napi_value {
             var e: napi.napi_value = undefined;
-            const code: napi.napi_value = String.New(env, self.status.ToString()).raw;
+            const status_str = if (self.custom_status) |custom_status| custom_status else self.status.?.ToString();
+            const code: napi.napi_value = String.New(env, status_str).raw;
             const message: napi.napi_value = String.New(env, self.message).raw;
             const create_status = switch (T) {
                 JsErrorType => napi.napi_create_error(env.raw, code, message, &e),
@@ -93,20 +94,36 @@ fn napiError(comptime T: type) type {
                 .message = message,
                 .status = Status.GenericFailure,
                 .mode = T{},
+                .custom_status = null,
             };
         }
 
-        pub fn fromStatus(status: Status) Self {
-            return Self{
-                .status = status,
-                .message = "",
-                .mode = T{},
-            };
+        pub fn fromStatus(status: anytype) Self {
+            const type_info = @TypeOf(status);
+            switch (type_info) {
+                Status => {
+                    return Self{
+                        .status = status,
+                        .message = "",
+                        .mode = T{},
+                        .custom_status = null,
+                    };
+                },
+                else => {
+                    return Self{
+                        .status = null,
+                        .message = "",
+                        .mode = T{},
+                        .custom_status = status,
+                    };
+                },
+            }
         }
 
         pub fn throwInto(self: Self, env: Env) void {
             var e: napi.napi_value = undefined;
-            const code: napi.napi_value = String.New(env, self.status.ToString()).raw;
+            const status_str = if (self.custom_status) |custom_status| custom_status else self.status.?.ToString();
+            const code: napi.napi_value = String.New(env, status_str).raw;
             const message: napi.napi_value = String.New(env, self.message).raw;
 
             const create_status = switch (T) {
@@ -131,9 +148,9 @@ pub const JsError = napiError(JsErrorType);
 pub const JsTypeError = napiError(JsTypeErrorType);
 pub const JsRangeError = napiError(JsRangeErrorType);
 
+/// Check the napi status and throw the error into the environment
 pub fn checkNapiStatus(env: napi.napi_env, err: anytype) napi.napi_value {
     const err_type = @TypeOf(err);
-    const infos = @typeInfo(err_type);
 
     const inner_env = Env.from_raw(env);
     var result: napi.napi_value = undefined;
@@ -145,21 +162,12 @@ pub fn checkNapiStatus(env: napi.napi_env, err: anytype) napi.napi_value {
             const js_error = Error{ .JsError = JsError.fromStatus(err) };
             js_error.throwInto(inner_env);
         },
-        else => {
-            switch (infos) {
-                .@"struct" => {
-                    const js_error = Error{ .JsError = JsError.fromStatus(err.status) };
-                    js_error.throwInto(inner_env);
-                },
-                else => {
-                    @compileError("Unsupported type: " ++ @typeName(err_type));
-                },
-            }
-        },
+        else => @compileError("Unsupported type: " ++ @typeName(err_type)),
     }
     return result;
 }
 
+/// Error union for the napi error
 pub const Error = union(enum) {
     JsError: JsError,
     JsTypeError: JsTypeError,
@@ -173,26 +181,57 @@ pub const Error = union(enum) {
         };
     }
 
+    pub fn withReason(reason: []const u8) Error {
+        return Error{ .JsError = JsError.fromMessage(reason) };
+    }
+
+    pub fn withStatus(status: anytype) Error {
+        const type_info = @TypeOf(status);
+        if (type_info != Status and type_info != []const u8) {
+            @compileError("Error Status must be Status or []const u8, Unsupported type: " ++ @typeName(type_info));
+        }
+
+        return Error{ .JsError = JsError.fromStatus(status) };
+    }
+
+    pub fn withTypeError(reason: []const u8) Error {
+        return Error{ .JsTypeError = JsTypeError.fromMessage(reason) };
+    }
+
+    pub fn withRangeError(reason: []const u8) Error {
+        return Error{ .JsRangeError = JsRangeError.fromMessage(reason) };
+    }
+
+    /// Create a new error from the reason and throw it
     pub fn fromReason(reason: []const u8) anyerror {
         last_error = Error{ .JsError = JsError.fromMessage(reason) };
         return error.GenericFailure;
     }
 
-    pub fn fromStatus(status: Status) anyerror {
+    /// Create a new error from the status and throw it
+    pub fn fromStatus(status: anytype) anyerror {
+        const type_info = @TypeOf(status);
+        if (type_info != Status and type_info != []const u8) {
+            @compileError("Error Status must be Status or []const u8, Unsupported type: " ++ @typeName(type_info));
+        }
+
         last_error = Error{ .JsError = JsError.fromStatus(status) };
-        return toError(status);
+        return error.GenericFailure;
     }
 
+    /// Create a new TypeError from the reason and throw it
     pub fn typeError(message: []const u8) anyerror {
         last_error = Error{ .JsTypeError = JsTypeError.fromMessage(message) };
         return error.GenericFailure;
     }
 
+    /// Create a new RangeError from the reason and throw it
     pub fn rangeError(message: []const u8) anyerror {
         last_error = Error{ .JsRangeError = JsRangeError.fromMessage(message) };
         return error.GenericFailure;
     }
 
+    /// Throw the error into the environment
     pub fn throwInto(self: Error, env: Env) void {
         switch (self) {
             .JsError => self.JsError.throwInto(env),

@@ -61,6 +61,7 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
 
                     const argv = self.allocator.alloc(napi.napi_value, args_len + call_variant) catch @panic("OOM");
                     defer self.allocator.free(argv);
+                    @memset(argv, null);
 
                     const undefined_value = Undefined.New(Env.from_raw(inner_env));
 
