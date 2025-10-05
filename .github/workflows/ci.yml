@@ -27,5 +27,5 @@ jobs:
 
       - name: Build
         run: |
-          cd examples/basic && zig build
-          cd examples/init && zig build
+          pushd examples/basic && zig build && popd
+          pushd examples/init && zig build && popd
