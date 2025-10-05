@@ -1,6 +1,6 @@
 .{
     .name = .zig_napi,
-    .version = "0.0.1-beta.0",
+    .version = "0.0.1-beta.2",
     .minimum_zig_version = "0.15.1",
     .dependencies = .{},
     .fingerprint = 0x6093bdd26bb0a31f,
