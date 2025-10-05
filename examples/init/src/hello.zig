@@ -3,7 +3,9 @@ const std = @import("std");
 const ArrayList = std.ArrayList;
 const number = @import("number.zig");
 
-pub usingnamespace number;
+pub const test_i32 = number.test_i32;
+pub const test_f32 = number.test_f32;
+pub const test_u32 = number.test_u32;
 
 fn fibonacci(n: f64) f64 {
     if (n <= 1) return n;
