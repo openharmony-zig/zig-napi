@@ -11,9 +11,11 @@ pub fn build(b: *std.Build) !void {
 
     const result = try napi_build.nativeAddonBuild(b, .{
         .name = "hello",
-        .root_source_file = b.path("./src/hello.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module_options = .{
+            .root_source_file = b.path("./src/hello.zig"),
+            .target = target,
+            .optimize = optimize,
+        },
     });
 
     if (result.arm64) |arm64| {

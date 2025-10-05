@@ -3,7 +3,9 @@ const std = @import("std");
 const ArrayList = std.ArrayList;
 const number = @import("number.zig");
 
-pub usingnamespace number;
+pub const test_i32 = number.test_i32;
+pub const test_f32 = number.test_f32;
+pub const test_u32 = number.test_u32;
 
 fn fibonacci(n: f64) f64 {
     if (n <= 1) return n;
@@ -18,7 +20,7 @@ fn fibonacci_execute(_: napi.Env, data: f64) void {
     defer allocator.free(message);
 }
 
-fn fibonacci_on_complete(_: napi.Env, _: napi.Status, data: f64) void {
+fn fibonacci_on_complete(_: napi.Env, data: f64) void {
     const allocator = std.heap.page_allocator;
     const message = std.fmt.allocPrint(allocator, "Fibonacci result: {d}", .{data}) catch @panic("OOM");
     defer allocator.free(message);
