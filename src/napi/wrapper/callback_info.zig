@@ -7,6 +7,7 @@ pub const CallbackInfo = struct {
     raw: napi.napi_callback_info,
     env: napi.napi_env,
     args: []const value.NapiValue,
+    this: napi.napi_value,
 
     pub fn from_raw(env: napi.napi_env, raw: napi.napi_callback_info) CallbackInfo {
         var init_argc: usize = 0;
@@ -19,7 +20,9 @@ pub const CallbackInfo = struct {
         const args_raw = allocator.alloc(napi.napi_value, init_argc) catch @panic("OOM");
         defer allocator.free(args_raw);
 
-        const status2 = napi.napi_get_cb_info(env, raw, &init_argc, args_raw.ptr, null, null);
+        var this: napi.napi_value = undefined;
+
+        const status2 = napi.napi_get_cb_info(env, raw, &init_argc, args_raw.ptr, &this, null);
         if (status2 != napi.napi_ok) {
             @panic("Failed to get callback info");
         }
@@ -34,6 +37,7 @@ pub const CallbackInfo = struct {
             .raw = raw,
             .env = env,
             .args = result,
+            .this = this,
         };
     }
 
@@ -43,5 +47,9 @@ pub const CallbackInfo = struct {
 
     pub fn Get(self: CallbackInfo, index: usize) value.NapiValue {
         return self.args[index];
+    }
+
+    pub fn This(self: CallbackInfo) napi.napi_value {
+        return self.this;
     }
 };
