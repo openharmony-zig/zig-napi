@@ -1,15 +1,31 @@
 const std = @import("std");
 
-pub var global_allocator: std.mem.Allocator = std.heap.page_allocator;
+pub const AllocatorManager = struct {
+    allocator: std.mem.Allocator,
 
-const self = @This();
+    const Self = @This();
 
-/// Default allocator
+    pub fn init() Self {
+        return Self{
+            .allocator = std.heap.page_allocator,
+        };
+    }
+
+    pub fn get(self: *const Self) std.mem.Allocator {
+        return self.allocator;
+    }
+
+    pub fn set(self: *Self, new_allocator: std.mem.Allocator) void {
+        self.allocator = new_allocator;
+    }
+};
+
+pub const global_manager = AllocatorManager.init();
+
 pub fn globalAllocator() std.mem.Allocator {
-    return self.global_allocator;
+    return global_manager.get();
 }
 
-/// Set the global allocator
 pub fn setGlobalAllocator(new_allocator: std.mem.Allocator) void {
-    self.global_allocator = new_allocator;
+    global_manager.set(new_allocator);
 }

@@ -6,6 +6,7 @@ const module = @import("./prelude/module.zig");
 const worker = @import("./napi/wrapper/worker.zig");
 const err = @import("./napi/wrapper/error.zig");
 const thread_safe_function = @import("./napi/wrapper/thread_safe_function.zig");
+const class = @import("./napi/wrapper/class.zig");
 
 pub const napi_sys = @import("napi-sys");
 
@@ -30,6 +31,8 @@ pub const Function = function.Function;
 pub const CallbackInfo = callback_info.CallbackInfo;
 pub const Worker = worker.Worker;
 pub const ThreadSafeFunction = thread_safe_function.ThreadSafeFunction;
+pub const Class = class.Class;
+pub const ClassWithoutInit = class.ClassWithoutInit;
 
 pub const NODE_API_MODULE = module.NODE_API_MODULE;
 pub const NODE_API_MODULE_WITH_INIT = module.NODE_API_MODULE_WITH_INIT;

@@ -1,181 +1,225 @@
 const std = @import("std");
 const napi = @import("napi-sys").napi_sys;
 const CallbackInfo = @import("./callback_info.zig").CallbackInfo;
-const Function = @import("../value/function.zig").Function;
 const napi_env = @import("../env.zig");
+const Napi = @import("../util/napi.zig").Napi;
 const helper = @import("../util/helper.zig");
-const allocator = @import("../util/allocator.zig").global_allocator;
+const GlobalAllocator = @import("../util/allocator.zig");
 
-var class_constructor_ref: std.AutoHashMap([]const u8, napi.napi_ref) = std.AutoHashMap([]const u8, napi.napi_ref).init(allocator);
+var class_constructors: std.StringHashMap(napi.napi_value) = std.StringHashMap(napi.napi_value).init(GlobalAllocator.globalAllocator());
 
-pub fn ClassInstance(comptime T: type) type {
+pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
     const type_info = @typeInfo(T);
     if (type_info != .@"struct") {
-        @compileError("Class must be a struct type");
+        @compileError("Class() only support struct type");
     }
 
     if (type_info.@"struct".is_tuple) {
-        @compileError("Class must be a named struct type, don't support tuple type");
+        @compileError("Class() does not support tuple type");
     }
 
-    const class_name = @typeName(T);
-    const class_fields = type_info.@"struct".fields;
-    const class_methods = type_info.@"struct".decls;
+    const fields = type_info.@"struct".fields;
+    const decls = type_info.@"struct".decls;
 
-    const constructor = blk: for (class_methods) |method| {
-        if (std.mem.eql(u8, method.name, "Constructor")) {
-            break :blk method.value;
-        }
-        break :blk null;
-    } else {
-        @compileError("Class must have a public constructor");
-    };
-
-    const factory = blk: for (class_methods) |method| {
-        if (std.mem.eql(u8, method.name, "Factory")) {
-            break :blk method.value;
-        }
-        break :blk null;
-    } else {
-        @compileError("Class must have a public factory");
-    };
-
+    const class_name = comptime helper.shortTypeName(T);
     return struct {
-        name: []const u8,
+        const WrappedType = T;
+
         env: napi.napi_env,
         raw: napi.napi_value,
-        ref: napi.napi_ref,
-        value: T,
 
         const Self = @This();
 
-        pub fn New(env: napi.napi_env, callback_info: napi.napi_callback_info) *Self {
-            const self = allocator.create(Self) catch @panic("OOM");
+        // 构造器回调
+        fn constructor_callback(env: napi.napi_env, callback_info: napi.napi_callback_info) callconv(.c) napi.napi_value {
+            const infos = CallbackInfo.from_raw(env, callback_info);
 
-            const data = allocator.create(T) catch @panic("OOM");
-            self.value = data.*;
+            const data = GlobalAllocator.globalAllocator().create(T) catch return null;
 
-            var new_target: napi.napi_value = undefined;
-            _ = napi.napi_get_new_target(env, callback_info, &new_target);
-
-            if (new_target == null) {
-                const constructor_ref = class_constructor_ref.get(@typeName(T));
-                if (constructor_ref == null) {
-                    @panic("Class constructor reference not found");
+            if (@hasDecl(T, "init")) {
+                var tuple_args: std.meta.ArgsTuple(T.init) = undefined;
+                inline for (@typeInfo(std.meta.ArgsTuple(T.init)).@"fn".params, 0..) |arg, i| {
+                    tuple_args[i] = Napi.from_napi_value(infos.env, infos.args[i].raw, arg.type.?);
                 }
 
-                _ = napi.napi_get_reference_value(env, constructor_ref.?, &self.raw);
-                _ = napi.napi_wrap(env, self.raw, data, null, null, &self.ref);
-
-                return self;
+                data.* = @call(.auto, T.init, tuple_args) catch {
+                    GlobalAllocator.globalAllocator().destroy(data);
+                    return null;
+                };
             } else {
-                const this = infos.This();
-
-                _ = napi.napi_wrap(env, this, data, null, null, &self.ref);
-
-                // align with node.js behavior
-                var ref_count: u32 = undefined;
-                napi.napi_reference_unref(env, self.ref, &ref_count);
-
-                return self;
+                // init with zero
+                data.* = std.mem.zeroes(T);
+                // if HasInit, init with args with order of fields
+                if (comptime HasInit) {
+                    inline for (fields, 0..) |field, i| {
+                        @field(data.*, field.name) = Napi.from_napi_value(infos.env, infos.args[i].raw, field.type);
+                    }
+                }
             }
+
+            const this_obj = infos.This();
+
+            var ref: napi.napi_ref = undefined;
+            const status = napi.napi_wrap(env, this_obj, data, finalize_callback, null, &ref);
+            if (status != napi.napi_ok) {
+                GlobalAllocator.globalAllocator().destroy(data);
+                return null;
+            }
+
+            var ref_count: u32 = undefined;
+            _ = napi.napi_reference_unref(env, ref, &ref_count);
+
+            return this_obj;
+        }
+
+        fn finalize_callback(env: napi.napi_env, data: ?*anyopaque, hint: ?*anyopaque) callconv(.c) void {
+            _ = env;
+            _ = hint;
+
+            if (data) |ptr| {
+                const typed_data: *T = @ptrCast(@alignCast(ptr));
+                if (@hasDecl(T, "deinit")) {
+                    typed_data.deinit();
+                }
+                GlobalAllocator.globalAllocator().destroy(typed_data);
+            }
+        }
+
+        fn define_class(env: napi.napi_env) !napi.napi_value {
+            comptime var property_count: usize = 0;
+            inline for (fields) |_| {
+                property_count += 1;
+            }
+            inline for (decls) |decl| {
+                if (@typeInfo(@TypeOf(@field(T, decl.name))) == .Fn and
+                    !std.mem.eql(u8, decl.name, "init") and
+                    !std.mem.eql(u8, decl.name, "deinit"))
+                {
+                    property_count += 1;
+                }
+            }
+
+            var properties: [property_count]napi.napi_property_descriptor = undefined;
+            var prop_idx: usize = 0;
+
+            inline for (fields) |field| {
+                const FieldAccessor = struct {
+                    fn getter(getter_env: napi.napi_env, info: napi.napi_callback_info) callconv(.c) napi.napi_value {
+                        const cb_info = CallbackInfo.from_raw(getter_env, info);
+                        var data: ?*anyopaque = null;
+                        _ = napi.napi_unwrap(getter_env, cb_info.This(), &data);
+                        if (data == null) return null;
+
+                        const instance: *T = @ptrCast(@alignCast(data.?));
+                        const field_value = @field(instance.*, field.name);
+                        return Napi.to_napi_value(getter_env, field_value, field.name) catch null;
+                    }
+
+                    fn setter(setter_env: napi.napi_env, info: napi.napi_callback_info) callconv(.c) napi.napi_value {
+                        const cb_info = CallbackInfo.from_raw(setter_env, info);
+                        var data: ?*anyopaque = null;
+                        _ = napi.napi_unwrap(setter_env, cb_info.This(), &data);
+                        if (data == null) return null;
+
+                        const instance: *T = @ptrCast(@alignCast(data.?));
+                        const args = cb_info.args;
+                        if (args.len > 0) {
+                            const new_value = Napi.from_napi_value(setter_env, args[0].raw, field.type);
+                            @field(instance.*, field.name) = new_value;
+                        }
+
+                        return null;
+                    }
+                };
+
+                properties[prop_idx] = napi.napi_property_descriptor{
+                    .utf8name = @ptrCast(field.name.ptr),
+                    .name = null,
+                    .method = null,
+                    .getter = FieldAccessor.getter,
+                    .setter = FieldAccessor.setter,
+                    .value = null,
+                    .attributes = napi.napi_default,
+                    .data = null,
+                };
+                prop_idx += 1;
+            }
+
+            inline for (decls) |decl| {
+                if (@typeInfo(@TypeOf(@field(T, decl.name))) == .Fn and
+                    !std.mem.eql(u8, decl.name, "init") and
+                    !std.mem.eql(u8, decl.name, "deinit"))
+                {
+                    const method = @field(T, decl.name);
+                    const method_info = @typeInfo(@TypeOf(method));
+                    const params = method_info.Fn.params;
+                    const is_instance_method = params.len > 0 and params[0].type.? == *T;
+
+                    const MethodWrapper = struct {
+                        fn call(method_env: napi.napi_env, info: napi.napi_callback_info) callconv(.c) napi.napi_value {
+                            const cb_info = CallbackInfo.from_raw(method_env, info);
+
+                            if (is_instance_method) {
+                                var data: ?*anyopaque = null;
+                                _ = napi.napi_unwrap(method_env, cb_info.This(), &data);
+                                if (data == null) return null;
+
+                                const instance: *T = @ptrCast(@alignCast(data.?));
+                                const result = method(instance);
+                                return Napi.to_napi_value(method_env, result, decl.name) catch null;
+                            } else {
+                                const result = method();
+                                return Napi.to_napi_value(method_env, result, decl.name) catch null;
+                            }
+                        }
+                    };
+
+                    properties[prop_idx] = napi.napi_property_descriptor{
+                        .utf8name = @ptrCast(decl.name.ptr),
+                        .name = null,
+                        .method = MethodWrapper.call,
+                        .getter = null,
+                        .setter = null,
+                        .value = null,
+                        .attributes = if (is_instance_method) napi.napi_default else napi.napi_static,
+                        .data = null,
+                    };
+                    prop_idx += 1;
+                }
+            }
+
+            var constructor: napi.napi_value = undefined;
+            _ = napi.napi_define_class(env, class_name.ptr, class_name.len, constructor_callback, null, prop_idx, &properties, &constructor);
+
+            try class_constructors.put(class_name, constructor);
+            return constructor;
+        }
+
+        fn define_custom_method(_: napi.napi_env, _: napi.napi_value) !void {}
+
+        /// to_napi_value will create a class constructor and return it
+        pub fn to_napi_value(env: napi_env.Env) !napi.napi_value {
+            const constructor = try Self.define_class(env.raw);
+
+            try Self.define_custom_method(env.raw, constructor);
+
+            return constructor;
         }
     };
 }
 
-pub fn Class(env: napi_env.Env, comptime T: type) ClassInstance(@TypeOf(T)) {
-    const type_info = @typeInfo(T);
-    if (type_info != .@"struct") {
-        @compileError("Class must be a struct type");
-    }
+/// Create a class with default constructor function
+pub fn Class(comptime T: type) type {
+    return ClassWrapper(T, true);
+}
 
-    if (type_info.@"struct".is_tuple) {
-        @compileError("Class must be a named struct type, don't support tuple type");
-    }
+/// Create a class without default constructor function
+pub fn ClassWithoutInit(comptime T: type) type {
+    return ClassWrapper(T, false);
+}
 
-    const class_name = @typeName(T);
-    const class_fields = type_info.@"struct".fields;
-    const class_methods = type_info.@"struct".decls;
+pub fn isClass(T: anytype) bool {
+    const type_name = @typeName(T);
 
-    comptime var properties: [class_fields.len + class_methods.len]napi.napi_property_descriptor = undefined;
-
-    comptime var property_count: usize = 0;
-
-    inline for (class_fields) |field| {
-        const Property = struct {
-            pub fn setter(setter_env: napi.napi_env, setter_info: napi.napi_callback_info) napi.napi_value {}
-
-            pub fn getter(getter_env: napi.napi_env, getter_info: napi.napi_callback_info) napi.napi_value {}
-        };
-
-        properties[property_count] = napi.napi_property_descriptor{
-            .utf8name = @ptrCast(field.name),
-            .utf8name_length = field.name.len,
-            .getter = &Property.getter,
-            .setter = &Property.setter,
-        };
-        property_count += 1;
-    }
-
-    inline for (class_methods) |method| {
-        const method_infos = @typeInfo(method);
-
-        if (method_infos != .@"fn") {
-            @compileError("Method must be a function type");
-        }
-
-        const params = method_infos.@"fn".params;
-        const hasSelf = comptime params.len > 0 and params[0].type.? == T;
-
-        if (std.mem.startsWith(u8, method.name, "Getter")) {
-            const name = method.name[6..];
-            const Getter = struct {
-                pub fn getter(getter_env: napi.napi_env, getter_info: napi.napi_callback_info) napi.napi_value {}
-            };
-            properties[property_count] = napi.napi_property_descriptor{
-                .utf8name = @ptrCast(name),
-                .utf8name_length = name.len,
-                .getter = &Getter.getter,
-                .setter = null,
-            };
-        }
-        if (std.mem.startsWith(u8, method.name, "Setter")) {
-            const name = method.name[6..];
-            const Setter = struct {
-                pub fn setter(setter_env: napi.napi_env, setter_info: napi.napi_callback_info) napi.napi_value {}
-            };
-            properties[property_count] = napi.napi_property_descriptor{
-                .utf8name = @ptrCast(name),
-                .utf8name_length = name.len,
-                .getter = null,
-                .setter = &Setter.setter,
-            };
-        }
-
-        const Method = struct {
-            pub fn call(method_env: napi.napi_env, method_info: napi.napi_callback_info) napi.napi_value {}
-        };
-
-        properties[property_count] = napi.napi_property_descriptor{
-            .utf8name = @ptrCast(method.name),
-            .utf8name_length = method.name.len,
-            .method = &Method.call,
-            .getter = null,
-            .setter = null,
-            .attributes = if (hasSelf) napi.napi_default_method else napi.napi_static,
-        };
-        property_count += 1;
-    }
-
-    const instance = ClassInstance(@TypeOf(T));
-
-    var con: napi.napi_value = undefined;
-    _ = napi.napi_define_class(env.raw, @ptrCast(class_name), class_name.len, instance.New, null, property_count, &properties, &con);
-
-    var ref: napi.napi_ref = undefined;
-    _ = napi.napi_create_reference(env.raw, con, 1, &ref);
-
-    class_constructor_ref.put(class_name, ref);
-
-    return instance;
+    return std.mem.indexOf(u8, type_name, "ClassWrapper") != null;
 }
