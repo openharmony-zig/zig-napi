@@ -8,6 +8,7 @@ const array = @import("array.zig");
 const object = @import("object.zig");
 const function = @import("function.zig");
 const thread_safe_function = @import("thread_safe_function.zig");
+const class = @import("class.zig");
 const log = @import("log/log.zig");
 
 pub const test_i32 = number.test_i32;
@@ -37,6 +38,8 @@ pub const basic_function = function.basic_function;
 pub const create_function = function.create_function;
 
 pub const call_thread_safe_function = thread_safe_function.call_thread_safe_function;
+
+pub const TestClass = class.TestClass;
 
 pub const test_hilog = log.test_hilog;
 

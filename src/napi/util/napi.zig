@@ -6,6 +6,7 @@ const Env = @import("../env.zig").Env;
 const NapiError = @import("../wrapper/error.zig");
 const Function = @import("../value/function.zig").Function;
 const ThreadSafeFunction = @import("../wrapper/thread_safe_function.zig").ThreadSafeFunction;
+const class = @import("../wrapper/class.zig");
 
 pub const Napi = struct {
     pub fn from_napi_value(env: napi.napi_env, raw: napi.napi_value, comptime T: type) T {
@@ -202,6 +203,7 @@ pub const Napi = struct {
                             const array = try NapiValue.Array.New(Env.from_raw(env), value);
                             return array.raw;
                         }
+
                         const object = try NapiValue.Object.New(Env.from_raw(env), value);
                         return object.raw;
                     },
@@ -227,7 +229,9 @@ pub const Napi = struct {
                                 return NapiValue.String.New(Env.from_raw(env), value).raw;
                             },
                             else => {
-
+                                if (comptime class.isClass(value)) {
+                                    return try value.to_napi_value(Env.from_raw(env));
+                                }
                                 // TODO: Implement this
                                 @compileError("Unsupported type: " ++ @typeName(value));
                             },

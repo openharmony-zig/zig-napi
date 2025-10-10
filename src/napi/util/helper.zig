@@ -192,3 +192,8 @@ pub fn collectFunctionArgs(comptime functions: anytype) type {
         .is_tuple = true,
     } });
 }
+
+pub fn shortTypeName(comptime T: type) []const u8 {
+    var iter = std.mem.splitBackwardsScalar(u8, @typeName(T), '.');
+    return iter.first();
+}
