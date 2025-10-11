@@ -40,6 +40,9 @@ pub const create_function = function.create_function;
 pub const call_thread_safe_function = thread_safe_function.call_thread_safe_function;
 
 pub const TestClass = class.TestClass;
+pub const TestWithInitClass = class.TestWithInitClass;
+pub const TestWithoutInitClass = class.TestWithoutInitClass;
+pub const TestFactoryClass = class.TestFactoryClass;
 
 pub const test_hilog = log.test_hilog;
 
