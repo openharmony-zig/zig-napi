@@ -8,6 +8,8 @@ const err = @import("./napi/wrapper/error.zig");
 const thread_safe_function = @import("./napi/wrapper/thread_safe_function.zig");
 const class = @import("./napi/wrapper/class.zig");
 
+const DefaultGlobalAllocator = @import("./napi/util/allocator.zig");
+
 pub const napi_sys = @import("napi-sys");
 
 pub const Env = env.Env;
@@ -33,6 +35,10 @@ pub const Worker = worker.Worker;
 pub const ThreadSafeFunction = thread_safe_function.ThreadSafeFunction;
 pub const Class = class.Class;
 pub const ClassWithoutInit = class.ClassWithoutInit;
+
+/// Default global allocator is the page allocator
+/// You can change it by calling `GlobalAllocator.setGlobalAllocator`
+pub const GlobalAllocator = DefaultGlobalAllocator;
 
 pub const NODE_API_MODULE = module.NODE_API_MODULE;
 pub const NODE_API_MODULE_WITH_INIT = module.NODE_API_MODULE_WITH_INIT;
