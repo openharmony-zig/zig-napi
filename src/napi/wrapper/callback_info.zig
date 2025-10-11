@@ -2,11 +2,14 @@ const std = @import("std");
 const napi = @import("napi-sys").napi_sys;
 const value = @import("../value.zig");
 const NapiEnv = @import("../env.zig").Env;
+const GlobalAllocator = @import("../util/allocator.zig");
 
 pub const CallbackInfo = struct {
     raw: napi.napi_callback_info,
     env: napi.napi_env,
     args: []const value.NapiValue,
+    args_raw: []napi.napi_value,
+    args_count: usize,
     this: napi.napi_value,
 
     pub fn from_raw(env: napi.napi_env, raw: napi.napi_callback_info) CallbackInfo {
@@ -16,9 +19,7 @@ pub const CallbackInfo = struct {
             @panic("Failed to get callback info");
         }
 
-        const allocator = std.heap.page_allocator;
-        const args_raw = allocator.alloc(napi.napi_value, init_argc) catch @panic("OOM");
-        defer allocator.free(args_raw);
+        const args_raw = GlobalAllocator.globalAllocator().alloc(napi.napi_value, init_argc) catch @panic("OOM");
 
         var this: napi.napi_value = undefined;
 
@@ -27,7 +28,7 @@ pub const CallbackInfo = struct {
             @panic("Failed to get callback info");
         }
 
-        const result = allocator.alloc(value.NapiValue, init_argc) catch @panic("OOM");
+        const result = GlobalAllocator.globalAllocator().alloc(value.NapiValue, init_argc) catch @panic("OOM");
 
         for (0..init_argc) |i| {
             result[i] = value.NapiValue.from_raw(env, args_raw[i]);
@@ -38,6 +39,8 @@ pub const CallbackInfo = struct {
             .env = env,
             .args = result,
             .this = this,
+            .args_raw = args_raw,
+            .args_count = init_argc,
         };
     }
 
