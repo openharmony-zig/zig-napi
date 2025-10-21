@@ -9,6 +9,7 @@ const Test = struct {
 const TestWithInit = struct {
     name: []u8,
     age: i32,
+    pub const hello = "Hello";
 
     pub fn init(age: i32, name: []u8) TestWithInit {
         return TestWithInit{ .name = name, .age = age };

@@ -11,6 +11,7 @@ var class_constructors: std.StringHashMap(napi.napi_value) = std.StringHashMap(n
 
 pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
     const type_info = @typeInfo(T);
+
     if (type_info != .@"struct") {
         @compileError("Class() only support struct type");
     }
@@ -143,9 +144,31 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
             }
         }
 
+        // Helper function to check if a declaration is a const field
+        fn isConstDecl(comptime decl_name: []const u8) bool {
+            if (!@hasDecl(T, decl_name)) return false;
+            const decl_type = @TypeOf(@field(T, decl_name));
+            const decl_type_info = @typeInfo(decl_type);
+            // Check if it's not a function and not a type
+            return decl_type_info != .@"fn" and decl_type_info != .type;
+        }
+
+        // Count const declarations at compile time
+        fn countConstDecls() usize {
+            var count: usize = 0;
+            for (decls) |decl| {
+                if (comptime isConstDecl(decl.name)) {
+                    count += 1;
+                }
+            }
+            return count;
+        }
+
         fn define_class(env: napi.napi_env) !napi.napi_value {
+            // Count instance properties and methods
             comptime var property_count: usize = fields.len;
 
+            // Count methods
             inline for (decls) |decl| {
                 const decl_type = @TypeOf(@field(T, decl.name));
                 if (@typeInfo(decl_type) == .@"fn") {
@@ -158,9 +181,14 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                 }
             }
 
-            var properties: [property_count]napi.napi_property_descriptor = undefined;
+            // Add const declarations count
+            const const_count = comptime countConstDecls();
+            const total_property_count = comptime property_count + const_count;
+
+            var properties: [total_property_count]napi.napi_property_descriptor = undefined;
             var prop_idx: usize = 0;
 
+            // Process instance fields
             inline for (fields) |field| {
                 const FieldAccessor = struct {
                     fn getter(getter_env: napi.napi_env, info: napi.napi_callback_info) callconv(.c) napi.napi_value {
@@ -203,6 +231,45 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                 prop_idx += 1;
             }
 
+            // Process const declarations as static value properties
+            // Following napi-rs pattern: use value field with static attribute
+            inline for (decls) |decl| {
+                if (comptime isConstDecl(decl.name)) {
+                    const const_value = @field(T, decl.name);
+
+                    // Create a static value property descriptor
+                    // The value is converted at define_class time
+                    const StaticValueHolder = struct {
+                        var cached_value: ?napi.napi_value = null;
+
+                        fn getValue(holder_env: napi.napi_env) napi.napi_value {
+                            if (cached_value) |val| {
+                                return val;
+                            }
+                            const val = Napi.to_napi_value(holder_env, const_value, decl.name) catch return null;
+                            cached_value = val;
+                            return val;
+                        }
+                    };
+
+                    // Get the static value
+                    const static_value = StaticValueHolder.getValue(env);
+
+                    properties[prop_idx] = napi.napi_property_descriptor{
+                        .utf8name = @ptrCast(decl.name.ptr),
+                        .name = null,
+                        .method = null,
+                        .getter = null,
+                        .setter = null,
+                        .value = static_value,
+                        .attributes = napi.napi_static | napi.napi_enumerable,
+                        .data = null,
+                    };
+                    prop_idx += 1;
+                }
+            }
+
+            // Process methods
             inline for (decls) |decl| {
                 const decl_type = @TypeOf(@field(T, decl.name));
                 if (@typeInfo(decl_type) == .@"fn") {
