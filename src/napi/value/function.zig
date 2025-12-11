@@ -5,6 +5,7 @@ const CallbackInfo = @import("../wrapper/callback_info.zig").CallbackInfo;
 const Napi = @import("../util/napi.zig").Napi;
 const NapiError = @import("../wrapper/error.zig");
 const Undefined = @import("./undefined.zig").Undefined;
+const GlobalAllocator = @import("../util/allocator.zig");
 
 pub fn Function(comptime Args: type, comptime Return: type) type {
     const ArgsInfos = @typeInfo(Args);
@@ -37,7 +38,7 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                     const undefined_value = Undefined.New(Env.from_raw(inner_env));
                     var init_argc: usize = params.len;
 
-                    const allocator = std.heap.page_allocator;
+                    const allocator = GlobalAllocator.globalAllocator();
                     const args_raw = allocator.alloc(napi.napi_value, init_argc) catch @panic("OOM");
                     defer allocator.free(args_raw);
 
@@ -111,7 +112,7 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
 
             const args_len = if (isTuple) ArgsInfos.@"struct".fields.len else 1;
 
-            const allocator = std.heap.page_allocator;
+            const allocator = GlobalAllocator.globalAllocator();
             const args_raw = allocator.alloc(napi.napi_value, args_len) catch @panic("OOM");
             defer allocator.free(args_raw);
 

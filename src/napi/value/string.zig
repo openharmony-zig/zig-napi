@@ -3,6 +3,7 @@ const napi = @import("napi-sys").napi_sys;
 const Value = @import("../value.zig").Value;
 const Env = @import("../env.zig").Env;
 const helper = @import("../util/helper.zig");
+const GlobalAllocator = @import("../util/allocator.zig");
 
 pub const String = struct {
     env: napi.napi_env,
@@ -15,12 +16,12 @@ pub const String = struct {
 
     pub fn from_napi_value(env: napi.napi_env, raw: napi.napi_value, comptime T: type) T {
         const stringMode = comptime helper.stringLike(T);
+        const allocator = GlobalAllocator.globalAllocator();
         switch (stringMode) {
             .Utf8 => {
                 var len: usize = 0;
                 _ = napi.napi_get_value_string_utf8(env, raw, null, 0, &len);
 
-                const allocator = std.heap.page_allocator;
                 const buf = allocator.alloc(u8, len + 1) catch @panic("OOM");
 
                 _ = napi.napi_get_value_string_utf8(env, raw, buf.ptr, len + 1, null);
@@ -30,7 +31,6 @@ pub const String = struct {
                 var len: usize = 0;
                 _ = napi.napi_get_value_string_utf16(env, raw, null, 0, &len);
 
-                const allocator = std.heap.page_allocator;
                 const buf = allocator.alloc(u16, len + 1) catch @panic("OOM");
 
                 _ = napi.napi_get_value_string_utf16(env, raw, buf.ptr, len + 1, null);

@@ -36,9 +36,5 @@ pub const ThreadSafeFunction = thread_safe_function.ThreadSafeFunction;
 pub const Class = class.Class;
 pub const ClassWithoutInit = class.ClassWithoutInit;
 
-/// Default global allocator is the page allocator
-/// You can change it by calling `GlobalAllocator.setGlobalAllocator`
-pub const GlobalAllocator = DefaultGlobalAllocator;
-
 pub const NODE_API_MODULE = module.NODE_API_MODULE;
 pub const NODE_API_MODULE_WITH_INIT = module.NODE_API_MODULE_WITH_INIT;

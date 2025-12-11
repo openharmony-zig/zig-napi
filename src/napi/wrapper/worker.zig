@@ -7,6 +7,7 @@ const Value = @import("../value.zig").Value;
 const Promise = @import("../value/promise.zig").Promise;
 const Napi = @import("../util/napi.zig").Napi;
 const NapiError = @import("./error.zig");
+const GlobalAllocator = @import("../util/allocator.zig");
 
 const WorkerStatus = enum {
     Pending,
@@ -180,7 +181,7 @@ pub fn WorkerContext(comptime T: type) type {
                 }
             };
 
-            const allocator = std.heap.page_allocator;
+            const allocator = GlobalAllocator.globalAllocator();
             var self = allocator.create(Self) catch @panic("OOM");
 
             self.* = Self{
@@ -205,6 +206,9 @@ pub fn WorkerContext(comptime T: type) type {
         }
 
         pub fn deinit(self: *Self) void {
+            if (self.promise) |promise| {
+                self.allocator.destroy(promise);
+            }
             self.allocator.destroy(self);
         }
 

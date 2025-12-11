@@ -22,10 +22,7 @@ pub const AllocatorManager = struct {
 
 pub const global_manager = AllocatorManager.init();
 
+/// Get the global allocator
 pub fn globalAllocator() std.mem.Allocator {
     return global_manager.get();
-}
-
-pub fn setGlobalAllocator(new_allocator: std.mem.Allocator) void {
-    global_manager.set(new_allocator);
 }
