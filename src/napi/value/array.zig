@@ -5,6 +5,7 @@ const Napi = @import("../util/napi.zig").Napi;
 const helper = @import("../util/helper.zig");
 const ArrayList = std.ArrayList;
 const NapiError = @import("../wrapper/error.zig");
+const GlobalAllocator = @import("../util/allocator.zig");
 
 pub const Array = struct {
     env: napi.napi_env,
@@ -40,7 +41,7 @@ pub const Array = struct {
                     var len: u32 = undefined;
                     _ = napi.napi_get_array_length(env, raw, &len);
 
-                    const allocator = std.heap.page_allocator;
+                    const allocator = GlobalAllocator.globalAllocator();
                     const buf = allocator.alloc(infos.pointer.child, len) catch @panic("OOM");
 
                     for (0..len) |i| {
@@ -67,16 +68,16 @@ pub const Array = struct {
                     // Get Array List's items type
                     const child = comptime helper.getArrayListElementType(T);
 
-                    const gpa = std.heap.page_allocator;
+                    const allocator = GlobalAllocator.globalAllocator();
 
                     var result: T = ArrayList(child).empty;
                     var len: u32 = undefined;
                     _ = napi.napi_get_array_length(env, raw, &len);
-                    result.ensureTotalCapacity(gpa, len) catch @panic("OOM");
+                    result.ensureTotalCapacity(allocator, len) catch @panic("OOM");
                     for (0..len) |i| {
                         var element: napi.napi_value = undefined;
                         _ = napi.napi_get_element(env, raw, @intCast(i), &element);
-                        result.append(gpa, Napi.from_napi_value(env, element, child)) catch @panic("OOM");
+                        result.append(allocator, Napi.from_napi_value(env, element, child)) catch @panic("OOM");
                     }
                     return result;
                 }

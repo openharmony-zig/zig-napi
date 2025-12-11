@@ -6,6 +6,7 @@ const Null = @import("../value/null.zig").Null;
 const Env = @import("../env.zig").Env;
 const NapiError = @import("./error.zig");
 const String = @import("../value/string.zig").String;
+const GlobalAllocator = @import("../util/allocator.zig");
 
 pub const ThreadSafeFunctionMode = enum {
     NonBlocking,
@@ -55,12 +56,13 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
                 fn cb(inner_env: napi.napi_env, js_callback: napi.napi_value, context: ?*anyopaque, data: ?*anyopaque) callconv(.c) void {
                     const self: *Self = @ptrCast(@alignCast(context));
                     const args: *CallData(Args) = @ptrCast(@alignCast(data));
+                    const allocator = self.allocator;
 
                     const args_len = if (@typeInfo(Args) == .@"struct" and @typeInfo(Args).@"struct".is_tuple) @typeInfo(Args).@"struct".fields.len else 1;
                     const call_variant = if (self.thread_safe_function_call_variant) 1 else 0;
 
-                    const argv = self.allocator.alloc(napi.napi_value, args_len + call_variant) catch @panic("OOM");
-                    defer self.allocator.free(argv);
+                    const argv = allocator.alloc(napi.napi_value, args_len + call_variant) catch @panic("OOM");
+                    defer allocator.free(argv);
                     @memset(argv, null);
 
                     const undefined_value = Undefined.New(Env.from_raw(inner_env));
@@ -71,6 +73,9 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
                             // if err, return immediately
                             var ret: napi.napi_value = undefined;
                             _ = napi.napi_call_function(inner_env, undefined_value.raw, js_callback, args_len + call_variant, argv.ptr, &ret);
+                            // Free the call data
+                            allocator.destroy(param);
+                            allocator.destroy(args);
                             return;
                         } else {
                             argv[0] = Null.New(Env.from_raw(inner_env)).raw;
@@ -80,19 +85,24 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
                     if (args.args) |actual_args| {
                         if (@typeInfo(Args) == .@"struct" and @typeInfo(Args).@"struct".is_tuple) {
                             inline for (@typeInfo(Args).@"struct".fields, 0..) |field, i| {
-                                argv[i + call_variant] = try Napi.to_napi_value(inner_env, @field(actual_args.*, field.name), null);
+                                argv[i + call_variant] = Napi.to_napi_value(inner_env, @field(actual_args.*, field.name), null) catch null;
                             }
                         } else {
-                            argv[call_variant] = try Napi.to_napi_value(inner_env, actual_args.*, null);
+                            argv[call_variant] = Napi.to_napi_value(inner_env, actual_args.*, null) catch null;
                         }
+                        // Free the args data
+                        allocator.destroy(actual_args);
                     }
 
                     var ret: napi.napi_value = undefined;
                     _ = napi.napi_call_function(inner_env, undefined_value.raw, js_callback, args_len + call_variant, argv.ptr, &ret);
+
+                    // Free the call data
+                    allocator.destroy(args);
                 }
             };
 
-            const allocator = std.heap.page_allocator;
+            const allocator = GlobalAllocator.globalAllocator();
             var self = allocator.create(Self) catch @panic("OOM");
 
             self.* = Self{ .env = env, .raw = raw, .allocator = allocator, .args = undefined, .return_type = undefined, .tsfn_raw = undefined };
