@@ -26,8 +26,3 @@ pub const global_manager = AllocatorManager.init();
 pub fn globalAllocator() std.mem.Allocator {
     return global_manager.get();
 }
-
-/// Set a custom global allocator
-pub fn setGlobalAllocator(new_allocator: std.mem.Allocator) void {
-    global_manager.set(new_allocator);
-}
