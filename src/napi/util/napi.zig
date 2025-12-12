@@ -7,12 +7,13 @@ const NapiError = @import("../wrapper/error.zig");
 const Function = @import("../value/function.zig").Function;
 const ThreadSafeFunction = @import("../wrapper/thread_safe_function.zig").ThreadSafeFunction;
 const class = @import("../wrapper/class.zig");
+const Buffer = @import("../wrapper/buffer.zig").Buffer;
 
 pub const Napi = struct {
     pub fn from_napi_value(env: napi.napi_env, raw: napi.napi_value, comptime T: type) T {
         const infos = @typeInfo(T);
         switch (T) {
-            NapiValue.BigInt, NapiValue.Number, NapiValue.String, NapiValue.Object, NapiValue.Promise, NapiValue.Array, NapiValue.Undefined, NapiValue.Null => {
+            NapiValue.BigInt, NapiValue.Number, NapiValue.String, NapiValue.Object, NapiValue.Promise, NapiValue.Array, NapiValue.Undefined, NapiValue.Null, Buffer => {
                 return T.from_raw(env, raw);
             },
             else => {
@@ -134,7 +135,7 @@ pub const Napi = struct {
         const infos = @typeInfo(value_type);
 
         switch (value_type) {
-            NapiValue.BigInt, NapiValue.Bool, NapiValue.Number, NapiValue.String, NapiValue.Object, NapiValue.Promise, NapiValue.Array, NapiValue.Undefined, NapiValue.Null => {
+            NapiValue.BigInt, NapiValue.Bool, NapiValue.Number, NapiValue.String, NapiValue.Object, NapiValue.Promise, NapiValue.Array, NapiValue.Undefined, NapiValue.Null, Buffer => {
                 return value.raw;
             },
             // If value is already a napi_value, return it directly
