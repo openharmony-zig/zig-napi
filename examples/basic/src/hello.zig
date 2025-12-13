@@ -10,6 +10,7 @@ const function = @import("function.zig");
 const thread_safe_function = @import("thread_safe_function.zig");
 const class = @import("class.zig");
 const log = @import("log/log.zig");
+const buffer = @import("buffer.zig");
 
 pub const test_i32 = number.test_i32;
 pub const test_f32 = number.test_f32;
@@ -45,6 +46,10 @@ pub const TestWithoutInitClass = class.TestWithoutInitClass;
 pub const TestFactoryClass = class.TestFactoryClass;
 
 pub const test_hilog = log.test_hilog;
+
+pub const create_buffer = buffer.create_buffer;
+pub const get_buffer = buffer.get_buffer;
+pub const get_buffer_as_string = buffer.get_buffer_as_string;
 
 comptime {
     napi.NODE_API_MODULE("hello", @This());

@@ -1,3 +1,5 @@
+import buffer from "@ohos.buffer";
+
 /**
  * Basic example module for zig-napi
  * OpenHarmony/HarmonyNext native module written in Zig
@@ -261,9 +263,9 @@ export declare function test_hilog(): void;
 export declare function create_buffer(): ArrayBuffer;
 
 /**
- * Gets the buffer length
+ * Gets the buffer as a string
  * @param buffer - The buffer
- * @returns The buffer length
+ * @returns The buffer as a string
  */
 export declare function get_buffer(buffer: ArrayBuffer): number;
 
