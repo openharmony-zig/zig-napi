@@ -15,6 +15,14 @@ pub const Buffer = struct {
         var data: ?*anyopaque = null;
         var len: usize = 0;
         _ = napi.napi_get_buffer_info(env, raw, &data, &len);
+        if (len == 0) {
+            return Buffer{
+                .env = env,
+                .raw = raw,
+                .data = &[_]u8{},
+                .len = 0,
+            };
+        }
         return Buffer{
             .env = env,
             .raw = raw,

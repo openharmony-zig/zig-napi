@@ -49,6 +49,7 @@ pub const test_hilog = log.test_hilog;
 
 pub const create_buffer = buffer.create_buffer;
 pub const get_buffer = buffer.get_buffer;
+pub const get_buffer_as_string = buffer.get_buffer_as_string;
 
 comptime {
     napi.NODE_API_MODULE("hello", @This());
