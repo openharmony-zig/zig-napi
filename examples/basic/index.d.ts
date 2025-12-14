@@ -273,3 +273,28 @@ export declare function get_buffer(buffer: ArrayBuffer): number;
  * @returns The buffer as a string
  */
 export declare function get_buffer_as_string(buffer: ArrayBuffer): string;
+
+// ============== ArrayBuffer Functions ==============
+
+/**
+ * Creates a new array buffer
+ * @param size - The size of the array buffer
+ * @returns The new array buffer
+ */
+export declare function create_arraybuffer(): ArrayBuffer;
+
+/**
+ * Gets the array buffer length
+ * @param arraybuffer - The array buffer
+ * @returns The array buffer length
+ */
+export declare function get_arraybuffer(arraybuffer: ArrayBuffer): number;
+
+/**
+ * Gets the array buffer as a string
+ * @param arraybuffer - The array buffer
+ * @returns The array buffer as a string
+ */
+export declare function get_arraybuffer_as_string(
+  arraybuffer: ArrayBuffer
+): string;

@@ -8,6 +8,7 @@ const err = @import("./napi/wrapper/error.zig");
 const thread_safe_function = @import("./napi/wrapper/thread_safe_function.zig");
 const class = @import("./napi/wrapper/class.zig");
 const buffer = @import("./napi/wrapper/buffer.zig");
+const arraybuffer = @import("./napi/wrapper/arraybuffer.zig");
 
 pub const napi_sys = @import("napi-sys");
 pub const Env = env.Env;
@@ -34,6 +35,7 @@ pub const ThreadSafeFunction = thread_safe_function.ThreadSafeFunction;
 pub const Class = class.Class;
 pub const ClassWithoutInit = class.ClassWithoutInit;
 pub const Buffer = buffer.Buffer;
+pub const ArrayBuffer = arraybuffer.ArrayBuffer;
 
 pub const NODE_API_MODULE = module.NODE_API_MODULE;
 pub const NODE_API_MODULE_WITH_INIT = module.NODE_API_MODULE_WITH_INIT;
