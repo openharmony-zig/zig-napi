@@ -120,6 +120,61 @@ pub const NativeAddonBuildOptionsWithModule = struct {
     win32_manifest: ?std.Build.LazyPath = null,
 };
 
+pub const TypeDefinitionBuildOptions = struct {
+    root_source_file: std.Build.LazyPath,
+    output: std.Build.LazyPath,
+    napi_module: *std.Build.Module,
+    // Optional text injected after the generated banner comments.
+    header: ?[]const u8 = null,
+};
+
+pub fn generateTypeDefinition(build: *std.Build, option: TypeDefinitionBuildOptions) !*std.Build.Step.Run {
+    const generator_root = build.createModule(.{
+        .root_source_file = option.napi_module.owner.path("src/build/napi-tsgen.zig"),
+        .target = build.graph.host,
+    });
+
+    const generator = build.addExecutable(.{
+        .name = "zig-napi-tsgen",
+        .root_module = generator_root,
+    });
+
+    const addon_root = build.createModule(.{
+        .root_source_file = option.root_source_file,
+        .target = build.graph.host,
+        .imports = &.{
+            .{
+                .name = "napi",
+                .module = option.napi_module,
+            },
+        },
+    });
+
+    const ndk_root = try resolveNdkPath(build);
+    if (ndk_root.len > 0) {
+        const include_path = try std.fs.path.join(build.allocator, &[_][]const u8{ ndk_root, "sysroot", "usr", "include" });
+        addon_root.addIncludePath(.{ .cwd_relative = include_path });
+
+        const platform_include_path = try std.fs.path.join(build.allocator, &[_][]const u8{
+            ndk_root,
+            "sysroot",
+            "usr",
+            "include",
+            "aarch64-linux-ohos",
+        });
+        addon_root.addIncludePath(.{ .cwd_relative = platform_include_path });
+    }
+
+    generator.root_module.addImport("addon_root", addon_root);
+    generator.root_module.addImport("napi", option.napi_module);
+
+    const run = build.addRunArtifact(generator);
+    run.addFileArg(option.output);
+    run.addFileArg(option.root_source_file);
+    run.addArg(option.header orelse "");
+    return run;
+}
+
 pub fn nativeAddonBuild(build: *std.Build, option: NativeAddonBuildOptionsWithModule) !NativeAddonBuildResult {
     const currentTarget = if (option.root_module_options.target) |target| target.result else build.graph.host.result;
 

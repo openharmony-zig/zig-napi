@@ -26,7 +26,8 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
     const class_name = comptime helper.shortTypeName(T);
 
     return struct {
-        const WrappedType = T;
+        pub const WrappedType = T;
+        pub const HasConstructorInit = HasInit;
         env: napi.napi_env,
         raw: napi.napi_value,
         const Self = @This();
