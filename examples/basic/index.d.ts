@@ -298,3 +298,54 @@ export declare function get_arraybuffer(arraybuffer: ArrayBuffer): number;
 export declare function get_arraybuffer_as_string(
   arraybuffer: ArrayBuffer
 ): string;
+
+// ============== TypedArray Functions ==============
+
+/**
+ * Creates a Uint8Array with 4 bytes: [1, 2, 3, 4]
+ * @returns The created typed array
+ */
+export declare function create_uint8_typedarray(): Uint8Array;
+
+/**
+ * Gets the length of a Uint8Array
+ * @param array - The typed array
+ * @returns The element count
+ */
+export declare function get_uint8_typedarray_length(array: Uint8Array): number;
+
+/**
+ * Sums all items in a Float32Array
+ * @param array - The typed array
+ * @returns The sum of all elements
+ */
+export declare function sum_float32_typedarray(array: Float32Array): number;
+
+// ============== DataView Functions ==============
+
+/**
+ * Creates a DataView with 4 bytes initialized to 0x78, 0x56, 0x34, 0x12
+ * @returns The created data view
+ */
+export declare function create_dataview(): DataView;
+
+/**
+ * Gets the byte length of a DataView
+ * @param view - The data view
+ * @returns The byte length
+ */
+export declare function get_dataview_length(view: DataView): number;
+
+/**
+ * Gets the first byte of a DataView
+ * @param view - The data view
+ * @returns The first byte, or 0 if empty
+ */
+export declare function get_dataview_first_byte(view: DataView): number;
+
+/**
+ * Reads the first 4 bytes of a DataView as a little-endian uint32
+ * @param view - The data view
+ * @returns The uint32 value
+ */
+export declare function get_dataview_uint32_le(view: DataView): number;

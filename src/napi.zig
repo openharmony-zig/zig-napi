@@ -9,6 +9,8 @@ const thread_safe_function = @import("./napi/wrapper/thread_safe_function.zig");
 const class = @import("./napi/wrapper/class.zig");
 const buffer = @import("./napi/wrapper/buffer.zig");
 const arraybuffer = @import("./napi/wrapper/arraybuffer.zig");
+const typedarray = @import("./napi/wrapper/typedarray.zig");
+const dataview = @import("./napi/wrapper/dataview.zig");
 
 pub const napi_sys = @import("napi-sys");
 pub const Env = env.Env;
@@ -36,6 +38,18 @@ pub const Class = class.Class;
 pub const ClassWithoutInit = class.ClassWithoutInit;
 pub const Buffer = buffer.Buffer;
 pub const ArrayBuffer = arraybuffer.ArrayBuffer;
+pub const TypedArray = typedarray.TypedArray;
+pub const Int8Array = typedarray.Int8Array;
+pub const Uint8Array = typedarray.Uint8Array;
+pub const Int16Array = typedarray.Int16Array;
+pub const Uint16Array = typedarray.Uint16Array;
+pub const Int32Array = typedarray.Int32Array;
+pub const Uint32Array = typedarray.Uint32Array;
+pub const Float32Array = typedarray.Float32Array;
+pub const Float64Array = typedarray.Float64Array;
+pub const BigInt64Array = typedarray.BigInt64Array;
+pub const BigUint64Array = typedarray.BigUint64Array;
+pub const DataView = dataview.DataView;
 
 pub const NODE_API_MODULE = module.NODE_API_MODULE;
 pub const NODE_API_MODULE_WITH_INIT = module.NODE_API_MODULE_WITH_INIT;
