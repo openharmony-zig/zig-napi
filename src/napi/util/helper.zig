@@ -92,6 +92,10 @@ pub fn isDataView(comptime T: type) bool {
     return @hasDecl(T, "is_napi_dataview");
 }
 
+pub fn isReference(comptime T: type) bool {
+    return @hasDecl(T, "is_napi_reference");
+}
+
 pub fn isArrayList(comptime T: type) bool {
     const info = @typeInfo(T);
     if (info != .@"struct") {

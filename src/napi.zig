@@ -11,6 +11,7 @@ const buffer = @import("./napi/wrapper/buffer.zig");
 const arraybuffer = @import("./napi/wrapper/arraybuffer.zig");
 const typedarray = @import("./napi/wrapper/typedarray.zig");
 const dataview = @import("./napi/wrapper/dataview.zig");
+const reference = @import("./napi/wrapper/reference.zig");
 
 pub const napi_sys = @import("napi-sys");
 pub const Env = env.Env;
@@ -50,6 +51,12 @@ pub const Float64Array = typedarray.Float64Array;
 pub const BigInt64Array = typedarray.BigInt64Array;
 pub const BigUint64Array = typedarray.BigUint64Array;
 pub const DataView = dataview.DataView;
+pub const Reference = reference.Reference;
+pub const Ref = reference.Reference;
+pub fn FunctionRef(comptime Args: type, comptime Return: type) type {
+    return reference.Reference(function.Function(Args, Return));
+}
+pub const ObjectRef = reference.Reference(value.Object);
 
 pub const NODE_API_MODULE = module.NODE_API_MODULE;
 pub const NODE_API_MODULE_WITH_INIT = module.NODE_API_MODULE_WITH_INIT;

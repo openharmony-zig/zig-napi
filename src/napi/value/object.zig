@@ -11,6 +11,7 @@ const String = @import("./string.zig").String;
 const helper = @import("../util/helper.zig");
 const Napi = @import("../util/napi.zig").Napi;
 const NapiError = @import("../wrapper/error.zig");
+const Reference = @import("../wrapper/reference.zig").Reference;
 
 pub const Object = struct {
     env: napi.napi_env,
@@ -157,5 +158,9 @@ pub const Object = struct {
             },
         }
         return result;
+    }
+
+    pub fn CreateRef(self: Object) !Reference(Object) {
+        return Reference(Object).New(Env.from_raw(self.env), self);
     }
 };

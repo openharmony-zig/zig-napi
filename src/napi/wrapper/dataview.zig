@@ -61,10 +61,6 @@ pub const DataView = struct {
         return DataView.from_raw(env.raw, raw);
     }
 
-    pub fn from_arraybuffer(env: Env, arraybuffer: ArrayBuffer, byte_offset: usize, byte_length: usize) !DataView {
-        return DataView.fromArrayBuffer(env, arraybuffer, byte_offset, byte_length);
-    }
-
     pub fn New(env: Env, byte_length: usize) !DataView {
         const arraybuffer = try ArrayBuffer.New(env, byte_length);
         return DataView.fromArrayBuffer(env, arraybuffer, 0, byte_length);
@@ -75,17 +71,9 @@ pub const DataView = struct {
         return DataView.fromArrayBuffer(env, arraybuffer, 0, data.len);
     }
 
-    pub fn copy_from(env: Env, data: []const u8) !DataView {
-        return DataView.copy(env, data);
-    }
-
     pub fn from(env: Env, data: []u8) !DataView {
         const arraybuffer = try ArrayBuffer.from(env, data);
         return DataView.fromArrayBuffer(env, arraybuffer, 0, data.len);
-    }
-
-    pub fn from_data(env: Env, data: []u8) !DataView {
-        return DataView.from(env, data);
     }
 
     pub fn asSlice(self: DataView) []u8 {

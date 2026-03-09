@@ -105,10 +105,6 @@ pub fn TypedArray(comptime T: type) type {
             return Self.from_raw(env.raw, raw);
         }
 
-        pub fn from_arraybuffer(env: Env, arraybuffer: ArrayBuffer, len: usize, byte_offset: usize) !Self {
-            return Self.fromArrayBuffer(env, arraybuffer, len, byte_offset);
-        }
-
         pub fn New(env: Env, len: usize) !Self {
             const arraybuffer = try ArrayBuffer.New(env, len * @sizeOf(T));
             return Self.fromArrayBuffer(env, arraybuffer, len, 0);
@@ -120,17 +116,9 @@ pub fn TypedArray(comptime T: type) type {
             return result;
         }
 
-        pub fn copy_from(env: Env, data: []const T) !Self {
-            return Self.copy(env, data);
-        }
-
         pub fn from(env: Env, data: []T) !Self {
             const arraybuffer = try ArrayBuffer.from(env, std.mem.sliceAsBytes(data));
             return Self.fromArrayBuffer(env, arraybuffer, data.len, 0);
-        }
-
-        pub fn from_data(env: Env, data: []T) !Self {
-            return Self.from(env, data);
         }
 
         pub fn asSlice(self: Self) []T {
