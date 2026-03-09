@@ -1,3 +1,4 @@
+const builtin = @import("builtin");
 const napi = @import("napi-sys").napi_sys;
 const Env = @import("../napi/env.zig").Env;
 const Object = @import("../napi/value.zig").Object;
@@ -95,8 +96,10 @@ pub fn NODE_API_MODULE_WITH_INIT(
     };
 
     comptime {
-        const init_array = [1]*const fn () callconv(.c) void{&ModuleImpl.module_init};
-        @export(&init_array, .{ .linkage = .strong, .name = "init_array", .section = ".init_array" });
+        if (builtin.target.abi.isOpenHarmony()) {
+            const init_array = [1]*const fn () callconv(.c) void{&ModuleImpl.module_init};
+            @export(&init_array, .{ .linkage = .strong, .name = "init_array", .section = ".init_array" });
+        }
     }
 }
 
