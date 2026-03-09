@@ -6,6 +6,7 @@ const Napi = @import("../util/napi.zig").Napi;
 const NapiError = @import("../wrapper/error.zig");
 const Undefined = @import("./undefined.zig").Undefined;
 const GlobalAllocator = @import("../util/allocator.zig");
+const Reference = @import("../wrapper/reference.zig").Reference;
 
 pub fn Function(comptime Args: type, comptime Return: type) type {
     const ArgsInfos = @typeInfo(Args);
@@ -134,6 +135,10 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
             }
 
             return Napi.from_napi_value(self.env, result, Return);
+        }
+
+        pub fn CreateRef(self: Self) !Reference(Self) {
+            return Reference(Self).New(Env.from_raw(self.env), self);
         }
     };
 }

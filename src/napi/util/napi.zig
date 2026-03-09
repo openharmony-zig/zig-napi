@@ -98,6 +98,9 @@ pub const Napi = struct {
                                 if (comptime helper.isDataView(T)) {
                                     return T.from_raw(env, raw);
                                 }
+                                if (comptime helper.isReference(T)) {
+                                    return T.from_napi_value(env, raw);
+                                }
 
                                 if (comptime helper.isTuple(T)) {
                                     return NapiValue.Array.from_napi_value(env, raw, T);
@@ -209,6 +212,9 @@ pub const Napi = struct {
                         }
                         if (comptime helper.isDataView(value_type)) {
                             return value.raw;
+                        }
+                        if (comptime helper.isReference(value_type)) {
+                            return try value.to_napi_value(env);
                         }
                         if (comptime helper.isTuple(value_type)) {
                             const array = try NapiValue.Array.New(Env.from_raw(env), value);

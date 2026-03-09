@@ -14,6 +14,7 @@ const buffer = @import("buffer.zig");
 const arraybuffer = @import("arraybuffer.zig");
 const typedarray = @import("typedarray.zig");
 const dataview = @import("dataview.zig");
+const reference = @import("reference.zig");
 
 pub const test_i32 = number.test_i32;
 pub const test_f32 = number.test_f32;
@@ -40,6 +41,7 @@ pub const return_nullable = object.return_nullable;
 pub const call_function = function.call_function;
 pub const basic_function = function.basic_function;
 pub const create_function = function.create_function;
+pub const call_function_with_reference = reference.call_function_with_reference;
 
 pub const call_thread_safe_function = thread_safe_function.call_thread_safe_function;
 

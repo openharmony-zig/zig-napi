@@ -190,6 +190,13 @@ export declare function basic_function(left: number, right: number): number;
  */
 export declare function create_function(): CallbackFunction;
 
+/**
+ * Creates a native reference to the callback, reads it back, and calls it with (1, 2)
+ * @param cb - A callback function that takes two numbers and returns a number
+ * @returns The result of calling cb(1, 2)
+ */
+export declare function call_function_with_reference(cb: CallbackFunction): number;
+
 // ============== Thread Safe Function ==============
 
 /**
