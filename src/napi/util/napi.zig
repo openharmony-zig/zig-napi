@@ -9,12 +9,13 @@ const ThreadSafeFunction = @import("../wrapper/thread_safe_function.zig").Thread
 const class = @import("../wrapper/class.zig");
 const Buffer = @import("../wrapper/buffer.zig").Buffer;
 const ArrayBuffer = @import("../wrapper/arraybuffer.zig").ArrayBuffer;
+const DataView = @import("../wrapper/dataview.zig").DataView;
 
 pub const Napi = struct {
     pub fn from_napi_value(env: napi.napi_env, raw: napi.napi_value, comptime T: type) T {
         const infos = @typeInfo(T);
         switch (T) {
-            NapiValue.BigInt, NapiValue.Number, NapiValue.String, NapiValue.Object, NapiValue.Promise, NapiValue.Array, NapiValue.Undefined, NapiValue.Null, Buffer, ArrayBuffer => {
+            NapiValue.BigInt, NapiValue.Number, NapiValue.String, NapiValue.Object, NapiValue.Promise, NapiValue.Array, NapiValue.Undefined, NapiValue.Null, Buffer, ArrayBuffer, DataView => {
                 return T.from_raw(env, raw);
             },
             else => {
@@ -91,6 +92,12 @@ pub const Napi = struct {
                                     }
                                     return Function(args_type, return_type).from_raw(env, raw);
                                 }
+                                if (comptime helper.isTypedArray(T)) {
+                                    return T.from_raw(env, raw);
+                                }
+                                if (comptime helper.isDataView(T)) {
+                                    return T.from_raw(env, raw);
+                                }
 
                                 if (comptime helper.isTuple(T)) {
                                     return NapiValue.Array.from_napi_value(env, raw, T);
@@ -136,7 +143,7 @@ pub const Napi = struct {
         const infos = @typeInfo(value_type);
 
         switch (value_type) {
-            NapiValue.BigInt, NapiValue.Bool, NapiValue.Number, NapiValue.String, NapiValue.Object, NapiValue.Promise, NapiValue.Array, NapiValue.Undefined, NapiValue.Null, Buffer, ArrayBuffer => {
+            NapiValue.BigInt, NapiValue.Bool, NapiValue.Number, NapiValue.String, NapiValue.Object, NapiValue.Promise, NapiValue.Array, NapiValue.Undefined, NapiValue.Null, Buffer, ArrayBuffer, DataView => {
                 return value.raw;
             },
             // If value is already a napi_value, return it directly
@@ -194,8 +201,14 @@ pub const Napi = struct {
                         if (comptime helper.isNapiFunction(value_type)) {
                             return value.raw;
                         }
+                        if (comptime helper.isTypedArray(value_type)) {
+                            return value.raw;
+                        }
                         if (comptime helper.isThreadSafeFunction(value_type)) {
                             @compileError("ThreadSafeFunction is not supported for to_napi_value");
+                        }
+                        if (comptime helper.isDataView(value_type)) {
+                            return value.raw;
                         }
                         if (comptime helper.isTuple(value_type)) {
                             const array = try NapiValue.Array.New(Env.from_raw(env), value);

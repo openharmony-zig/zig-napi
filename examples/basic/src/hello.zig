@@ -12,6 +12,8 @@ const class = @import("class.zig");
 const log = @import("log/log.zig");
 const buffer = @import("buffer.zig");
 const arraybuffer = @import("arraybuffer.zig");
+const typedarray = @import("typedarray.zig");
+const dataview = @import("dataview.zig");
 
 pub const test_i32 = number.test_i32;
 pub const test_f32 = number.test_f32;
@@ -55,6 +57,15 @@ pub const get_buffer_as_string = buffer.get_buffer_as_string;
 pub const create_arraybuffer = arraybuffer.create_arraybuffer;
 pub const get_arraybuffer = arraybuffer.get_arraybuffer;
 pub const get_arraybuffer_as_string = arraybuffer.get_arraybuffer_as_string;
+
+pub const create_uint8_typedarray = typedarray.create_uint8_typedarray;
+pub const get_uint8_typedarray_length = typedarray.get_uint8_typedarray_length;
+pub const sum_float32_typedarray = typedarray.sum_float32_typedarray;
+
+pub const create_dataview = dataview.create_dataview;
+pub const get_dataview_length = dataview.get_dataview_length;
+pub const get_dataview_first_byte = dataview.get_dataview_first_byte;
+pub const get_dataview_uint32_le = dataview.get_dataview_uint32_le;
 
 comptime {
     napi.NODE_API_MODULE("hello", @This());

@@ -84,6 +84,14 @@ pub fn isThreadSafeFunction(comptime T: type) bool {
     return false;
 }
 
+pub fn isTypedArray(comptime T: type) bool {
+    return @hasDecl(T, "is_napi_typedarray");
+}
+
+pub fn isDataView(comptime T: type) bool {
+    return @hasDecl(T, "is_napi_dataview");
+}
+
 pub fn isArrayList(comptime T: type) bool {
     const info = @typeInfo(T);
     if (info != .@"struct") {
