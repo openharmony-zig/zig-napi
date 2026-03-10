@@ -140,6 +140,11 @@ fn isDataViewType(comptime T: type) bool {
     return @hasDecl(T, "is_napi_dataview");
 }
 
+fn isStringEnumType(comptime T: type) bool {
+    if (@typeInfo(T) != .@"enum") return false;
+    return @hasDecl(T, "napi_string_enum") and @TypeOf(@field(T, "napi_string_enum")) == bool and @field(T, "napi_string_enum");
+}
+
 fn isArrayList(comptime T: type) bool {
     const info = @typeInfo(T);
     if (info != .@"struct") return false;
@@ -1003,6 +1008,9 @@ fn emitType(state: *State, comptime T: type) ![]const u8 {
             try emitEnumDecl(state, T);
             return shortTypeName(T);
         },
+        .@"union" => {
+            return try emitUnionType(state, T);
+        },
         else => {},
     }
 
@@ -1016,7 +1024,11 @@ fn emitEnumDecl(state: *State, comptime T: type) !void {
 
     try appendFmt(&state.declarations, "export declare const enum {s} {{\n", .{name});
     inline for (@typeInfo(T).@"enum".fields) |field| {
-        try appendFmt(&state.declarations, "  {s} = '{s}',\n", .{ field.name, field.name });
+        if (comptime isStringEnumType(T)) {
+            try appendFmt(&state.declarations, "  {s} = '{s}',\n", .{ field.name, field.name });
+        } else {
+            try appendFmt(&state.declarations, "  {s} = {d},\n", .{ field.name, field.value });
+        }
     }
     try append(&state.declarations, "}\n\n");
 }
@@ -1041,6 +1053,21 @@ fn emitInterfaceDecl(state: *State, comptime T: type) !void {
         }
     }
     try append(&state.declarations, "}\n\n");
+}
+
+fn emitUnionType(state: *State, comptime T: type) ![]const u8 {
+    const info = @typeInfo(T).@"union";
+    if (info.fields.len == 0) return "never";
+
+    var buf = StringBuilder.init(state.allocator);
+    defer buf.deinit();
+
+    inline for (info.fields, 0..) |field, idx| {
+        if (idx > 0) try append(&buf, " | ");
+        try append(&buf, try emitType(state, field.type));
+    }
+
+    return try buf.toOwnedSlice();
 }
 
 fn collectFunctionInfo(comptime T: type) struct {

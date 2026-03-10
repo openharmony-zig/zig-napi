@@ -17,32 +17,36 @@ pub const Number = struct {
     }
 
     pub fn from_napi_value(env: napi.napi_env, raw: napi.napi_value, comptime T: type) T {
-        switch (T) {
-            f16, f32, f64 => {
-                var result: T = undefined;
+        switch (@typeInfo(T)) {
+            .float => {
                 var temp: f64 = undefined;
                 _ = napi.napi_get_value_double(env, raw, &temp);
-                result = @floatCast(temp);
-                return result;
+                return @floatCast(temp);
             },
-            isize, i8, i16, i32 => {
-                var result: T = undefined;
-                var temp: i32 = undefined;
-                _ = napi.napi_get_value_int32(env, raw, &temp);
-                result = @intCast(temp);
-                return result;
-            },
-            usize, u8, u16, u32 => {
-                var result: T = undefined;
-                var temp: u32 = undefined;
-                _ = napi.napi_get_value_uint32(env, raw, &temp);
-                result = @intCast(temp);
-                return result;
-            },
+            .int => |int| {
+                if (int.signedness == .signed) {
+                    if (int.bits <= 32) {
+                        var temp: i32 = undefined;
+                        _ = napi.napi_get_value_int32(env, raw, &temp);
+                        return @intCast(temp);
+                    }
 
-            else => {
-                @compileError("Unsupported type: " ++ @typeName(T));
+                    var temp: i64 = undefined;
+                    _ = napi.napi_get_value_int64(env, raw, &temp);
+                    return @intCast(temp);
+                }
+
+                if (int.bits <= 32) {
+                    var temp: u32 = undefined;
+                    _ = napi.napi_get_value_uint32(env, raw, &temp);
+                    return @intCast(temp);
+                }
+
+                var temp: i64 = undefined;
+                _ = napi.napi_get_value_int64(env, raw, &temp);
+                return @intCast(temp);
             },
+            else => @compileError("Unsupported type: " ++ @typeName(T)),
         }
     }
 

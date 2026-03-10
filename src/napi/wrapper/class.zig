@@ -44,7 +44,17 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
 
                 var tuple_args: std.meta.ArgsTuple(init_fn_type) = undefined;
                 inline for (init_fn_info.@"fn".params, 0..) |arg, i| {
+                    if (comptime @typeInfo(arg.type.?) == .@"union") {
+                        NapiError.clearLastError();
+                    }
                     tuple_args[i] = Napi.from_napi_value(infos.env, infos.args[i].raw, arg.type.?);
+                    if (comptime @typeInfo(arg.type.?) == .@"union") {
+                        if (NapiError.last_error) |last_err| {
+                            last_err.throwInto(napi_env.Env.from_raw(env));
+                            GlobalAllocator.globalAllocator().destroy(data);
+                            return null;
+                        }
+                    }
                 }
 
                 if (@typeInfo(init_fn_info.@"fn".return_type.?) == .error_union) {
@@ -62,7 +72,17 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                 data.* = std.mem.zeroes(T);
                 if (comptime HasInit) {
                     inline for (fields, 0..) |field, i| {
+                        if (comptime @typeInfo(field.type) == .@"union") {
+                            NapiError.clearLastError();
+                        }
                         @field(data.*, field.name) = Napi.from_napi_value(env, infos.args[i].raw, field.type);
+                        if (comptime @typeInfo(field.type) == .@"union") {
+                            if (NapiError.last_error) |last_err| {
+                                last_err.throwInto(napi_env.Env.from_raw(env));
+                                GlobalAllocator.globalAllocator().destroy(data);
+                                return null;
+                            }
+                        }
                     }
                 }
             }
@@ -100,7 +120,16 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                         var tuple_args: std.meta.ArgsTuple(factory_fn_type) = undefined;
                         inline for (params, 0..) |param, i| {
                             if (i < infos.args.len) {
+                                if (comptime @typeInfo(param.type.?) == .@"union") {
+                                    NapiError.clearLastError();
+                                }
                                 tuple_args[i] = Napi.from_napi_value(infos.env, infos.args[i].raw, param.type.?);
+                                if (comptime @typeInfo(param.type.?) == .@"union") {
+                                    if (NapiError.last_error) |last_err| {
+                                        last_err.throwInto(napi_env.Env.from_raw(env));
+                                        return null;
+                                    }
+                                }
                             }
                         }
                         if (@typeInfo(factory_fn_info.@"fn".return_type.?) == .error_union) {
@@ -212,7 +241,16 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                         const instance: *T = @ptrCast(@alignCast(data.?));
                         const args = cb_info.args;
                         if (args.len > 0) {
+                            if (comptime @typeInfo(field.type) == .@"union") {
+                                NapiError.clearLastError();
+                            }
                             const new_value = Napi.from_napi_value(setter_env, args[0].raw, field.type);
+                            if (comptime @typeInfo(field.type) == .@"union") {
+                                if (NapiError.last_error) |last_err| {
+                                    last_err.throwInto(napi_env.Env.from_raw(setter_env));
+                                    return null;
+                                }
+                            }
                             @field(instance.*, field.name) = new_value;
                         }
                         return null;
@@ -327,7 +365,16 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                                     const args_offset = if (is_instance_method) 1 else 0;
                                     // inject args
                                     inline for (method_info.@"fn".params[args_offset..], args_offset..) |param, i| {
+                                        if (comptime @typeInfo(param.type.?) == .@"union") {
+                                            NapiError.clearLastError();
+                                        }
                                         tuple_args[i] = Napi.from_napi_value(method_env, cb_info.args[i - args_offset].raw, param.type.?);
+                                        if (comptime @typeInfo(param.type.?) == .@"union") {
+                                            if (NapiError.last_error) |last_err| {
+                                                last_err.throwInto(napi_env.Env.from_raw(method_env));
+                                                return null;
+                                            }
+                                        }
                                     }
                                     const result = @call(.auto, method, tuple_args);
                                     return Napi.to_napi_value(method_env, result, fn_name) catch null;

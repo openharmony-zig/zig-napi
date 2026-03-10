@@ -57,7 +57,16 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                     }
 
                     inline for (params[env_index..], env_index..) |param_index, i| {
+                        if (comptime @typeInfo(param_index.type.?) == .@"union") {
+                            NapiError.clearLastError();
+                        }
                         napi_params[i] = Napi.from_napi_value(inner_env, args_raw[i - env_index], param_index.type.?);
+                        if (comptime @typeInfo(param_index.type.?) == .@"union") {
+                            if (NapiError.last_error) |last_err| {
+                                last_err.throwInto(Env.from_raw(inner_env));
+                                return undefined_value.raw;
+                            }
+                        }
                     }
 
                     const return_info = infos.@"fn".return_type.?;
@@ -134,6 +143,14 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                 return NapiError.Error.fromStatus(NapiError.Status.New(status));
             }
 
+            if (comptime @typeInfo(Return) == .@"union") {
+                NapiError.clearLastError();
+                const converted = Napi.from_napi_value(self.env, result, Return);
+                if (NapiError.last_error) |_| {
+                    return error.GenericFailure;
+                }
+                return converted;
+            }
             return Napi.from_napi_value(self.env, result, Return);
         }
 

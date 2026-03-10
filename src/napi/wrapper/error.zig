@@ -9,6 +9,11 @@ pub const Status = @import("status.zig").Status;
 pub threadlocal var last_error: ?Error = null;
 pub threadlocal var last_error_status: ?Status = null;
 
+pub fn clearLastError() void {
+    last_error = null;
+    last_error_status = null;
+}
+
 pub const ErrorStatus = error{
     InvalidArg,
     ObjectExpected,
