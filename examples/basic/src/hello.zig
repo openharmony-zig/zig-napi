@@ -15,6 +15,8 @@ const arraybuffer = @import("arraybuffer.zig");
 const typedarray = @import("typedarray.zig");
 const dataview = @import("dataview.zig");
 const reference = @import("reference.zig");
+const union_value = @import("union.zig");
+const enum_value = @import("enum.zig");
 
 pub const test_i32 = number.test_i32;
 pub const test_f32 = number.test_f32;
@@ -68,6 +70,35 @@ pub const create_dataview = dataview.create_dataview;
 pub const get_dataview_length = dataview.get_dataview_length;
 pub const get_dataview_first_byte = dataview.get_dataview_first_byte;
 pub const get_dataview_uint32_le = dataview.get_dataview_uint32_le;
+
+pub const union_identity = union_value.union_identity;
+pub const make_union = union_value.make_union;
+pub const union_kind = union_value.union_kind;
+pub const object_or_text_identity = union_value.object_or_text_identity;
+pub const make_object_or_text = union_value.make_object_or_text;
+pub const object_or_array_identity = union_value.object_or_array_identity;
+pub const tuple_or_text_identity = union_value.tuple_or_text_identity;
+pub const flip_flag_or_increment = union_value.flip_flag_or_increment;
+pub const color_or_text_identity = union_value.color_or_text_identity;
+pub const favorite_color_or_text = union_value.favorite_color_or_text;
+pub const maybe_text_or_count_identity = union_value.maybe_text_or_count_identity;
+pub const make_maybe_text_or_count = union_value.make_maybe_text_or_count;
+pub const buffer_or_text_identity = union_value.buffer_or_text_identity;
+pub const make_buffer_or_text = union_value.make_buffer_or_text;
+pub const arraybuffer_or_array_identity = union_value.arraybuffer_or_array_identity;
+pub const make_arraybuffer_or_array = union_value.make_arraybuffer_or_array;
+pub const payload_or_color_identity = union_value.payload_or_color_identity;
+pub const make_payload_or_color = union_value.make_payload_or_color;
+pub const payload_or_string_color_identity = union_value.payload_or_string_color_identity;
+pub const make_payload_or_string_color = union_value.make_payload_or_string_color;
+
+pub const Color = enum_value.Color;
+pub const StringColor = enum_value.StringColor;
+pub const enum_identity = enum_value.enum_identity;
+pub const favorite_color = enum_value.favorite_color;
+pub const is_primary = enum_value.is_primary;
+pub const string_enum_identity = enum_value.string_enum_identity;
+pub const favorite_string_color = enum_value.favorite_string_color;
 
 comptime {
     napi.NODE_API_MODULE("hello", @This());

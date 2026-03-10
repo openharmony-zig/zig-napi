@@ -45,6 +45,23 @@ export declare class TestFactoryClass {
   format(): string
 }
 
+export interface MessagePayload {
+  title: string
+  count: number
+}
+
+export declare const enum Color {
+  Red = 1,
+  Green = 2,
+  Blue = 4,
+}
+
+export declare const enum StringColor {
+  Red = 'Red',
+  Green = 'Green',
+  Blue = 'Blue',
+}
+
 
 export declare function test_i32(left: number, right: number): number
 export declare function test_f32(left: number, right: number): number
@@ -81,3 +98,28 @@ export declare function create_dataview(): DataView
 export declare function get_dataview_length(view: DataView): number
 export declare function get_dataview_first_byte(view: DataView): number
 export declare function get_dataview_uint32_le(view: DataView): number
+export declare function union_identity(value: number | string): number | string
+export declare function make_union(is_number: boolean): number | string
+export declare function union_kind(value: number | string): string
+export declare function object_or_text_identity(value: MessagePayload | string): MessagePayload | string
+export declare function make_object_or_text(as_object: boolean): MessagePayload | string
+export declare function object_or_array_identity(value: MessagePayload | Array<number>): MessagePayload | Array<number>
+export declare function tuple_or_text_identity(value: [number, boolean, string] | string): [number, boolean, string] | string
+export declare function flip_flag_or_increment(value: boolean | number): boolean | number
+export declare function color_or_text_identity(value: Color | string): Color | string
+export declare function favorite_color_or_text(use_color: boolean): Color | string
+export declare function maybe_text_or_count_identity(value: string | undefined | null | number): string | undefined | null | number
+export declare function make_maybe_text_or_count(as_text: boolean): string | undefined | null | number
+export declare function buffer_or_text_identity(value: Buffer | string): Buffer | string
+export declare function make_buffer_or_text(use_buffer: boolean): Buffer | string
+export declare function arraybuffer_or_array_identity(value: ArrayBuffer | Array<number>): ArrayBuffer | Array<number>
+export declare function make_arraybuffer_or_array(use_arraybuffer: boolean): ArrayBuffer | Array<number>
+export declare function payload_or_color_identity(value: MessagePayload | Color): MessagePayload | Color
+export declare function make_payload_or_color(use_payload: boolean): MessagePayload | Color
+export declare function payload_or_string_color_identity(value: MessagePayload | StringColor): MessagePayload | StringColor
+export declare function make_payload_or_string_color(use_payload: boolean): MessagePayload | StringColor
+export declare function enum_identity(color: Color): Color
+export declare function favorite_color(): Color
+export declare function is_primary(color: Color): boolean
+export declare function string_enum_identity(color: StringColor): StringColor
+export declare function favorite_string_color(): StringColor
