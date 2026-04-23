@@ -24,6 +24,8 @@ jobs:
       - name: Setup Zig for OpenHarmony
         uses: openharmony-zig/setup-zig-ohos@v0.1.0
         id: setup-zig
+        with:
+          tag: '0.16.0'
 
       - name: Build
         run: |

@@ -261,11 +261,13 @@ const ParsedSourceParams = struct {
 
 const SourceResolver = struct {
     allocator: std.mem.Allocator,
+    io: std.Io,
     root_source_path: []const u8,
 
-    fn init(allocator: std.mem.Allocator, root_source_path: []const u8) SourceResolver {
+    fn init(allocator: std.mem.Allocator, io: std.Io, root_source_path: []const u8) SourceResolver {
         return .{
             .allocator = allocator,
+            .io = io,
             .root_source_path = root_source_path,
         };
     }
@@ -515,10 +517,10 @@ const SourceResolver = struct {
         if (param.len == 0 or std.mem.eql(u8, param, "...")) return;
 
         if (std.mem.startsWith(u8, param, "comptime ")) {
-            param = std.mem.trimLeft(u8, param["comptime ".len..], " \t");
+            param = std.mem.trimStart(u8, param["comptime ".len..], " \t");
         }
         if (std.mem.startsWith(u8, param, "noalias ")) {
-            param = std.mem.trimLeft(u8, param["noalias ".len..], " \t");
+            param = std.mem.trimStart(u8, param["noalias ".len..], " \t");
         }
 
         const colon = std.mem.indexOfScalar(u8, param, ':') orelse return;
@@ -538,10 +540,10 @@ const SourceResolver = struct {
         if (std.mem.eql(u8, param, "...")) return;
 
         if (std.mem.startsWith(u8, param, "comptime ")) {
-            param = std.mem.trimLeft(u8, param["comptime ".len..], " \t");
+            param = std.mem.trimStart(u8, param["comptime ".len..], " \t");
         }
         if (std.mem.startsWith(u8, param, "noalias ")) {
-            param = std.mem.trimLeft(u8, param["noalias ".len..], " \t");
+            param = std.mem.trimStart(u8, param["noalias ".len..], " \t");
         }
 
         const colon = std.mem.indexOfScalar(u8, param, ':') orelse return;
@@ -551,7 +553,7 @@ const SourceResolver = struct {
     }
 
     fn readFile(self: *SourceResolver, file_path: []const u8) ![]const u8 {
-        return try std.fs.cwd().readFileAlloc(file_path, self.allocator, .unlimited);
+        return try std.Io.Dir.cwd().readFileAlloc(self.io, file_path, self.allocator, .limited(std.math.maxInt(usize)));
     }
 
     fn resolveImportPath(self: *SourceResolver, file_path: []const u8, alias: []const u8) !?[]const u8 {
@@ -608,7 +610,7 @@ fn trimAfterBalancedCall(text: []const u8) ?[]const u8 {
             ')' => {
                 depth -= 1;
                 if (depth == 0) {
-                    return std.mem.trimLeft(u8, text[i + 1 ..], " \t\r\n");
+                    return std.mem.trimStart(u8, text[i + 1 ..], " \t\r\n");
                 }
             },
             else => {},
@@ -640,7 +642,7 @@ fn matchConstAssignment(line: []const u8, symbol: []const u8) ?[]const u8 {
     if (!std.mem.eql(u8, lhs, symbol)) return null;
 
     const rhs_full = std.mem.trim(u8, rest[eq_index + 1 ..], " \t");
-    return std.mem.trimRight(u8, rhs_full, ";");
+    return std.mem.trimEnd(u8, rhs_full, ";");
 }
 
 fn tryMatchConstPrefix(line: []const u8) ?usize {
@@ -666,7 +668,7 @@ const ObjectSetCall = struct {
 fn matchObjectSetCall(line: []const u8, object_name: []const u8) ?ObjectSetCall {
     var rest = std.mem.trim(u8, line, " \t\r\n");
     if (std.mem.startsWith(u8, rest, "try ")) {
-        rest = std.mem.trimLeft(u8, rest["try ".len..], " \t");
+        rest = std.mem.trimStart(u8, rest["try ".len..], " \t");
     }
 
     if (!std.mem.startsWith(u8, rest, object_name)) return null;
@@ -677,9 +679,9 @@ fn matchObjectSetCall(line: []const u8, object_name: []const u8) ?ObjectSetCall 
     const name_end = std.mem.indexOfScalar(u8, rest, '"') orelse return null;
     const name = rest[0..name_end];
 
-    rest = std.mem.trimLeft(u8, rest[name_end + 1 ..], " \t");
+    rest = std.mem.trimStart(u8, rest[name_end + 1 ..], " \t");
     if (rest.len == 0 or rest[0] != ',') return null;
-    rest = std.mem.trimLeft(u8, rest[1..], " \t");
+    rest = std.mem.trimStart(u8, rest[1..], " \t");
 
     const call_end = std.mem.lastIndexOfScalar(u8, rest, ')') orelse return null;
     const value_expr = std.mem.trim(u8, rest[0..call_end], " \t");
@@ -1361,7 +1363,7 @@ fn isSourceNumericType(type_expr: []const u8) bool {
 fn trimConstType(type_expr: []const u8) []const u8 {
     const trimmed = std.mem.trim(u8, type_expr, " \t\r\n");
     if (std.mem.startsWith(u8, trimmed, "const ")) {
-        return std.mem.trimLeft(u8, trimmed["const ".len..], " \t");
+        return std.mem.trimStart(u8, trimmed["const ".len..], " \t");
     }
     return trimmed;
 }
@@ -1684,8 +1686,8 @@ fn appendHeader(writer: *StringBuilder, header: []const u8) !void {
     try append(writer, "\n");
 }
 
-fn generate(allocator: std.mem.Allocator, root_source_path: []const u8, header: []const u8) ![]u8 {
-    var source = SourceResolver.init(allocator, root_source_path);
+fn generate(allocator: std.mem.Allocator, io: std.Io, root_source_path: []const u8, header: []const u8) ![]u8 {
+    var source = SourceResolver.init(allocator, io, root_source_path);
     var state = State.init(allocator, &source);
     defer state.deinit();
 
@@ -1738,21 +1740,21 @@ fn generate(allocator: std.mem.Allocator, root_source_path: []const u8, header: 
     return try output.toOwnedSlice();
 }
 
-pub fn main() !void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
+    const allocator = init.arena.allocator();
+    const args = try init.minimal.args.toSlice(allocator);
 
-    var args = try std.process.argsWithAllocator(allocator);
-    defer args.deinit();
+    if (args.len < 3) return error.InvalidArgument;
 
-    _ = args.next();
-    const output_path = args.next() orelse return error.InvalidArgument;
-    const root_source_path = args.next() orelse return error.InvalidArgument;
-    const header = args.next() orelse "";
+    const output_path = args[1];
+    const root_source_path = args[2];
+    const header = if (args.len > 3) args[3] else "";
 
-    const content = try generate(allocator, root_source_path, header);
-    const file = try std.fs.cwd().createFile(output_path, .{ .truncate = true });
-    defer file.close();
-    try file.writeAll(content);
+    const content = try generate(allocator, io, root_source_path, header);
+    try std.Io.Dir.cwd().writeFile(io, .{
+        .sub_path = output_path,
+        .data = content,
+        .flags = .{ .truncate = true },
+    });
 }
