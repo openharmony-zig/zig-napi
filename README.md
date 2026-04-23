@@ -17,8 +17,9 @@ We recommend you use ZON(Zig Package Manager) to install it.
 .{
     .name = "appname",
     .version = "0.0.0",
+    .minimum_zig_version = "0.16.0",
     .dependencies = .{
-        .network = .{
+        .@"zig-napi" = .{
             .url = "https://github.com/openharmony-zig/zig-addon/archive/refs/tags/<GIT_TAG>.tar.gz",
             .hash = "HASH_GOES_HERE",
         },
@@ -43,9 +44,11 @@ pub fn build(b: *std.Build) !void {
 
     const result = try napi_build.nativeAddonBuild(b, .{
         .name = "hello",
-        .root_source_file = b.path("./src/hello.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module_options = .{
+            .root_source_file = b.path("./src/hello.zig"),
+            .target = target,
+            .optimize = optimize,
+        },
     });
 
     if (result.arm64) |arm64| {

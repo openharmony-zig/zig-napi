@@ -1,12 +1,7 @@
 const std = @import("std");
 
-fn getEnvVarOptional(allocator: std.mem.Allocator, name: []const u8) !?[]const u8 {
-    return std.process.getEnvVarOwned(allocator, name) catch |err| {
-        if (err == error.EnvironmentVariableNotFound) {
-            return null;
-        }
-        return err;
-    };
+fn getEnvVarOptional(build: *std.Build, name: []const u8) ?[]const u8 {
+    return build.graph.environ_map.get(name);
 }
 
 pub fn cloneLibraryOptions(build: *std.Build, option: NativeAddonBuildOptionsWithModule, target: std.Build.ResolvedTarget) std.Build.LibraryOptions {
@@ -49,20 +44,13 @@ pub fn cloneLibraryOptions(build: *std.Build, option: NativeAddonBuildOptionsWit
 }
 
 pub fn resolveNdkPath(build: *std.Build) ![]const u8 {
-    const allocator = build.allocator;
-
-    var ndkRoot: ?[]const u8 = null;
-
-    const home = try getEnvVarOptional(allocator, "OHOS_NDK_HOME");
-    if (home) |v| {
-        ndkRoot = try std.fs.path.join(allocator, &[_][]const u8{ v, "native" });
-    } else {
-        const ohos_sdk_native = try getEnvVarOptional(allocator, "ohos_sdk_native");
-        if (ohos_sdk_native) |v| {
-            ndkRoot = v;
-        }
+    if (getEnvVarOptional(build, "OHOS_NDK_HOME")) |home| {
+        return build.pathJoin(&.{ home, "native" });
     }
-    return ndkRoot orelse "";
+    if (getEnvVarOptional(build, "ohos_sdk_native")) |native| {
+        return native;
+    }
+    return "";
 }
 
 const targets: []const std.Target.Query = &.{

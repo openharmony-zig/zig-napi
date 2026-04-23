@@ -185,24 +185,13 @@ pub fn collectFunctionArgs(comptime functions: anytype) type {
 
     const args_len = infos.@"fn".params.len;
 
-    var fields: [args_len]std.builtin.Type.StructField = undefined;
+    var field_types: [args_len]type = undefined;
 
     inline for (0..args_len) |i| {
-        fields[i] = std.builtin.Type.StructField{
-            .name = std.fmt.comptimePrint("{d}", .{i}),
-            .type = infos.@"fn".params[i].type.?,
-            .default_value_ptr = null,
-            .is_comptime = false,
-            .alignment = @alignOf(infos.@"fn".params[i].type.?),
-        };
+        field_types[i] = infos.@"fn".params[i].type.?;
     }
 
-    return @Type(std.builtin.Type{ .@"struct" = std.builtin.Type.Struct{
-        .layout = .auto,
-        .fields = &fields,
-        .decls = &[_]std.builtin.Type.Declaration{},
-        .is_tuple = true,
-    } });
+    return std.meta.Tuple(&field_types);
 }
 
 pub fn shortTypeName(comptime T: type) []const u8 {
