@@ -10,7 +10,7 @@ const GlobalAllocator = @import("./util/allocator.zig");
 const AbortSignal = @import("./abort_signal.zig").AbortSignal;
 const AbortRegistration = @import("./abort_signal.zig").AbortRegistration;
 
-var threaded_runtime_mutex: std.Thread.Mutex = .{};
+var threaded_runtime_mutex: std.atomic.Mutex = .unlocked;
 var threaded_runtime_initialized = false;
 var threaded_runtime: std.Io.Threaded = undefined;
 
@@ -69,7 +69,9 @@ fn singleIo() std.Io {
 }
 
 fn threadedIo() std.Io {
-    threaded_runtime_mutex.lock();
+    while (!threaded_runtime_mutex.tryLock()) {
+        std.Thread.yield() catch {};
+    }
     defer threaded_runtime_mutex.unlock();
 
     if (!threaded_runtime_initialized) {
@@ -132,9 +134,12 @@ pub fn mapAnyError(err: anyerror) NapiError.Error {
     if (NapiError.last_error) |last_error| return last_error;
 
     return switch (err) {
-        error.Canceled, error.Cancelled => NapiError.Error.withReason("AbortError"),
-        error.Closing => NapiError.Error.withStatus("Closing"),
-        else => NapiError.Error.withStatus(@errorName(err)),
+        error.Canceled, error.Cancelled => NapiError.Error.withReason(@as([]const u8, "AbortError")),
+        error.Closing => NapiError.Error.withStatus(@as([]const u8, "Closing")),
+        else => |actual_err| blk: {
+            const name = @errorName(actual_err);
+            break :blk NapiError.Error.withStatus(name[0..name.len]);
+        },
     };
 }
 
@@ -289,14 +294,14 @@ fn AsyncTaskDescriptorImpl(
         const Self = @This();
 
         fn schedule(base: *AsyncTaskDescriptorBase, env_raw: napi.napi_env, listener: ?napi.napi_value, signal: ?AbortSignal) !Promise {
-            const self: *Self = @fieldParentPtr("base", base);
+            const self: *Self = @alignCast(@fieldParentPtr("base", base));
             const operation = try AsyncTaskOperation(Input, Result, Event, runtime, run_fn).create(Env.from_raw(env_raw), self.input, listener, signal);
             defer base.destroy_fn(base);
             return try operation.submit();
         }
 
         fn destroy(base: *AsyncTaskDescriptorBase) void {
-            const self: *Self = @fieldParentPtr("base", base);
+            const self: *Self = @alignCast(@fieldParentPtr("base", base));
             self.base.allocator.destroy(self);
         }
     };
@@ -322,8 +327,8 @@ fn AsyncTaskOperation(
         controller_thread: ?std.Thread = null,
         future: ?std.Io.Future(void) = null,
         tsfn_raw: napi.napi_threadsafe_function = null,
-        state_mutex: std.Thread.Mutex = .{},
-        state_cond: std.Thread.Condition = .{},
+        state_mutex: std.Io.Mutex = .init,
+        state_cond: std.Io.Condition = .init,
         task_done: bool = false,
         cancel_requested: bool = false,
         cancel_dispatched: bool = false,
@@ -455,27 +460,30 @@ fn AsyncTaskOperation(
         }
 
         fn requestAbort(self: *Self) void {
+            const io = threadedIo();
             self.cancel_token.cancel();
-            self.state_mutex.lock();
-            defer self.state_mutex.unlock();
+            self.state_mutex.lockUncancelable(io);
+            defer self.state_mutex.unlock(io);
             if (self.task_done) return;
             self.cancel_requested = true;
-            self.state_cond.signal();
+            self.state_cond.signal(io);
         }
 
         fn markTaskDone(self: *Self) void {
-            self.state_mutex.lock();
-            defer self.state_mutex.unlock();
+            const io = threadedIo();
+            self.state_mutex.lockUncancelable(io);
+            defer self.state_mutex.unlock(io);
             self.task_done = true;
-            self.state_cond.signal();
+            self.state_cond.signal(io);
         }
 
         fn waitForTaskDoneOrAbort(self: *Self) bool {
-            self.state_mutex.lock();
-            defer self.state_mutex.unlock();
+            const io = threadedIo();
+            self.state_mutex.lockUncancelable(io);
+            defer self.state_mutex.unlock(io);
 
             while (!self.task_done and !self.cancel_requested) {
-                self.state_cond.wait(&self.state_mutex);
+                self.state_cond.waitUncancelable(io, &self.state_mutex);
             }
             return self.cancel_requested and !self.task_done;
         }
