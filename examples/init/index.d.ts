@@ -7,7 +7,7 @@ export declare function add(left: number, right: number): number
 export declare function hello(name: string): string
 export declare const text: string
 export declare function fib(n: number): void
-export declare function fib_async(n: number): Promise<void>
+export declare function fib_async(n: number): Promise<number>
 export declare function get_and_return_array(array: Array<number>): Array<number>
 export declare function get_named_array(array: [number, boolean, string]): [number, boolean, string]
 export declare function get_arraylist(array: Array<number>): Array<number>

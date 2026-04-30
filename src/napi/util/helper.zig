@@ -84,6 +84,22 @@ pub fn isThreadSafeFunction(comptime T: type) bool {
     return false;
 }
 
+pub fn isAsyncDescriptor(comptime T: type) bool {
+    switch (@typeInfo(T)) {
+        .@"struct", .@"enum", .@"union", .@"opaque" => {},
+        else => return false,
+    }
+    return @hasDecl(T, "is_napi_async_descriptor");
+}
+
+pub fn isAbortSignal(comptime T: type) bool {
+    switch (@typeInfo(T)) {
+        .@"struct", .@"enum", .@"union", .@"opaque" => {},
+        else => return false,
+    }
+    return @hasDecl(T, "is_napi_abort_signal");
+}
+
 pub fn isTypedArray(comptime T: type) bool {
     return @hasDecl(T, "is_napi_typedarray");
 }

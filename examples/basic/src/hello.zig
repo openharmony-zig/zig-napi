@@ -4,6 +4,7 @@ const number = @import("number.zig");
 const string = @import("string.zig");
 const err = @import("err.zig");
 const worker = @import("worker.zig");
+const async_examples = @import("async.zig");
 const array = @import("array.zig");
 const object = @import("object.zig");
 const function = @import("function.zig");
@@ -28,7 +29,17 @@ pub const text = string.text;
 pub const throw_error = err.throw_error;
 
 pub const fib = worker.fib;
-pub const fib_async = worker.fib_async;
+pub const fib_async = async_examples.fib_async;
+pub const fib_async_progress = async_examples.fib_async_progress;
+pub const read_file_async = async_examples.read_file_async;
+pub const read_file_summary_async = async_examples.read_file_summary_async;
+pub const parallel_read_files_async = async_examples.parallel_read_files_async;
+pub const async_math_single = async_examples.async_math_single;
+pub const async_void_thread = async_examples.async_void_thread;
+pub const async_fail_thread = async_examples.async_fail_thread;
+pub const count_async_progress_thread = async_examples.count_async_progress_thread;
+pub const event_mode_progress_async = async_examples.event_mode_progress_async;
+pub const abortable_count_async = async_examples.abortable_count_async;
 
 pub const get_and_return_array = array.get_and_return_array;
 pub const get_named_array = array.get_named_array;
