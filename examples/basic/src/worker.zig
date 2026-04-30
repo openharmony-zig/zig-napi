@@ -6,12 +6,8 @@ fn fibonacci(n: f64) f64 {
     return fibonacci(n - 1) + fibonacci(n - 2);
 }
 
-fn fibonacci_execute(_: napi.Env, data: f64) void {
-    const result = fibonacci(data);
-
-    const allocator = std.heap.page_allocator;
-    const message = std.fmt.allocPrint(allocator, "Fibonacci result: {d}", .{result}) catch @panic("OOM");
-    defer allocator.free(message);
+fn fibonacci_execute(data: f64) f64 {
+    return fibonacci(data);
 }
 
 fn fibonacci_on_complete(_: napi.Env, data: f64) void {
@@ -23,10 +19,4 @@ fn fibonacci_on_complete(_: napi.Env, data: f64) void {
 pub fn fib(env: napi.Env, n: f64) void {
     const worker = napi.Worker(env, .{ .data = n, .Execute = fibonacci_execute, .OnComplete = fibonacci_on_complete });
     worker.Queue();
-}
-
-pub fn fib_async(env: napi.Env, n: f64) napi.Promise {
-    const worker = napi.Worker(env, .{ .data = n, .Execute = fibonacci_execute, .OnComplete = fibonacci_on_complete });
-    const promise = worker.AsyncQueue();
-    return promise;
 }

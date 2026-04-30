@@ -73,6 +73,34 @@ fn isPromiseType(comptime T: type) bool {
     return T == napi.Promise;
 }
 
+fn isAsyncDescriptorType(comptime T: type) bool {
+    switch (@typeInfo(T)) {
+        .@"struct", .@"enum", .@"union", .@"opaque" => {},
+        else => return false,
+    }
+    return @hasDecl(T, "is_napi_async_descriptor");
+}
+
+fn isAbortSignalType(comptime T: type) bool {
+    switch (@typeInfo(T)) {
+        .@"struct", .@"enum", .@"union", .@"opaque" => {},
+        else => return false,
+    }
+    return @hasDecl(T, "is_napi_abort_signal");
+}
+
+fn asyncResultType(comptime T: type) type {
+    return T.async_result_type;
+}
+
+fn asyncEventType(comptime T: type) type {
+    return T.async_event_type;
+}
+
+fn asyncHasEvents(comptime T: type) bool {
+    return @hasDecl(T, "async_has_events") and T.async_has_events;
+}
+
 fn typedArrayName(comptime T: type) ?[]const u8 {
     switch (@typeInfo(T)) {
         .@"struct", .@"enum", .@"union", .@"opaque" => {},
@@ -210,6 +238,23 @@ const State = struct {
         self.exported.deinit();
     }
 };
+
+fn emitAbortSignalDecl(state: *State) !void {
+    if (state.emitted.contains("AbortSignal")) return;
+    try state.emitted.put("AbortSignal", {});
+    try append(&state.declarations,
+        \\export interface AbortSignal {
+        \\  aborted: boolean
+        \\  reason?: any
+        \\  onabort: null | ((this: AbortSignal, event: any) => void)
+        \\  addEventListener(name: string, listener: (this: AbortSignal, event: any) => any): void
+        \\  removeEventListener(name: string, listener: (this: AbortSignal, event: any) => any): void
+        \\  throwIfAborted?(): void
+        \\}
+        \\
+        \\
+    );
+}
 
 const FunctionSource = struct {
     file_path: []const u8,
@@ -939,7 +984,15 @@ fn emitType(state: *State, comptime T: type) ![]const u8 {
 
     if (isNumeric(T)) return "number";
     if (isStringLike(T)) return "string";
+    if (comptime isAbortSignalType(T)) {
+        try emitAbortSignalDecl(state);
+        return "AbortSignal";
+    }
     if (isPromiseType(T)) return "Promise<void>";
+    if (comptime isAsyncDescriptorType(T)) {
+        const result_type = try emitType(state, asyncResultType(T));
+        return try std.fmt.allocPrint(state.allocator, "Promise<{s}>", .{result_type});
+    }
 
     if (T == napi.Buffer) return "Buffer";
     if (T == napi.ArrayBuffer) return "ArrayBuffer";
@@ -1145,6 +1198,10 @@ fn emitFunctionLikeWithNames(state: *State, comptime T: type, comptime is_tsfn: 
     return try buf.toOwnedSlice();
 }
 
+fn emitAsyncEventCallbackType(state: *State, comptime T: type) ![]const u8 {
+    return try std.fmt.allocPrint(state.allocator, "(event: {s}) => void", .{try emitType(state, asyncEventType(T))});
+}
+
 fn emitMethodSignature(state: *State, writer: *StringBuilder, comptime fn_type: type, comptime name: []const u8, comptime skip_first: bool, param_names: ?[]const []const u8) !void {
     const info = @typeInfo(fn_type).@"fn";
     try appendFmt(writer, "{s}(", .{name});
@@ -1161,6 +1218,11 @@ fn emitMethodSignature(state: *State, writer: *StringBuilder, comptime fn_type: 
 
 fn emitMethodParams(state: *State, writer: *StringBuilder, comptime fn_type: type, comptime skip_first: bool, param_names: ?[]const []const u8) !void {
     const info = @typeInfo(fn_type).@"fn";
+    const ret = info.return_type.?;
+    const ret_payload = switch (@typeInfo(ret)) {
+        .error_union => |eu| eu.payload,
+        else => ret,
+    };
     var first = true;
     const total = if (skip_first) info.params.len - 1 else info.params.len;
     const source_offset: usize = if (param_names) |names|
@@ -1175,6 +1237,10 @@ fn emitMethodParams(state: *State, writer: *StringBuilder, comptime fn_type: typ
         const arg_idx = if (skip_first) idx - 1 else idx;
         const effective_names = if (param_names) |names| names[source_offset..] else null;
         try appendFmt(writer, "{s}: {s}", .{ resolvedArgName(effective_names, arg_idx, total), ts_type });
+    }
+    if (comptime isAsyncDescriptorType(ret_payload) and asyncHasEvents(ret_payload)) {
+        if (!first) try append(writer, ", ");
+        try appendFmt(writer, "onEvent?: {s}", .{try emitAsyncEventCallbackType(state, ret_payload)});
     }
     try append(writer, ")");
 }
@@ -1279,6 +1345,10 @@ fn emitExportFunction(state: *State, comptime name: []const u8, comptime fn_valu
         .error_union => |eu| eu.payload,
         else => ret,
     };
+    if (comptime isAsyncDescriptorType(ret_payload) and asyncHasEvents(ret_payload)) {
+        if (!first) try append(&state.exports, ", ");
+        try appendFmt(&state.exports, "onEvent?: {s}", .{try emitAsyncEventCallbackType(state, ret_payload)});
+    }
     const ret_payload_info = @typeInfo(ret_payload);
     if (comptime isFunctionType(ret_payload)) {
         const returned_param_names = try state.source.getReturnedFunctionParamNames(name);
@@ -1507,6 +1577,43 @@ fn emitSourceStructType(state: *State, file_path: []const u8, struct_expr: []con
     return try buf.toOwnedSlice();
 }
 
+const ParsedAsyncSourceType = struct {
+    result_expr: []const u8,
+    event_expr: ?[]const u8,
+};
+
+fn parseAsyncSourceTypeExpr(allocator: std.mem.Allocator, type_expr: []const u8) !?ParsedAsyncSourceType {
+    const trimmed = std.mem.trim(u8, type_expr, " \t\r\n");
+    const async_markers = [_][]const u8{ "napi.Async(", "Async(" };
+    const async_events_markers = [_][]const u8{ "napi.AsyncWithEvents(", "AsyncWithEvents(" };
+
+    inline for (async_events_markers) |marker| {
+        if (std.mem.startsWith(u8, trimmed, marker) and std.mem.endsWith(u8, trimmed, ")")) {
+            const args = try parseCallArguments(allocator, trimmed, marker.len - 1);
+            if (args.items.len >= 2) {
+                return .{
+                    .result_expr = args.items[0],
+                    .event_expr = args.items[1],
+                };
+            }
+        }
+    }
+
+    inline for (async_markers) |marker| {
+        if (std.mem.startsWith(u8, trimmed, marker) and std.mem.endsWith(u8, trimmed, ")")) {
+            const args = try parseCallArguments(allocator, trimmed, marker.len - 1);
+            if (args.items.len >= 1) {
+                return .{
+                    .result_expr = args.items[0],
+                    .event_expr = null,
+                };
+            }
+        }
+    }
+
+    return null;
+}
+
 fn emitSourceTypeExpr(state: *State, file_path: []const u8, type_expr: []const u8, depth: usize) anyerror![]const u8 {
     if (depth > 8) return "unknown";
 
@@ -1526,6 +1633,17 @@ fn emitSourceTypeExpr(state: *State, file_path: []const u8, type_expr: []const u
     if (std.mem.eql(u8, trimmed, "bool")) return "boolean";
     if (isSourceNumericType(trimmed)) return "number";
     if (isSourceStringType(trimmed)) return "string";
+    if (std.mem.eql(u8, trimmed, "AbortSignal") or
+        std.mem.eql(u8, trimmed, "napi.AbortSignal") or
+        std.mem.endsWith(u8, trimmed, ".AbortSignal"))
+    {
+        try emitAbortSignalDecl(state);
+        return "AbortSignal";
+    }
+    if (try parseAsyncSourceTypeExpr(state.allocator, trimmed)) |async_source| {
+        const result_ts = try emitSourceTypeExpr(state, file_path, async_source.result_expr, depth + 1);
+        return try std.fmt.allocPrint(state.allocator, "Promise<{s}>", .{result_ts});
+    }
 
     if (std.mem.eql(u8, trimmed, "napi.Promise")) return "Promise<void>";
     if (std.mem.eql(u8, trimmed, "napi.Buffer")) return "Buffer";
@@ -1647,6 +1765,13 @@ fn buildInitFunctionDeclaration(state: *State, export_name: []const u8, file_pat
             param.name,
             try emitSourceTypeExpr(state, file_path, param.type_expr, 0),
         });
+    }
+
+    if (try parseAsyncSourceTypeExpr(state.allocator, signature.return_type_expr)) |async_source| {
+        if (async_source.event_expr) |event_expr| {
+            if (!first) try append(&buf, ", ");
+            try appendFmt(&buf, "onEvent?: (event: {s}) => void", .{try emitSourceTypeExpr(state, file_path, event_expr, 0)});
+        }
     }
 
     try appendFmt(&buf, "): {s}\n", .{try emitSourceTypeExpr(state, file_path, signature.return_type_expr, 0)});
