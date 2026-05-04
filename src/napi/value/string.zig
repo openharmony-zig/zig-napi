@@ -22,18 +22,24 @@ pub const String = struct {
                 var len: usize = 0;
                 _ = napi.napi_get_value_string_utf8(env, raw, null, 0, &len);
 
-                const buf = allocator.alloc(u8, len + 1) catch @panic("OOM");
+                const tmp = allocator.alloc(u8, len + 1) catch @panic("OOM");
+                defer allocator.free(tmp);
 
-                _ = napi.napi_get_value_string_utf8(env, raw, buf.ptr, len + 1, null);
+                _ = napi.napi_get_value_string_utf8(env, raw, tmp.ptr, len + 1, null);
+                const buf = allocator.alloc(u8, len) catch @panic("OOM");
+                @memcpy(buf, tmp[0..len]);
                 return @as(T, buf[0..len]);
             },
             .Utf16 => {
                 var len: usize = 0;
                 _ = napi.napi_get_value_string_utf16(env, raw, null, 0, &len);
 
-                const buf = allocator.alloc(u16, len + 1) catch @panic("OOM");
+                const tmp = allocator.alloc(u16, len + 1) catch @panic("OOM");
+                defer allocator.free(tmp);
 
-                _ = napi.napi_get_value_string_utf16(env, raw, buf.ptr, len + 1, null);
+                _ = napi.napi_get_value_string_utf16(env, raw, tmp.ptr, len + 1, null);
+                const buf = allocator.alloc(u16, len) catch @panic("OOM");
+                @memcpy(buf, tmp[0..len]);
                 return @as(T, buf[0..len]);
             },
             else => {

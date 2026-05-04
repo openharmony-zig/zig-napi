@@ -183,3 +183,5 @@ export declare function favorite_color(): Color
 export declare function is_primary(color: Color): boolean
 export declare function string_enum_identity(color: StringColor): StringColor
 export declare function favorite_string_color(): StringColor
+export declare function leak_tracker_start(): void
+export declare function leak_tracker_finish(): boolean

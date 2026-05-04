@@ -11,6 +11,7 @@ const Buffer = @import("../wrapper/buffer.zig").Buffer;
 const ArrayBuffer = @import("../wrapper/arraybuffer.zig").ArrayBuffer;
 const DataView = @import("../wrapper/dataview.zig").DataView;
 const AbortSignal = @import("../abort_signal.zig").AbortSignal;
+const GlobalAllocator = @import("./allocator.zig");
 
 fn napiTypeOf(env: napi.napi_env, raw: napi.napi_value) napi.napi_valuetype {
     var value_type: napi.napi_valuetype = undefined;
@@ -178,6 +179,117 @@ fn valueMatchesType(env: napi.napi_env, raw: napi.napi_value, comptime T: type) 
 }
 
 pub const Napi = struct {
+    pub const DeinitState = struct {
+        const Entry = struct {
+            addr: usize,
+            byte_len: usize,
+        };
+
+        entries: [128]Entry = undefined,
+        len: usize = 0,
+
+        fn shouldFree(self: *DeinitState, addr: usize, byte_len: usize) bool {
+            for (self.entries[0..self.len]) |entry| {
+                if (entry.addr == addr and entry.byte_len == byte_len) {
+                    return false;
+                }
+            }
+            if (self.len < self.entries.len) {
+                self.entries[self.len] = .{ .addr = addr, .byte_len = byte_len };
+                self.len += 1;
+            }
+            return true;
+        }
+    };
+
+    pub fn deinit_napi_value(comptime T: type, value: T) void {
+        var state = DeinitState{};
+        Napi.deinit_napi_value_with_state(T, value, &state);
+    }
+
+    pub fn deinit_napi_value_with_state(comptime T: type, value: T, state: *DeinitState) void {
+        const allocator = GlobalAllocator.globalAllocator();
+        const infos = @typeInfo(T);
+
+        const string_mode = comptime helper.stringLike(T);
+        if (string_mode != .Unknown) {
+            if (infos == .pointer and infos.pointer.size == .slice) {
+                const bytes = std.mem.sliceAsBytes(value);
+                if (state.shouldFree(@intFromPtr(bytes.ptr), bytes.len)) {
+                    allocator.free(value);
+                }
+            }
+            return;
+        }
+
+        switch (infos) {
+            .array => {
+                for (value) |item| {
+                    Napi.deinit_napi_value_with_state(infos.array.child, item, state);
+                }
+            },
+            .pointer => |ptr| {
+                if (ptr.size == .slice) {
+                    for (value) |item| {
+                        Napi.deinit_napi_value_with_state(ptr.child, item, state);
+                    }
+                    const bytes = std.mem.sliceAsBytes(value);
+                    if (state.shouldFree(@intFromPtr(bytes.ptr), bytes.len)) {
+                        allocator.free(value);
+                    }
+                }
+            },
+            .optional => |optional| {
+                if (value) |payload| {
+                    Napi.deinit_napi_value_with_state(optional.child, payload, state);
+                }
+            },
+            .@"struct" => {
+                if (comptime helper.isNapiFunction(T) or
+                    helper.isTypedArray(T) or
+                    helper.isDataView(T) or
+                    helper.isReference(T) or
+                    helper.isAbortSignal(T) or
+                    T == NapiValue.BigInt or
+                    T == NapiValue.Bool or
+                    T == NapiValue.Number or
+                    T == NapiValue.String or
+                    T == NapiValue.Object or
+                    T == NapiValue.Promise or
+                    T == NapiValue.Array or
+                    T == NapiValue.Undefined or
+                    T == NapiValue.Null or
+                    T == Buffer or
+                    T == ArrayBuffer or
+                    T == DataView)
+                {
+                    return;
+                }
+
+                if (comptime helper.isArrayList(T)) {
+                    const child = comptime helper.getArrayListElementType(T);
+                    for (value.items) |item| {
+                        Napi.deinit_napi_value_with_state(child, item, state);
+                    }
+                    var mutable = value;
+                    mutable.deinit(allocator);
+                    return;
+                }
+
+                inline for (infos.@"struct".fields) |field| {
+                    Napi.deinit_napi_value_with_state(field.type, @field(value, field.name), state);
+                }
+            },
+            .@"union" => |union_info| {
+                if (union_info.tag_type == null) return;
+                switch (value) {
+                    inline else => |payload| Napi.deinit_napi_value_with_state(@TypeOf(payload), payload, state),
+                }
+            },
+            else => {},
+        }
+    }
+
     pub fn from_napi_value(env: napi.napi_env, raw: napi.napi_value, comptime T: type) T {
         const infos = @typeInfo(T);
         switch (T) {

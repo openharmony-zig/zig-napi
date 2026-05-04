@@ -290,18 +290,25 @@ fn AsyncTaskDescriptorImpl(
     return struct {
         base: AsyncTaskDescriptorBase,
         input: Input,
+        input_moved: bool = false,
 
         const Self = @This();
 
         fn schedule(base: *AsyncTaskDescriptorBase, env_raw: napi.napi_env, listener: ?napi.napi_value, signal: ?AbortSignal) !Promise {
             const self: *Self = @alignCast(@fieldParentPtr("base", base));
+            errdefer base.destroy_fn(base);
             const operation = try AsyncTaskOperation(Input, Result, Event, runtime, run_fn).create(Env.from_raw(env_raw), self.input, listener, signal);
-            defer base.destroy_fn(base);
-            return try operation.submit();
+            self.input_moved = true;
+            const promise = try operation.submit();
+            base.destroy_fn(base);
+            return promise;
         }
 
         fn destroy(base: *AsyncTaskDescriptorBase) void {
             const self: *Self = @alignCast(@fieldParentPtr("base", base));
+            if (!self.input_moved) {
+                Napi.deinit_napi_value(Input, self.input);
+            }
             self.base.allocator.destroy(self);
         }
     };
@@ -333,6 +340,7 @@ fn AsyncTaskOperation(
         cancel_requested: bool = false,
         cancel_dispatched: bool = false,
         closed: bool = false,
+        result_ready: bool = false,
 
         const Self = @This();
         const Context = AsyncContext(Event);
@@ -495,12 +503,14 @@ fn AsyncTaskOperation(
                         try run_fn(self.input);
                     } else {
                         self.result = try run_fn(self.input);
+                        self.result_ready = true;
                     }
                 } else {
                     if (Result == void) {
                         _ = run_fn(self.input);
                     } else {
                         self.result = run_fn(self.input);
+                        self.result_ready = true;
                     }
                 }
             } else {
@@ -509,12 +519,14 @@ fn AsyncTaskOperation(
                         try run_fn(context, self.input);
                     } else {
                         self.result = try run_fn(context, self.input);
+                        self.result_ready = true;
                     }
                 } else {
                     if (Result == void) {
                         _ = run_fn(context, self.input);
                     } else {
                         self.result = run_fn(context, self.input);
+                        self.result_ready = true;
                     }
                 }
             }
@@ -658,6 +670,13 @@ fn AsyncTaskOperation(
             if (self.tsfn_raw != null) {
                 _ = napi.napi_release_threadsafe_function(self.tsfn_raw, napi.napi_tsfn_release);
                 self.tsfn_raw = null;
+            }
+            var deinit_state = Napi.DeinitState{};
+            Napi.deinit_napi_value_with_state(Input, self.input, &deinit_state);
+            if (comptime Result != void) {
+                if (self.result_ready) {
+                    Napi.deinit_napi_value_with_state(Result, self.result, &deinit_state);
+                }
             }
             self.allocator.destroy(self);
         }

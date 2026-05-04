@@ -977,6 +977,9 @@ fn emitType(state: *State, comptime T: type) ![]const u8 {
     switch (T) {
         void => return "void",
         bool => return "boolean",
+        napi.Bool => return "boolean",
+        napi.Number => return "number",
+        napi.String => return "string",
         napi.Null => return "null",
         napi.Undefined => return "undefined",
         else => {},
