@@ -7,7 +7,14 @@ const helper = @import("../util/helper.zig");
 const NapiError = @import("./error.zig");
 const GlobalAllocator = @import("../util/allocator.zig");
 
-var class_constructors: std.StringHashMap(napi.napi_value) = std.StringHashMap(napi.napi_value).init(GlobalAllocator.globalAllocator());
+var class_constructors: ?std.StringHashMap(napi.napi_value) = null;
+
+fn constructors() *std.StringHashMap(napi.napi_value) {
+    if (class_constructors == null) {
+        class_constructors = std.StringHashMap(napi.napi_value).init(GlobalAllocator.globalAllocator());
+    }
+    return &class_constructors.?;
+}
 
 pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
     const type_info = @typeInfo(T);
@@ -34,6 +41,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
 
         fn constructor_callback(env: napi.napi_env, callback_info: napi.napi_callback_info) callconv(.c) napi.napi_value {
             const infos = CallbackInfo.from_raw(env, callback_info);
+            defer infos.deinit();
 
             const data = GlobalAllocator.globalAllocator().create(T) catch return null;
 
@@ -106,6 +114,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
             return struct {
                 fn call(env: napi.napi_env, callback_info: napi.napi_callback_info) callconv(.c) napi.napi_value {
                     const infos = CallbackInfo.from_raw(env, callback_info);
+                    defer infos.deinit();
 
                     const factory_fn = @field(T, factory_name);
                     const factory_fn_type = @TypeOf(factory_fn);
@@ -139,7 +148,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                         }
                     }
 
-                    const constructor = class_constructors.get(class_name) orelse return null;
+                    const constructor = constructors().get(class_name) orelse return null;
                     var js_instance: napi.napi_value = undefined;
                     _ = napi.napi_new_instance(env, constructor, infos.args_count, @ptrCast(infos.args_raw.ptr), &js_instance);
 
@@ -169,6 +178,8 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                 const typed_data: *T = @ptrCast(@alignCast(ptr));
                 if (@hasDecl(T, "deinit")) {
                     typed_data.deinit();
+                } else {
+                    Napi.deinit_napi_value(T, typed_data.*);
                 }
                 GlobalAllocator.globalAllocator().destroy(typed_data);
             }
@@ -223,6 +234,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                 const FieldAccessor = struct {
                     fn getter(getter_env: napi.napi_env, info: napi.napi_callback_info) callconv(.c) napi.napi_value {
                         const cb_info = CallbackInfo.from_raw(getter_env, info);
+                        defer cb_info.deinit();
                         var data: ?*anyopaque = null;
                         _ = napi.napi_unwrap(getter_env, cb_info.This(), &data);
                         if (data == null) return null;
@@ -234,6 +246,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
 
                     fn setter(setter_env: napi.napi_env, info: napi.napi_callback_info) callconv(.c) napi.napi_value {
                         const cb_info = CallbackInfo.from_raw(setter_env, info);
+                        defer cb_info.deinit();
                         var data: ?*anyopaque = null;
                         _ = napi.napi_unwrap(setter_env, cb_info.This(), &data);
                         if (data == null) return null;
@@ -321,6 +334,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                         const params = method_info.@"fn".params;
 
                         const is_instance_method = params.len > 0 and (params[0].type.? == *T or params[0].type.? == T);
+                        const method_args_offset = if (is_instance_method) 1 else 0;
 
                         const return_type = method_info.@"fn".return_type.?;
                         const is_factory_method = blk: {
@@ -345,13 +359,24 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                             };
                         } else {
                             const MethodWrapper = struct {
+                                fn cleanupArgs(args: *std.meta.ArgsTuple(@TypeOf(method)), initialized: usize) void {
+                                    inline for (method_info.@"fn".params[method_args_offset..], method_args_offset..) |param, i| {
+                                        if (i < initialized) {
+                                            Napi.deinit_napi_value(param.type.?, args[i]);
+                                        }
+                                    }
+                                }
+
                                 fn call(method_env: napi.napi_env, info: napi.napi_callback_info) callconv(.c) napi.napi_value {
                                     const cb_info = CallbackInfo.from_raw(method_env, info);
+                                    defer cb_info.deinit();
                                     var data: ?*anyopaque = null;
                                     _ = napi.napi_unwrap(method_env, cb_info.This(), &data);
                                     if (data == null) return null;
 
                                     var tuple_args: std.meta.ArgsTuple(@TypeOf(method)) = undefined;
+                                    var initialized_args: usize = 0;
+                                    defer cleanupArgs(&tuple_args, initialized_args);
 
                                     // inject instance
                                     if (is_instance_method) {
@@ -360,15 +385,16 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                                         }
                                         const instance: *T = @ptrCast(@alignCast(data.?));
                                         tuple_args[0] = instance;
+                                        initialized_args = 1;
                                     }
 
-                                    const args_offset = if (is_instance_method) 1 else 0;
                                     // inject args
-                                    inline for (method_info.@"fn".params[args_offset..], args_offset..) |param, i| {
+                                    inline for (method_info.@"fn".params[method_args_offset..], method_args_offset..) |param, i| {
                                         if (comptime @typeInfo(param.type.?) == .@"union") {
                                             NapiError.clearLastError();
                                         }
-                                        tuple_args[i] = Napi.from_napi_value(method_env, cb_info.args[i - args_offset].raw, param.type.?);
+                                        tuple_args[i] = Napi.from_napi_value(method_env, cb_info.args[i - method_args_offset].raw, param.type.?);
+                                        initialized_args = i + 1;
                                         if (comptime @typeInfo(param.type.?) == .@"union") {
                                             if (NapiError.last_error) |last_err| {
                                                 last_err.throwInto(napi_env.Env.from_raw(method_env));
@@ -400,7 +426,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
             var constructor: napi.napi_value = undefined;
             _ = napi.napi_define_class(env, class_name.ptr, class_name.len, constructor_callback, null, prop_idx, &properties, &constructor);
 
-            try class_constructors.put(class_name, constructor);
+            try constructors().put(class_name, constructor);
             return constructor;
         }
 

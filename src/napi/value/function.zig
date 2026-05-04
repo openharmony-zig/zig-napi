@@ -37,6 +37,20 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
             }
 
             const FnImpl = struct {
+                const has_env = params.len > 0 and params[0].type.? == Env;
+                const env_index = if (has_env) 1 else 0;
+
+                fn cleanupArgs(args: *std.meta.ArgsTuple(value_type), initialized: usize) void {
+                    inline for (params, 0..) |param, i| {
+                        if (comptime has_env and i == 0) {
+                            continue;
+                        }
+                        if (i < initialized) {
+                            Napi.deinit_napi_value(param.type.?, args[i]);
+                        }
+                    }
+                }
+
                 fn inner_fn(inner_env: napi.napi_env, info: napi.napi_callback_info) callconv(.c) napi.napi_value {
                     const undefined_value = Undefined.New(Env.from_raw(inner_env));
                     const return_info = infos.@"fn".return_type.?;
@@ -46,8 +60,6 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                     };
                     const async_returns_descriptor = comptime helper.isAsyncDescriptor(return_payload);
                     const has_async_events = comptime async_returns_descriptor and return_payload.async_has_events;
-                    const has_env = comptime params.len > 0 and params[0].type.? == Env;
-                    const env_index = if (has_env) 1 else 0;
                     const expected_argc = params.len - env_index + if (has_async_events) 1 else 0;
 
                     var init_argc: usize = expected_argc;
@@ -62,8 +74,13 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                     }
 
                     var napi_params: std.meta.ArgsTuple(value_type) = undefined;
+                    var initialized_params: usize = 0;
+                    var cleanup_params = true;
+                    defer if (cleanup_params) cleanupArgs(&napi_params, initialized_params);
+
                     if (comptime has_env) {
                         napi_params[0] = Env.from_raw(inner_env);
+                        initialized_params = 1;
                     }
 
                     var abort_signal: ?AbortSignal = null;
@@ -72,6 +89,7 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                             NapiError.clearLastError();
                         }
                         napi_params[i] = Napi.from_napi_value(inner_env, args_raw[i - env_index], param_index.type.?);
+                        initialized_params = i + 1;
                         if (comptime helper.isAbortSignal(param_index.type.?)) {
                             abort_signal = napi_params[i];
                         }
@@ -96,6 +114,7 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                             return undefined_value.raw;
                         };
                         if (comptime async_returns_descriptor) {
+                            cleanup_params = false;
                             var task = ret;
                             const promise = task.scheduleWithListenerAndSignal(Env.from_raw(inner_env), event_listener, abort_signal) catch {
                                 if (NapiError.last_error) |last_err| {
@@ -115,6 +134,7 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                     } else {
                         const ret = @call(.auto, value, napi_params);
                         if (comptime async_returns_descriptor) {
+                            cleanup_params = false;
                             var task = ret;
                             const promise = task.scheduleWithListenerAndSignal(Env.from_raw(inner_env), event_listener, abort_signal) catch {
                                 if (NapiError.last_error) |last_err| {

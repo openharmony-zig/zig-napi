@@ -7,9 +7,9 @@ on:
     branches: [ main ]
 
 jobs:
-  test:
+  build:
     runs-on: ubuntu-latest
-    name: Test on ubuntu-latest
+    name: Build on ubuntu-latest
     
     steps:
       - name: Checkout
@@ -31,3 +31,36 @@ jobs:
         run: |
           pushd examples/basic && zig build && popd
           pushd examples/init && zig build && popd
+
+  arkvm-tests:
+    runs-on: ubuntu-latest
+    name: ArkTS N-API tests
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Zig for OpenHarmony
+        uses: openharmony-zig/setup-zig-ohos@v0.1.0
+        with:
+          tag: '0.16.0'
+
+      - name: Setup arkvm
+        id: setup-arkvm
+        uses: harmony-contrib/arkts-vm@v2.0.0
+        with:
+          cache: true
+
+      - name: Validate Ark host bundle
+        env:
+          ARK_HOST_TOOLS_DIR: ${{ steps.setup-arkvm.outputs.arkvm-path }}
+        run: |
+          set -euo pipefail
+          test -x "${ARK_HOST_TOOLS_DIR}/ark_js_napi_cli"
+          test -x "${ARK_HOST_TOOLS_DIR}/es2abc"
+          test -f "${ARK_HOST_TOOLS_DIR}/libace_napi.so"
+
+      - name: Run ArkTS tests
+        env:
+          ARK_HOST_TOOLS_DIR: ${{ steps.setup-arkvm.outputs.arkvm-path }}
+        run: bash ./scripts/ohos/run_arkvm_tests.sh

@@ -14,6 +14,7 @@ const arraybuffer = @import("./napi/wrapper/arraybuffer.zig");
 const typedarray = @import("./napi/wrapper/typedarray.zig");
 const dataview = @import("./napi/wrapper/dataview.zig");
 const reference = @import("./napi/wrapper/reference.zig");
+const allocator = @import("./napi/util/allocator.zig");
 
 pub const napi_sys = @import("napi-sys");
 pub const Env = env.Env;
@@ -65,6 +66,7 @@ pub fn FunctionRef(comptime Args: type, comptime Return: type) type {
     return reference.Reference(function.Function(Args, Return));
 }
 pub const ObjectRef = reference.Reference(value.Object);
+pub const util_allocator = allocator;
 pub fn AsyncContext(comptime Event: type) type {
     return async.AsyncContext(Event);
 }

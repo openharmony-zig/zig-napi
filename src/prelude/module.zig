@@ -96,7 +96,7 @@ pub fn NODE_API_MODULE_WITH_INIT(
     };
 
     comptime {
-        if (builtin.target.abi.isOpenHarmony()) {
+        if (builtin.object_format == .elf) {
             const init_array = [1]*const fn () callconv(.c) void{&ModuleImpl.module_init};
             @export(&init_array, .{ .linkage = .strong, .name = "init_array", .section = ".init_array" });
         }

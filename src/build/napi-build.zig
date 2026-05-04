@@ -114,6 +114,7 @@ pub const TypeDefinitionBuildOptions = struct {
     napi_module: *std.Build.Module,
     // Optional text injected after the generated banner comments.
     header: ?[]const u8 = null,
+    options: ?*std.Build.Step.Options = null,
 };
 
 pub fn generateTypeDefinition(build: *std.Build, option: TypeDefinitionBuildOptions) !*std.Build.Step.Run {
@@ -137,6 +138,9 @@ pub fn generateTypeDefinition(build: *std.Build, option: TypeDefinitionBuildOpti
             },
         },
     });
+    if (option.options) |options| {
+        addon_root.addOptions("build_options", options);
+    }
 
     const ndk_root = try resolveNdkPath(build);
     if (ndk_root.len > 0) {
