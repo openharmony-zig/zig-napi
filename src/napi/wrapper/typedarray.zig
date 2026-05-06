@@ -67,14 +67,23 @@ pub fn TypedArray(comptime T: type) type {
                 &byte_offset,
             );
 
+            const arraybuffer = ArrayBuffer.from_raw(env, arraybuffer_raw);
+            const remaining_byte_len = arraybuffer.length() -| byte_offset;
+            const element_len = if (len * @sizeOf(T) <= remaining_byte_len)
+                len
+            else if (len <= remaining_byte_len and len % @sizeOf(T) == 0)
+                len / @sizeOf(T)
+            else
+                0;
+
             return Self{
                 .env = env,
                 .raw = raw,
-                .data = if (len == 0 or data == null) &[_]T{} else @ptrCast(@alignCast(data)),
-                .len = len,
+                .data = if (element_len == 0 or data == null) &[_]T{} else @ptrCast(@alignCast(data)),
+                .len = element_len,
                 .typedarray_type = typedarray_type,
                 .byte_offset = byte_offset,
-                .arraybuffer = ArrayBuffer.from_raw(env, arraybuffer_raw),
+                .arraybuffer = arraybuffer,
             };
         }
 

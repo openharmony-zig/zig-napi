@@ -10,10 +10,10 @@ const object = @import("object.zig");
 const function = @import("function.zig");
 const thread_safe_function = @import("thread_safe_function.zig");
 const class = @import("class.zig");
-const build_options = @import("build_options");
-const log = if (build_options.arkvm_test) struct {
+const builtin = @import("builtin");
+const log = if (builtin.target.abi.isOpenHarmony()) @import("log/log.zig") else struct {
     pub fn test_hilog() void {}
-} else @import("log/log.zig");
+};
 const buffer = @import("buffer.zig");
 const arraybuffer = @import("arraybuffer.zig");
 const typedarray = @import("typedarray.zig");
@@ -21,7 +21,6 @@ const dataview = @import("dataview.zig");
 const reference = @import("reference.zig");
 const union_value = @import("union.zig");
 const enum_value = @import("enum.zig");
-const leak = @import("leak.zig");
 
 pub const test_i32 = number.test_i32;
 pub const test_f32 = number.test_f32;
@@ -114,9 +113,6 @@ pub const favorite_color = enum_value.favorite_color;
 pub const is_primary = enum_value.is_primary;
 pub const string_enum_identity = enum_value.string_enum_identity;
 pub const favorite_string_color = enum_value.favorite_string_color;
-
-pub const leak_tracker_start = leak.leak_tracker_start;
-pub const leak_tracker_finish = leak.leak_tracker_finish;
 
 comptime {
     napi.NODE_API_MODULE("hello", @This());

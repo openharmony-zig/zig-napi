@@ -6,7 +6,6 @@ pub fn build(b: *std.Build) !void {
     const optimize = b.standardOptimizeOption(.{});
 
     const zig_napi = b.dependency("zig-napi", .{});
-
     const napi = zig_napi.module("napi");
 
     const result = try napi_build.nativeAddonBuild(b, .{
@@ -20,27 +19,11 @@ pub fn build(b: *std.Build) !void {
 
     if (result.arm64) |arm64| {
         arm64.root_module.addImport("napi", napi);
-        if (arm64.rootModuleTarget().abi.isOpenHarmony()) {
-            arm64.root_module.linkSystemLibrary("hilog_ndk.z", .{});
-        }
     }
     if (result.arm) |arm| {
         arm.root_module.addImport("napi", napi);
-        if (arm.rootModuleTarget().abi.isOpenHarmony()) {
-            arm.root_module.linkSystemLibrary("hilog_ndk.z", .{});
-        }
     }
     if (result.x64) |x64| {
         x64.root_module.addImport("napi", napi);
-        if (x64.rootModuleTarget().abi.isOpenHarmony()) {
-            x64.root_module.linkSystemLibrary("hilog_ndk.z", .{});
-        }
     }
-
-    const dts = try napi_build.generateTypeDefinition(b, .{
-        .root_source_file = b.path("./src/hello.zig"),
-        .output = b.path("index.d.ts"),
-        .napi_module = napi,
-    });
-    b.getInstallStep().dependOn(&dts.step);
 }

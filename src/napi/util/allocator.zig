@@ -21,8 +21,14 @@ pub const AllocatorManager = struct {
 };
 
 pub var global_manager = AllocatorManager.init();
+pub var runtime_manager = AllocatorManager.init();
 
 /// Get the global allocator
 pub fn globalAllocator() std.mem.Allocator {
     return global_manager.get();
+}
+
+/// Get the allocator used for values whose lifetime is owned by the JS runtime.
+pub fn runtimeAllocator() std.mem.Allocator {
+    return runtime_manager.get();
 }

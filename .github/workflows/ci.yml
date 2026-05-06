@@ -63,4 +63,4 @@ jobs:
       - name: Run ArkTS tests
         env:
           ARK_HOST_TOOLS_DIR: ${{ steps.setup-arkvm.outputs.arkvm-path }}
-        run: bash ./scripts/ohos/run_arkvm_tests.sh
+        run: bash ./scripts/arkvm/run_arkvm_tests.sh

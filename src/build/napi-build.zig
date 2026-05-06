@@ -108,6 +108,50 @@ pub const NativeAddonBuildOptionsWithModule = struct {
     win32_manifest: ?std.Build.LazyPath = null,
 };
 
+var cached_arkvm_test_build: ?*std.Build = null;
+var cached_arkvm_test_value: bool = false;
+
+fn isArkvmTestBuild(build: *std.Build) bool {
+    if (cached_arkvm_test_build == build) return cached_arkvm_test_value;
+
+    cached_arkvm_test_value = build.option(bool, "arkvm-test", "Build host ArkVM test addon without device-only libraries") orelse false;
+    cached_arkvm_test_build = build;
+    return cached_arkvm_test_value;
+}
+
+fn createAddonBuildOptions(build: *std.Build) *std.Build.Step.Options {
+    const options = build.addOptions();
+    options.addOption(bool, "napi_tsgen", false);
+    return options;
+}
+
+fn arkvmHostAddonBuild(build: *std.Build, option: NativeAddonBuildOptionsWithModule) *std.Build.Step.Compile {
+    const target = build.resolveTargetQuery(.{
+        .cpu_arch = .x86_64,
+        .os_tag = .linux,
+        .abi = .gnu,
+    });
+
+    var hostOption = cloneLibraryOptions(build, option, target);
+    hostOption.use_llvm = true;
+
+    const compile = build.addLibrary(hostOption);
+    compile.linker_allow_shlib_undefined = true;
+    compile.root_module.link_libc = true;
+    compile.root_module.addOptions("build_options", createAddonBuildOptions(build));
+
+    const installStep = build.addInstallArtifact(compile, .{
+        .dest_dir = .{
+            .override = .{
+                .custom = "arkvm-host",
+            },
+        },
+    });
+    build.getInstallStep().dependOn(&installStep.step);
+
+    return compile;
+}
+
 pub const TypeDefinitionBuildOptions = struct {
     root_source_file: std.Build.LazyPath,
     output: std.Build.LazyPath,
@@ -118,6 +162,22 @@ pub const TypeDefinitionBuildOptions = struct {
 };
 
 pub fn generateTypeDefinition(build: *std.Build, option: TypeDefinitionBuildOptions) !*std.Build.Step.Run {
+    _ = isArkvmTestBuild(build);
+
+    const tsgen_build_options = build.addOptions();
+    tsgen_build_options.addOption(bool, "napi_tsgen", true);
+
+    const tsgen_napi_sys = build.addModule("zig-napi-tsgen-napi-sys", .{
+        .root_source_file = option.napi_module.owner.path("src/sys/api.zig"),
+    });
+    const tsgen_napi = build.addModule("zig-napi-tsgen-napi", .{
+        .root_source_file = option.napi_module.owner.path("src/napi.zig"),
+    });
+    tsgen_napi.addImport("napi-sys", tsgen_napi_sys);
+    tsgen_napi.addOptions("build_options", tsgen_build_options);
+    tsgen_napi.addIncludePath(option.napi_module.owner.path("src/sys/header"));
+    tsgen_napi_sys.addIncludePath(option.napi_module.owner.path("src/sys/header"));
+
     const generator_root = build.createModule(.{
         .root_source_file = option.napi_module.owner.path("src/build/napi-tsgen.zig"),
         .target = build.graph.host,
@@ -134,13 +194,11 @@ pub fn generateTypeDefinition(build: *std.Build, option: TypeDefinitionBuildOpti
         .imports = &.{
             .{
                 .name = "napi",
-                .module = option.napi_module,
+                .module = tsgen_napi,
             },
         },
     });
-    if (option.options) |options| {
-        addon_root.addOptions("build_options", options);
-    }
+    addon_root.addOptions("build_options", option.options orelse createAddonBuildOptions(build));
 
     const ndk_root = try resolveNdkPath(build);
     if (ndk_root.len > 0) {
@@ -158,7 +216,7 @@ pub fn generateTypeDefinition(build: *std.Build, option: TypeDefinitionBuildOpti
     }
 
     generator.root_module.addImport("addon_root", addon_root);
-    generator.root_module.addImport("napi", option.napi_module);
+    generator.root_module.addImport("napi", tsgen_napi);
 
     const run = build.addRunArtifact(generator);
     run.addFileArg(option.output);
@@ -168,6 +226,14 @@ pub fn generateTypeDefinition(build: *std.Build, option: TypeDefinitionBuildOpti
 }
 
 pub fn nativeAddonBuild(build: *std.Build, option: NativeAddonBuildOptionsWithModule) !NativeAddonBuildResult {
+    const arkvm_test = isArkvmTestBuild(build);
+    if (arkvm_test) {
+        const host = arkvmHostAddonBuild(build, option);
+        return .{ .arm64 = null, .arm = null, .x64 = host };
+    }
+
+    const addon_build_options = createAddonBuildOptions(build);
+
     const currentTarget = if (option.root_module_options.target) |target| target.result else build.graph.host.result;
 
     // Respect the target platform for command line.
@@ -191,6 +257,7 @@ pub fn nativeAddonBuild(build: *std.Build, option: NativeAddonBuildOptionsWithMo
 
             const arm64Option = cloneLibraryOptions(build, option, target);
             arm64 = build.addLibrary(arm64Option);
+            arm64.?.root_module.addOptions("build_options", addon_build_options);
             try linkNapi(build, arm64.?, target.query);
 
             const arm64DistDir: []const u8 = build.dupePath("arm64-v8a");
@@ -207,6 +274,7 @@ pub fn nativeAddonBuild(build: *std.Build, option: NativeAddonBuildOptionsWithMo
             const target = build.resolveTargetQuery(targets[1]);
             const armOption = cloneLibraryOptions(build, option, target);
             arm = build.addLibrary(armOption);
+            arm.?.root_module.addOptions("build_options", addon_build_options);
             try linkNapi(build, arm.?, target.query);
 
             const armDistDir: []const u8 = build.dupePath("armeabi-v7a");
@@ -225,6 +293,7 @@ pub fn nativeAddonBuild(build: *std.Build, option: NativeAddonBuildOptionsWithMo
             // TODO: https://github.com/ziglang/zig/issues/25335
             x64Option.use_llvm = true;
             x64 = build.addLibrary(x64Option);
+            x64.?.root_module.addOptions("build_options", addon_build_options);
             try linkNapi(build, x64.?, target.query);
 
             const x64DistDir: []const u8 = build.dupePath("x86_64");

@@ -1634,6 +1634,11 @@ fn emitSourceTypeExpr(state: *State, file_path: []const u8, type_expr: []const u
 
     if (std.mem.eql(u8, trimmed, "void")) return "void";
     if (std.mem.eql(u8, trimmed, "bool")) return "boolean";
+    if (std.mem.eql(u8, trimmed, "napi.Bool")) return "boolean";
+    if (std.mem.eql(u8, trimmed, "napi.String")) return "string";
+    if (std.mem.eql(u8, trimmed, "napi.Number")) return "number";
+    if (std.mem.eql(u8, trimmed, "napi.Null")) return "null";
+    if (std.mem.eql(u8, trimmed, "napi.Undefined")) return "undefined";
     if (isSourceNumericType(trimmed)) return "number";
     if (isSourceStringType(trimmed)) return "string";
     if (std.mem.eql(u8, trimmed, "AbortSignal") or

@@ -7,15 +7,6 @@ const helper = @import("../util/helper.zig");
 const NapiError = @import("./error.zig");
 const GlobalAllocator = @import("../util/allocator.zig");
 
-var class_constructors: ?std.StringHashMap(napi.napi_value) = null;
-
-fn constructors() *std.StringHashMap(napi.napi_value) {
-    if (class_constructors == null) {
-        class_constructors = std.StringHashMap(napi.napi_value).init(GlobalAllocator.globalAllocator());
-    }
-    return &class_constructors.?;
-}
-
 pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
     const type_info = @typeInfo(T);
 
@@ -38,14 +29,47 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
         env: napi.napi_env,
         raw: napi.napi_value,
         const Self = @This();
+        var cached_constructor_ref: ?napi.napi_ref = null;
+        const InstanceData = struct {
+            allocator: std.mem.Allocator,
+            value: T,
+
+            fn create() !*InstanceData {
+                const allocator = GlobalAllocator.globalAllocator();
+                const instance = try allocator.create(InstanceData);
+                instance.* = .{
+                    .allocator = allocator,
+                    .value = undefined,
+                };
+                return instance;
+            }
+
+            fn destroyUninitialized(self: *InstanceData) void {
+                self.allocator.destroy(self);
+            }
+
+            fn destroy(self: *InstanceData) void {
+                const previous_allocator = GlobalAllocator.globalAllocator();
+                GlobalAllocator.global_manager.set(self.allocator);
+                defer GlobalAllocator.global_manager.set(previous_allocator);
+
+                if (@hasDecl(T, "deinit")) {
+                    self.value.deinit();
+                } else {
+                    Napi.deinit_napi_value(T, self.value);
+                }
+                self.allocator.destroy(self);
+            }
+        };
 
         fn constructor_callback(env: napi.napi_env, callback_info: napi.napi_callback_info) callconv(.c) napi.napi_value {
             const infos = CallbackInfo.from_raw(env, callback_info);
             defer infos.deinit();
 
-            const data = GlobalAllocator.globalAllocator().create(T) catch return null;
+            const instance = InstanceData.create() catch return null;
+            const data = &instance.value;
 
-            if (@hasDecl(T, "init")) {
+            if (comptime HasInit and @hasDecl(T, "init")) {
                 const init_fn = T.init;
                 const init_fn_type = @TypeOf(init_fn);
                 const init_fn_info = @typeInfo(init_fn_type);
@@ -59,7 +83,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                     if (comptime @typeInfo(arg.type.?) == .@"union") {
                         if (NapiError.last_error) |last_err| {
                             last_err.throwInto(napi_env.Env.from_raw(env));
-                            GlobalAllocator.globalAllocator().destroy(data);
+                            instance.destroyUninitialized();
                             return null;
                         }
                     }
@@ -70,7 +94,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                         if (NapiError.last_error) |last_err| {
                             last_err.throwInto(napi_env.Env.from_raw(env));
                         }
-                        GlobalAllocator.globalAllocator().destroy(data);
+                        instance.destroyUninitialized();
                         return null;
                     };
                 } else {
@@ -87,7 +111,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                         if (comptime @typeInfo(field.type) == .@"union") {
                             if (NapiError.last_error) |last_err| {
                                 last_err.throwInto(napi_env.Env.from_raw(env));
-                                GlobalAllocator.globalAllocator().destroy(data);
+                                instance.destroyUninitialized();
                                 return null;
                             }
                         }
@@ -97,15 +121,11 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
 
             const this_obj = infos.This();
 
-            var ref: napi.napi_ref = undefined;
-            const status = napi.napi_wrap(env, this_obj, data, finalize_callback, null, &ref);
+            const status = napi.napi_wrap(env, this_obj, instance, finalize_callback, null, null);
             if (status != napi.napi_ok) {
-                GlobalAllocator.globalAllocator().destroy(data);
+                instance.destroy();
                 return null;
             }
-
-            var ref_count: u32 = undefined;
-            _ = napi.napi_reference_unref(env, ref, &ref_count);
 
             return this_obj;
         }
@@ -148,22 +168,27 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                         }
                     }
 
-                    const constructor = constructors().get(class_name) orelse return null;
-                    var js_instance: napi.napi_value = undefined;
-                    _ = napi.napi_new_instance(env, constructor, infos.args_count, @ptrCast(infos.args_raw.ptr), &js_instance);
+                    const class_constructor_ref = Self.cached_constructor_ref orelse return null;
+                    defer Napi.deinit_napi_value(T, instance_data);
 
-                    const heap_data = GlobalAllocator.globalAllocator().create(T) catch return null;
-                    heap_data.* = instance_data;
-
-                    var ref: napi.napi_ref = undefined;
-                    const status = napi.napi_wrap(env, js_instance, heap_data, finalize_callback, null, &ref);
-                    if (status != napi.napi_ok) {
-                        GlobalAllocator.globalAllocator().destroy(heap_data);
-                        return null;
+                    var constructor_args: [fields.len]napi.napi_value = undefined;
+                    inline for (fields, 0..) |field, i| {
+                        constructor_args[i] = Napi.to_napi_value(env, @field(instance_data, field.name), field.name) catch return null;
                     }
 
-                    var ref_count: u32 = undefined;
-                    _ = napi.napi_reference_unref(env, ref, &ref_count);
+                    var constructor: napi.napi_value = undefined;
+                    const get_ref_status = napi.napi_get_reference_value(env, class_constructor_ref, &constructor);
+                    if (get_ref_status != napi.napi_ok) return null;
+
+                    var js_instance: napi.napi_value = undefined;
+                    const status = napi.napi_new_instance(
+                        env,
+                        constructor,
+                        fields.len,
+                        if (fields.len == 0) null else @ptrCast(&constructor_args),
+                        &js_instance,
+                    );
+                    if (status != napi.napi_ok) return null;
 
                     return js_instance;
                 }
@@ -175,13 +200,8 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
             _ = hint;
 
             if (data) |ptr| {
-                const typed_data: *T = @ptrCast(@alignCast(ptr));
-                if (@hasDecl(T, "deinit")) {
-                    typed_data.deinit();
-                } else {
-                    Napi.deinit_napi_value(T, typed_data.*);
-                }
-                GlobalAllocator.globalAllocator().destroy(typed_data);
+                const instance: *InstanceData = @ptrCast(@alignCast(ptr));
+                instance.destroy();
             }
         }
 
@@ -239,8 +259,8 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                         _ = napi.napi_unwrap(getter_env, cb_info.This(), &data);
                         if (data == null) return null;
 
-                        const instance: *T = @ptrCast(@alignCast(data.?));
-                        const field_value = @field(instance.*, field.name);
+                        const instance: *InstanceData = @ptrCast(@alignCast(data.?));
+                        const field_value = @field(instance.value, field.name);
                         return Napi.to_napi_value(getter_env, field_value, field.name) catch null;
                     }
 
@@ -251,7 +271,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                         _ = napi.napi_unwrap(setter_env, cb_info.This(), &data);
                         if (data == null) return null;
 
-                        const instance: *T = @ptrCast(@alignCast(data.?));
+                        const instance: *InstanceData = @ptrCast(@alignCast(data.?));
                         const args = cb_info.args;
                         if (args.len > 0) {
                             if (comptime @typeInfo(field.type) == .@"union") {
@@ -264,7 +284,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                                     return null;
                                 }
                             }
-                            @field(instance.*, field.name) = new_value;
+                            @field(instance.value, field.name) = new_value;
                         }
                         return null;
                     }
@@ -383,8 +403,8 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                                         if (method_info.@"fn".params[0].type.? != *T) {
                                             @compileError("Method " ++ fn_name ++ " must have a self parameter, which is a pointer to the class");
                                         }
-                                        const instance: *T = @ptrCast(@alignCast(data.?));
-                                        tuple_args[0] = instance;
+                                        const instance: *InstanceData = @ptrCast(@alignCast(data.?));
+                                        tuple_args[0] = &instance.value;
                                         initialized_args = 1;
                                     }
 
@@ -424,9 +444,18 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
             }
 
             var constructor: napi.napi_value = undefined;
-            _ = napi.napi_define_class(env, class_name.ptr, class_name.len, constructor_callback, null, prop_idx, &properties, &constructor);
+            const define_status = napi.napi_define_class(env, class_name.ptr, class_name.len, constructor_callback, null, prop_idx, &properties, &constructor);
+            if (define_status != napi.napi_ok) {
+                return NapiError.Error.fromStatus(NapiError.Status.New(define_status));
+            }
 
-            try constructors().put(class_name, constructor);
+            var new_constructor_ref: napi.napi_ref = undefined;
+            const ref_status = napi.napi_create_reference(env, constructor, 1, &new_constructor_ref);
+            if (ref_status != napi.napi_ok) {
+                return NapiError.Error.fromStatus(NapiError.Status.New(ref_status));
+            }
+
+            Self.cached_constructor_ref = new_constructor_ref;
             return constructor;
         }
 

@@ -1,4 +1,5 @@
 const builtin = @import("builtin");
+const build_options = @import("build_options");
 const napi = @import("napi-sys").napi_sys;
 const Env = @import("../napi/env.zig").Env;
 const Object = @import("../napi/value.zig").Object;
@@ -11,6 +12,10 @@ pub fn NODE_API_MODULE_WITH_INIT(
     comptime root: type,
     init: ?fn (env: Env, exports: Object) anyerror!?Object,
 ) void {
+    if (@hasDecl(build_options, "napi_tsgen") and build_options.napi_tsgen) {
+        return;
+    }
+
     const root_infos = @typeInfo(root);
 
     if (root_infos != .@"struct") {
