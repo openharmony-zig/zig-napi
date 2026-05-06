@@ -2,10 +2,7 @@ const std = @import("std");
 const napi = @import("napi-sys").napi_sys;
 const napi_env = @import("../env.zig");
 const String = @import("../value/string.zig").String;
-const napi_status = @import("./status.zig");
-const Value = @import("../value.zig").Value;
 const Promise = @import("../value/promise.zig").Promise;
-const Napi = @import("../util/napi.zig").Napi;
 const NapiError = @import("./error.zig");
 const GlobalAllocator = @import("../util/allocator.zig");
 
@@ -17,42 +14,41 @@ const WorkerStatus = enum {
 };
 
 pub fn WorkerContext(comptime T: type) type {
-    const hasData = comptime @hasField(T, "data");
-    const hasExecute = comptime @hasField(T, "Execute");
-    const hasOnComplete = comptime @hasField(T, "OnComplete");
+    const has_data = comptime @hasField(T, "data");
+    const has_execute = comptime @hasField(T, "Execute");
+    const has_on_complete = comptime @hasField(T, "OnComplete");
 
-    if (!hasData) {
+    if (!has_data) {
         @compileError("Worker must init with data field");
     }
-
-    if (!hasExecute) {
+    if (!has_execute) {
         @compileError("Worker must init with Execute field");
     }
-
-    const type_info = @typeInfo(T);
-    if (type_info != .@"struct") {
-        @compileError("T must be a struct type");
+    if (@typeInfo(T) != .@"struct") {
+        @compileError("Worker init data must be a struct");
     }
 
     const DataType = @TypeOf(@as(T, undefined).data);
     const ExecuteFn = @TypeOf(@as(T, undefined).Execute);
-    const ExecuteFnInfos = @typeInfo(ExecuteFn);
-    const OnComplete = if (hasOnComplete) @TypeOf(@as(T, undefined).OnComplete) else void;
-    const OnCompleteInfos = @typeInfo(OnComplete);
-
-    const ExecuteResult = ExecuteFnInfos.@"fn".return_type.?;
-
-    const ExecuteResultType = switch (@typeInfo(ExecuteResult)) {
-        .error_union => |eu| eu.payload,
-        else => ExecuteResult,
-    };
-
-    if (ExecuteFnInfos != .@"fn") {
+    const ExecuteInfo = @typeInfo(ExecuteFn);
+    if (ExecuteInfo != .@"fn") {
         @compileError("Execute must be a function");
     }
 
-    if (hasOnComplete and OnCompleteInfos != .@"fn") {
-        @compileError("OnComplete must be a function");
+    const ExecuteReturn = ExecuteInfo.@"fn".return_type.?;
+    const ExecutePayload = switch (@typeInfo(ExecuteReturn)) {
+        .error_union => |eu| eu.payload,
+        else => ExecuteReturn,
+    };
+
+    comptime validateExecuteSignature(DataType, ExecuteFn);
+
+    if (has_on_complete) {
+        const OnComplete = @TypeOf(@as(T, undefined).OnComplete);
+        if (@typeInfo(OnComplete) != .@"fn") {
+            @compileError("OnComplete must be a function");
+        }
+        comptime validateOnCompleteSignature(DataType, OnComplete);
     }
 
     return struct {
@@ -60,154 +56,53 @@ pub fn WorkerContext(comptime T: type) type {
         env: napi.napi_env,
         raw: napi.napi_async_work,
         allocator: std.mem.Allocator,
-        result: ExecuteResultType,
-        err: ?NapiError.Error,
-        status: WorkerStatus,
-        promise: ?*Promise,
+        result: ExecutePayload = if (ExecutePayload == void) {} else undefined,
+        err: ?NapiError.Error = null,
+        status: WorkerStatus = .Pending,
+        promise: ?*Promise = null,
 
         const Self = @This();
 
         pub fn New(env: napi_env.Env, init_data: anytype) *Self {
-            const Execute = struct {
-                fn inner_execute(inner_env: napi.napi_env, data: ?*anyopaque) callconv(.c) void {
-                    const inner_self: *Self = @ptrCast(@alignCast(data));
-                    const params = ExecuteFnInfos.@"fn".params;
-                    const return_type = @typeInfo(ExecuteFnInfos.@"fn".return_type.?);
-
-                    switch (params.len) {
-                        1 => {
-                            if (params[0].type.? != DataType) {
-                                @compileError("Execute's first parameter must be " ++ @typeName(DataType));
-                            } else {
-                                if (return_type == .error_union) {
-                                    inner_self.result = inner_self.data.Execute(inner_self.data.data) catch {
-                                        inner_self.status = .Rejected;
-                                        // transfer the last error from the worker thread to the main thread
-                                        inner_self.err = NapiError.last_error;
-                                        return;
-                                    };
-                                } else {
-                                    inner_self.result = inner_self.data.Execute(inner_self.data.data);
-                                }
-                                inner_self.status = .Resolved;
-                            }
-                        },
-                        2 => {
-                            if (params[0].type.? != napi_env.Env) {
-                                @compileError("Execute's first parameter must be napi.Env");
-                            } else if (params[1].type.? != DataType) {
-                                @compileError("Execute's second parameter must be " ++ @typeName(DataType));
-                            } else {
-                                if (return_type == .error_union) {
-                                    inner_self.result = inner_self.data.Execute(napi_env.Env.from_raw(inner_env), inner_self.data.data) catch {
-                                        inner_self.status = .Rejected;
-                                        inner_self.err = NapiError.last_error;
-                                        return;
-                                    };
-                                } else {
-                                    inner_self.result = inner_self.data.Execute(napi_env.Env.from_raw(inner_env), inner_self.data.data);
-                                }
-                                inner_self.status = .Resolved;
-                            }
-                        },
-                        else => {
-                            @compileError("Execute must have 1 or 2 parameters, but got " ++ std.fmt.comptimePrint("{d}", .{params.len}));
-                        },
-                    }
-                }
-            };
-
-            const Complete = struct {
-                fn inner_complete(inner_env: napi.napi_env, _: napi.napi_status, data: ?*anyopaque) callconv(.c) void {
-                    const inner_self: *Self = @ptrCast(@alignCast(data));
-
-                    switch (inner_self.status) {
-                        .Rejected => {
-                            if (inner_self.promise) |promise| {
-                                if (inner_self.err) |err| {
-                                    promise.Reject(err) catch {
-                                        if (NapiError.last_error) |last_err| {
-                                            last_err.throwInto(napi_env.Env.from_raw(inner_env));
-                                        }
-                                        return;
-                                    };
-                                }
-                            }
-                        },
-                        .Resolved => {
-                            if (inner_self.promise) |promise| {
-                                const napi_data = Napi.to_napi_value(inner_env, inner_self.result, null) catch {
-                                    if (NapiError.last_error) |last_err| {
-                                        last_err.throwInto(napi_env.Env.from_raw(inner_env));
-                                    }
-                                    return;
-                                };
-                                promise.Resolve(napi_data) catch {
-                                    if (NapiError.last_error) |last_err| {
-                                        last_err.throwInto(napi_env.Env.from_raw(inner_env));
-                                    }
-                                    return;
-                                };
-                            }
-                        },
-                        else => {},
-                    }
-                    const hasComplete = comptime @hasField(T, "OnComplete");
-                    if (hasComplete) {
-                        const params = OnCompleteInfos.@"fn".params;
-                        switch (params.len) {
-                            1 => {
-                                if (params[0].type.? != DataType) {
-                                    @compileError("OnComplete's first parameter must be " ++ @typeName(DataType));
-                                } else {
-                                    inner_self.data.OnComplete(inner_self.data.data);
-                                }
-                            },
-                            2 => {
-                                if (params[0].type.? != napi_env.Env) {
-                                    @compileError("OnComplete's first parameter must be napi.Env");
-                                } else if (params[1].type.? != DataType) {
-                                    @compileError("OnComplete's second parameter must be napi.Status");
-                                } else {
-                                    inner_self.data.OnComplete(napi_env.Env.from_raw(inner_env), inner_self.data.data);
-                                }
-                            },
-                            else => {
-                                @compileError("OnComplete must have 1 or 2 parameters, but got " ++ std.fmt.comptimePrint("{d}", .{params.len}));
-                            },
-                        }
-                    }
-                    inner_self.deinit();
-                }
-            };
-
             const allocator = GlobalAllocator.globalAllocator();
-            var self = allocator.create(Self) catch @panic("OOM");
+            const self = allocator.create(Self) catch @panic("OOM");
 
-            self.* = Self{
+            self.* = .{
                 .data = init_data,
                 .env = env.raw,
-                .raw = undefined,
+                .raw = null,
                 .allocator = allocator,
-                .result = undefined,
-                .status = .Pending,
-                .promise = null,
-                .err = null,
             };
 
             const async_resource_name = String.New(env, "AsyncWorkerCallback");
 
-            var result: napi.napi_async_work = undefined;
-            _ = napi.napi_create_async_work(env.raw, null, async_resource_name.raw, Execute.inner_execute, Complete.inner_complete, @ptrCast(self), &result);
+            var result: napi.napi_async_work = null;
+            const status = napi.napi_create_async_work(
+                env.raw,
+                null,
+                async_resource_name.raw,
+                execute,
+                complete,
+                @ptrCast(self),
+                &result,
+            );
+            if (status != napi.napi_ok) {
+                allocator.destroy(self);
+                @panic("Failed to create async worker");
+            }
 
             self.raw = result;
-
             return self;
         }
 
         pub fn deinit(self: *Self) void {
+            if (self.raw != null) {
+                _ = napi.napi_delete_async_work(self.env, self.raw);
+                self.raw = null;
+            }
             if (self.promise) |promise| {
                 self.allocator.destroy(promise);
+                self.promise = null;
             }
             self.allocator.destroy(self);
         }
@@ -227,7 +122,142 @@ pub fn WorkerContext(comptime T: type) type {
         pub fn Cancel(self: *Self) void {
             _ = napi.napi_cancel_async_work(self.env, self.raw);
         }
+
+        fn execute(inner_env: napi.napi_env, data: ?*anyopaque) callconv(.c) void {
+            const self: *Self = @ptrCast(@alignCast(data));
+            NapiError.clearLastError();
+            self.run(inner_env) catch {
+                self.status = .Rejected;
+                self.err = NapiError.last_error orelse NapiError.Error.withStatus("GenericFailure");
+                return;
+            };
+            self.status = .Resolved;
+        }
+
+        fn complete(inner_env: napi.napi_env, status: napi.napi_status, data: ?*anyopaque) callconv(.c) void {
+            const self: *Self = @ptrCast(@alignCast(data));
+            defer self.deinit();
+
+            if (status == napi.napi_cancelled) {
+                self.status = .Cancelled;
+            }
+
+            switch (self.status) {
+                .Rejected => {
+                    if (self.promise) |promise| {
+                        if (self.err) |err| {
+                            promise.Reject(err) catch {
+                                if (NapiError.last_error) |last_err| {
+                                    last_err.throwInto(napi_env.Env.from_raw(inner_env));
+                                }
+                            };
+                        }
+                    } else if (self.err) |err| {
+                        err.throwInto(napi_env.Env.from_raw(inner_env));
+                    }
+                },
+                .Resolved => {
+                    if (self.promise) |promise| {
+                        if (ExecutePayload == void) {
+                            promise.Resolve({}) catch {};
+                        } else {
+                            promise.Resolve(self.result) catch {
+                                if (NapiError.last_error) |last_err| {
+                                    last_err.throwInto(napi_env.Env.from_raw(inner_env));
+                                }
+                            };
+                        }
+                    }
+                },
+                else => {},
+            }
+
+            if (has_on_complete) {
+                callOnComplete(self.data, napi_env.Env.from_raw(inner_env));
+            }
+        }
+
+        fn run(self: *Self, inner_env: napi.napi_env) !void {
+            const execute_fn = self.data.Execute;
+            if (@typeInfo(ExecuteReturn) == .error_union) {
+                if (ExecutePayload == void) {
+                    if (ExecuteInfo.@"fn".params.len == 1) {
+                        try execute_fn(self.data.data);
+                    } else {
+                        try execute_fn(napi_env.Env.from_raw(inner_env), self.data.data);
+                    }
+                } else {
+                    self.result = if (ExecuteInfo.@"fn".params.len == 1)
+                        try execute_fn(self.data.data)
+                    else
+                        try execute_fn(napi_env.Env.from_raw(inner_env), self.data.data);
+                }
+            } else {
+                if (ExecutePayload == void) {
+                    if (ExecuteInfo.@"fn".params.len == 1) {
+                        _ = execute_fn(self.data.data);
+                    } else {
+                        _ = execute_fn(napi_env.Env.from_raw(inner_env), self.data.data);
+                    }
+                } else {
+                    self.result = if (ExecuteInfo.@"fn".params.len == 1)
+                        execute_fn(self.data.data)
+                    else
+                        execute_fn(napi_env.Env.from_raw(inner_env), self.data.data);
+                }
+            }
+        }
     };
+}
+
+fn validateExecuteSignature(comptime DataType: type, comptime ExecuteFn: type) void {
+    const info = @typeInfo(ExecuteFn).@"fn";
+    if (info.params.len != 1 and info.params.len != 2) {
+        @compileError("Worker Execute must accept (data) or (napi.Env, data)");
+    }
+
+    if (info.params.len == 1) {
+        if (info.params[0].type.? != DataType) {
+            @compileError("Worker Execute data type mismatch");
+        }
+    } else {
+        if (info.params[0].type.? != napi_env.Env) {
+            @compileError("Worker Execute first parameter must be napi.Env");
+        }
+        if (info.params[1].type.? != DataType) {
+            @compileError("Worker Execute data type mismatch");
+        }
+    }
+}
+
+fn validateOnCompleteSignature(comptime DataType: type, comptime OnCompleteFn: type) void {
+    const info = @typeInfo(OnCompleteFn).@"fn";
+    if (info.params.len != 1 and info.params.len != 2) {
+        @compileError("Worker OnComplete must accept (data) or (napi.Env, data)");
+    }
+
+    if (info.params.len == 1) {
+        if (info.params[0].type.? != DataType) {
+            @compileError("Worker OnComplete data type mismatch");
+        }
+    } else {
+        if (info.params[0].type.? != napi_env.Env) {
+            @compileError("Worker OnComplete first parameter must be napi.Env");
+        }
+        if (info.params[1].type.? != DataType) {
+            @compileError("Worker OnComplete data type mismatch");
+        }
+    }
+}
+
+fn callOnComplete(data: anytype, env: napi_env.Env) void {
+    const OnCompleteFn = @TypeOf(data.OnComplete);
+    const info = @typeInfo(OnCompleteFn).@"fn";
+    if (info.params.len == 1) {
+        data.OnComplete(data.data);
+    } else {
+        data.OnComplete(env, data.data);
+    }
 }
 
 pub fn Worker(env: napi_env.Env, data: anytype) *WorkerContext(@TypeOf(data)) {

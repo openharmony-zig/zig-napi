@@ -13,10 +13,25 @@ pub const ThreadSafeFunctionMode = enum {
     Blocking,
 
     const Self = @This();
+
     pub fn to_raw(self: Self) napi.napi_threadsafe_function_call_mode {
         return switch (self) {
             .NonBlocking => napi.napi_tsfn_nonblocking,
             .Blocking => napi.napi_tsfn_blocking,
+        };
+    }
+};
+
+pub const ThreadSafeFunctionReleaseMode = enum {
+    Release,
+    Abort,
+
+    const Self = @This();
+
+    pub fn to_raw(self: Self) napi.napi_threadsafe_function_release_mode {
+        return switch (self) {
+            .Release => napi.napi_tsfn_release,
+            .Abort => napi.napi_tsfn_abort,
         };
     }
 };
@@ -41,6 +56,8 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
         allocator: std.mem.Allocator,
         args: Args,
         return_type: Return,
+        closed: bool,
+        aborted: bool,
         comptime thread_safe_function_call_variant: bool = ThreadSafeFunctionCalleeHandled,
         comptime max_queue_size: usize = MaxQueueSize,
 
@@ -50,6 +67,7 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
             const ThreadSafe = struct {
                 fn finalize(_: napi.napi_env, data: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
                     const self: *Self = @ptrCast(@alignCast(data));
+                    self.closed = true;
                     self.deinit();
                 }
 
@@ -70,10 +88,8 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
                     if (self.thread_safe_function_call_variant) {
                         if (args.err) |param| {
                             argv[0] = param.to_napi_error(Env.from_raw(inner_env));
-                            // if err, return immediately
                             var ret: napi.napi_value = undefined;
                             _ = napi.napi_call_function(inner_env, undefined_value.raw, js_callback, args_len + call_variant, argv.ptr, &ret);
-                            // Free the call data
                             allocator.destroy(param);
                             allocator.destroy(args);
                             return;
@@ -90,14 +106,11 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
                         } else {
                             argv[call_variant] = Napi.to_napi_value(inner_env, actual_args.*, null) catch null;
                         }
-                        // Free the args data
                         allocator.destroy(actual_args);
                     }
 
                     var ret: napi.napi_value = undefined;
                     _ = napi.napi_call_function(inner_env, undefined_value.raw, js_callback, args_len + call_variant, argv.ptr, &ret);
-
-                    // Free the call data
                     allocator.destroy(args);
                 }
             };
@@ -105,11 +118,36 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
             const allocator = GlobalAllocator.globalAllocator();
             var self = allocator.create(Self) catch @panic("OOM");
 
-            self.* = Self{ .env = env, .raw = raw, .allocator = allocator, .args = undefined, .return_type = undefined, .tsfn_raw = undefined };
+            self.* = Self{
+                .env = env,
+                .raw = raw,
+                .allocator = allocator,
+                .args = undefined,
+                .return_type = undefined,
+                .tsfn_raw = null,
+                .closed = false,
+                .aborted = false,
+            };
 
-            var tsfn_raw: napi.napi_threadsafe_function = undefined;
+            var tsfn_raw: napi.napi_threadsafe_function = null;
             const resource = String.New(Env.from_raw(env), "ThreadSafeFunction");
-            _ = napi.napi_create_threadsafe_function(env, raw, null, resource.raw, 0, 1, @ptrCast(self), null, @ptrCast(self), ThreadSafe.cb, &tsfn_raw);
+            const create_status = napi.napi_create_threadsafe_function(
+                env,
+                raw,
+                null,
+                resource.raw,
+                self.max_queue_size,
+                1,
+                @ptrCast(self),
+                ThreadSafe.finalize,
+                @ptrCast(self),
+                ThreadSafe.cb,
+                &tsfn_raw,
+            );
+            if (create_status != napi.napi_ok) {
+                allocator.destroy(self);
+                @panic("Failed to create ThreadSafeFunction");
+            }
 
             self.tsfn_raw = tsfn_raw;
 
@@ -120,24 +158,81 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
             self.allocator.destroy(self);
         }
 
-        pub fn Ok(self: *const Self, args: Args, mode: ThreadSafeFunctionMode) void {
+        fn freeCallData(self: *const Self, data: *CallData(Args)) void {
+            if (data.args) |actual_args| {
+                self.allocator.destroy(actual_args);
+            }
+            if (data.err) |actual_err| {
+                self.allocator.destroy(actual_err);
+            }
+            self.allocator.destroy(data);
+        }
+
+        fn callThreadSafeFunction(self: *const Self, data: *CallData(Args), mode: ThreadSafeFunctionMode) !void {
+            const status = napi.napi_call_threadsafe_function(self.tsfn_raw, @ptrCast(data), mode.to_raw());
+            if (status != napi.napi_ok) {
+                self.freeCallData(data);
+                return NapiError.Error.fromStatus(NapiError.Status.New(status));
+            }
+        }
+
+        pub fn acquire(self: *const Self) !void {
+            const status = napi.napi_acquire_threadsafe_function(self.tsfn_raw);
+            if (status != napi.napi_ok) {
+                return NapiError.Error.fromStatus(NapiError.Status.New(status));
+            }
+        }
+
+        pub fn release(self: *const Self, mode: ThreadSafeFunctionReleaseMode) !void {
+            const status = napi.napi_release_threadsafe_function(self.tsfn_raw, mode.to_raw());
+            if (status != napi.napi_ok) {
+                return NapiError.Error.fromStatus(NapiError.Status.New(status));
+            }
+        }
+
+        pub fn abort(self: *Self) !void {
+            if (self.aborted) return;
+            try self.release(.Abort);
+            self.aborted = true;
+        }
+
+        pub fn ref(self: *const Self) !void {
+            const status = napi.napi_ref_threadsafe_function(self.env, self.tsfn_raw);
+            if (status != napi.napi_ok) {
+                return NapiError.Error.fromStatus(NapiError.Status.New(status));
+            }
+        }
+
+        pub fn unref(self: *const Self) !void {
+            const status = napi.napi_unref_threadsafe_function(self.env, self.tsfn_raw);
+            if (status != napi.napi_ok) {
+                return NapiError.Error.fromStatus(NapiError.Status.New(status));
+            }
+        }
+
+        pub fn Ok(self: *const Self, args: Args, mode: ThreadSafeFunctionMode) !void {
             const args_data = self.allocator.create(Args) catch @panic("OOM");
             args_data.* = args;
 
             const data = self.allocator.create(CallData(Args)) catch @panic("OOM");
             data.* = CallData(Args){ .args = args_data, .err = null };
 
-            _ = napi.napi_call_threadsafe_function(self.tsfn_raw, @ptrCast(data), mode.to_raw());
+            try self.callThreadSafeFunction(data, mode);
         }
 
-        pub fn Err(self: *const Self, err: NapiError.Error, mode: ThreadSafeFunctionMode) void {
-            const e = self.allocator.create(NapiError.Error) catch @panic("OOM");
-            e.* = err;
+        pub fn Err(self: *const Self, err: NapiError.Error, mode: ThreadSafeFunctionMode) !void {
+            const actual_err = self.allocator.create(NapiError.Error) catch @panic("OOM");
+            actual_err.* = err;
 
             const data = self.allocator.create(CallData(Args)) catch @panic("OOM");
-            data.* = CallData(Args){ .args = null, .err = e };
+            data.* = CallData(Args){ .args = null, .err = actual_err };
 
-            _ = napi.napi_call_threadsafe_function(self.tsfn_raw, @ptrCast(data), mode.to_raw());
+            try self.callThreadSafeFunction(data, mode);
         }
     };
+}
+
+test "ThreadSafeFunction release modes map to napi values" {
+    try std.testing.expect(ThreadSafeFunctionReleaseMode.Release.to_raw() == napi.napi_tsfn_release);
+    try std.testing.expect(ThreadSafeFunctionReleaseMode.Abort.to_raw() == napi.napi_tsfn_abort);
 }

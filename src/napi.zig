@@ -6,6 +6,8 @@ const module = @import("./prelude/module.zig");
 const worker = @import("./napi/wrapper/worker.zig");
 const err = @import("./napi/wrapper/error.zig");
 const thread_safe_function = @import("./napi/wrapper/thread_safe_function.zig");
+const async = @import("./napi/async.zig");
+const abort_signal = @import("./napi/abort_signal.zig");
 const class = @import("./napi/wrapper/class.zig");
 const buffer = @import("./napi/wrapper/buffer.zig");
 const arraybuffer = @import("./napi/wrapper/arraybuffer.zig");
@@ -35,6 +37,12 @@ pub const Function = function.Function;
 pub const CallbackInfo = callback_info.CallbackInfo;
 pub const Worker = worker.Worker;
 pub const ThreadSafeFunction = thread_safe_function.ThreadSafeFunction;
+pub const ThreadSafeFunctionMode = thread_safe_function.ThreadSafeFunctionMode;
+pub const ThreadSafeFunctionReleaseMode = thread_safe_function.ThreadSafeFunctionReleaseMode;
+pub const AsyncRuntime = async.RuntimeModel;
+pub const CancelToken = async.CancelToken;
+pub const AbortSignal = abort_signal.AbortSignal;
+pub const resolveRequestedRuntime = async.resolveRequestedRuntime;
 pub const Class = class.Class;
 pub const ClassWithoutInit = class.ClassWithoutInit;
 pub const Buffer = buffer.Buffer;
@@ -57,6 +65,15 @@ pub fn FunctionRef(comptime Args: type, comptime Return: type) type {
     return reference.Reference(function.Function(Args, Return));
 }
 pub const ObjectRef = reference.Reference(value.Object);
+pub fn AsyncContext(comptime Event: type) type {
+    return async.AsyncContext(Event);
+}
+pub fn Async(comptime Result: type, comptime runtime: async.RuntimeModel) type {
+    return async.Async(Result, runtime);
+}
+pub fn AsyncWithEvents(comptime Result: type, comptime Event: type, comptime runtime: async.RuntimeModel) type {
+    return async.AsyncWithEvents(Result, Event, runtime);
+}
 
 pub const NODE_API_MODULE = module.NODE_API_MODULE;
 pub const NODE_API_MODULE_WITH_INIT = module.NODE_API_MODULE_WITH_INIT;

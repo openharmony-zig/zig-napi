@@ -10,6 +10,7 @@ const class = @import("../wrapper/class.zig");
 const Buffer = @import("../wrapper/buffer.zig").Buffer;
 const ArrayBuffer = @import("../wrapper/arraybuffer.zig").ArrayBuffer;
 const DataView = @import("../wrapper/dataview.zig").DataView;
+const AbortSignal = @import("../abort_signal.zig").AbortSignal;
 
 fn napiTypeOf(env: napi.napi_env, raw: napi.napi_value) napi.napi_valuetype {
     var value_type: napi.napi_valuetype = undefined;
@@ -161,6 +162,7 @@ fn valueMatchesType(env: napi.napi_env, raw: napi.napi_value, comptime T: type) 
             break :blk valueMatchesType(env, raw, infos.optional.child);
         },
         .@"struct" => blk: {
+            if (comptime helper.isAbortSignal(T)) break :blk napiTypeOf(env, raw) == napi.napi_object;
             if (comptime helper.isNapiFunction(T)) break :blk napiTypeOf(env, raw) == napi.napi_function;
             if (comptime helper.isTypedArray(T)) break :blk isTypedArrayValue(env, raw);
             if (comptime helper.isDataView(T)) break :blk isDataViewValue(env, raw);
@@ -242,6 +244,9 @@ pub const Napi = struct {
                                 return NapiValue.Array.from_napi_value(env, raw, T);
                             },
                             .@"struct" => {
+                                if (comptime helper.isAbortSignal(T)) {
+                                    return AbortSignal.from_napi_value(env, raw);
+                                }
                                 if (comptime helper.isNapiFunction(T)) {
                                     const fn_infos = @typeInfo(T);
                                     comptime var args_type = void;
@@ -388,6 +393,9 @@ pub const Napi = struct {
                     .@"struct" => {
                         if (comptime helper.isNapiFunction(value_type)) {
                             return value.raw;
+                        }
+                        if (comptime helper.isAsyncDescriptor(value_type)) {
+                            @compileError("Async descriptors can only be returned from exported functions");
                         }
                         if (comptime helper.isTypedArray(value_type)) {
                             return value.raw;

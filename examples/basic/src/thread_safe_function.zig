@@ -13,16 +13,25 @@ fn sleepForFiveSeconds() void {
 }
 
 fn execute_thread_safe_function(tsfn: *napi.ThreadSafeFunction(Args, Return, true, 0)) void {
+    defer tsfn.release(.Release) catch {};
     sleepForFiveSeconds();
-    tsfn.Ok(.{ 1, 2 }, .NonBlocking);
+    tsfn.Ok(.{ 1, 2 }, .NonBlocking) catch {};
 }
 
 fn execute_thread_safe_function_with_error(tsfn: *napi.ThreadSafeFunction(Args, Return, true, 0)) void {
+    defer tsfn.release(.Release) catch {};
     sleepForFiveSeconds();
-    tsfn.Err(napi.Error.withReason("TSFN Error"), .NonBlocking);
+    tsfn.Err(napi.Error.withReason("TSFN Error"), .NonBlocking) catch {};
 }
 
-pub fn call_thread_safe_function(tsfn: *napi.ThreadSafeFunction(Args, Return, true, 0)) void {
-    _ = std.Thread.spawn(.{}, execute_thread_safe_function, .{tsfn}) catch @panic("Failed to spawn thread");
-    _ = std.Thread.spawn(.{}, execute_thread_safe_function_with_error, .{tsfn}) catch @panic("Failed to spawn thread");
+pub fn call_thread_safe_function(tsfn: *napi.ThreadSafeFunction(Args, Return, true, 0)) !void {
+    try tsfn.acquire();
+    const worker = try std.Thread.spawn(.{}, execute_thread_safe_function, .{tsfn});
+    worker.detach();
+
+    try tsfn.acquire();
+    const worker_with_error = try std.Thread.spawn(.{}, execute_thread_safe_function_with_error, .{tsfn});
+    worker_with_error.detach();
+
+    try tsfn.release(.Release);
 }
