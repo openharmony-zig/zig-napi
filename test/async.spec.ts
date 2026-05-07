@@ -21,7 +21,11 @@ export async function testAsync(native: NativeAddon) {
   assertEqual(await native.fib_async(10), 55, "fib_async");
 
   const progressEvents: Array<ESObject> = [];
-  assertEqual(await native.fib_async_progress(8, (event: ESObject) => progressEvents.push(event)), 21, "fib_async_progress");
+  assertEqual(
+    await native.fib_async_progress(8, (event: ESObject) => progressEvents.push(event)),
+    21,
+    "fib_async_progress",
+  );
   assertEqual(progressEvents.length, 2, "fib_async_progress events");
   assertEqual(progressEvents[0].current, 0, "fib_async_progress first event");
   assertEqual(progressEvents[1].current, 8, "fib_async_progress last event");
@@ -54,12 +58,32 @@ export async function testAsync(native: NativeAddon) {
   await assertRejects(native.async_fail_thread("async boom"), "async boom", "async_fail_thread");
 
   const countEvents: Array<ESObject> = [];
-  assertEqual(await native.count_async_progress_thread(3, (event: ESObject) => countEvents.push(event)), 3, "count_async_progress_thread result");
-  assertArrayEqual(countEvents.map((event: ESObject) => event.current), [0, 1, 2, 3], "count_async_progress_thread current events");
+  assertEqual(
+    await native.count_async_progress_thread(3, (event: ESObject) => countEvents.push(event)),
+    3,
+    "count_async_progress_thread result",
+  );
+  assertArrayEqual(
+    countEvents.map((event: ESObject) => event.current),
+    [0, 1, 2, 3],
+    "count_async_progress_thread current events",
+  );
 
   const eventModeEvents: Array<ESObject> = [];
-  assertEqual(await native.event_mode_progress_async(2, (event: ESObject) => eventModeEvents.push(event)), 2, "event_mode_progress_async result");
-  assertArrayEqual(eventModeEvents.map((event: ESObject) => event.current), [0, 1, 2], "event_mode_progress_async current events");
+  assertEqual(
+    await native.event_mode_progress_async(2, (event: ESObject) => eventModeEvents.push(event)),
+    2,
+    "event_mode_progress_async result",
+  );
+  assertArrayEqual(
+    eventModeEvents.map((event: ESObject) => event.current),
+    [0, 1, 2],
+    "event_mode_progress_async current events",
+  );
 
-  await assertRejects(native.abortable_count_async(4096, abortSignal(true)), "AbortError", "abortable_count_async pre-aborted");
+  await assertRejects(
+    native.abortable_count_async(4096, abortSignal(true)),
+    "AbortError",
+    "abortable_count_async pre-aborted",
+  );
 }

@@ -31,7 +31,12 @@ export function exerciseFinalizerWrappers(native: NativeAddon) {
     assertEqual(withoutInit.total(), 0, "class without init method");
     withoutInit = null;
 
-    let factoryClass: ESObject | null = native.MemoryFactoryClass.initWithFactory(`factory-${i}`, [1, 2, 3, i]);
+    let factoryClass: ESObject | null = native.MemoryFactoryClass.initWithFactory(`factory-${i}`, [
+      1,
+      2,
+      3,
+      i,
+    ]);
     assertEqual(factoryClass.name, `factory-${i}`, "factory class name");
     assertEqual(factoryClass.total(), i + 6, "factory class method");
     factoryClass = null;

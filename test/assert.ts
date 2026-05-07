@@ -20,13 +20,22 @@ export function assertNullish(actual: ESObject, message: string) {
   }
 }
 
-export function assertApproxEqual(actual: number, expected: number, message: string, epsilon: number = 0.00001) {
+export function assertApproxEqual(
+  actual: number,
+  expected: number,
+  message: string,
+  epsilon: number = 0.00001,
+) {
   if (Math.abs(actual - expected) > epsilon) {
     fail(`${message}: expected=${String(expected)} actual=${String(actual)}`);
   }
 }
 
-export function assertArrayEqual(actual: Array<ESObject>, expected: Array<ESObject>, message: string) {
+export function assertArrayEqual(
+  actual: Array<ESObject>,
+  expected: Array<ESObject>,
+  message: string,
+) {
   assertEqual(actual.length, expected.length, `${message}.length`);
   for (let i = 0; i < expected.length; i++) {
     assertEqual(actual[i], expected[i], `${message}[${i}]`);
@@ -51,7 +60,11 @@ export function assertThrows(fn: () => void, expectedMessage: string, message: s
   assert(threw, `${message}: expected throw`);
 }
 
-export async function assertRejects(promise: Promise<any>, expectedMessage: string, message: string) {
+export async function assertRejects(
+  promise: Promise<any>,
+  expectedMessage: string,
+  message: string,
+) {
   let rejected = false;
   try {
     await promise;

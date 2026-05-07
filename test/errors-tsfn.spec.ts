@@ -18,7 +18,11 @@ async function waitForThreadSafeFunction(native: NativeAddon) {
         try {
           if (err) {
             assert(!sawErr, "thread safe function error callback duplicated");
-            assertIncludes(String(err && (err.message || err)), "TSFN Error", "thread safe function error callback");
+            assertIncludes(
+              String(err && (err.message || err)),
+              "TSFN Error",
+              "thread safe function error callback",
+            );
             sawErr = true;
           } else {
             assert(!sawOk, "thread safe function success callback duplicated");

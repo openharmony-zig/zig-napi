@@ -15,14 +15,28 @@ export function testUnionsAndEnums(native: NativeAddon) {
   assertEqual(native.union_kind(42), "number", "union_kind number");
   assertEqual(native.union_kind("forty-two"), "text", "union_kind text");
 
-  assertPayload(native.object_or_text_identity({ title: "payload", count: 5 }), "payload", 5, "object_or_text payload");
+  assertPayload(
+    native.object_or_text_identity({ title: "payload", count: 5 }),
+    "payload",
+    5,
+    "object_or_text payload",
+  );
   assertEqual(native.object_or_text_identity("plain"), "plain", "object_or_text text");
   assertPayload(native.make_object_or_text(true), "hello", 2, "make_object_or_text payload");
   assertEqual(native.make_object_or_text(false), "plain", "make_object_or_text text");
 
-  assertPayload(native.object_or_array_identity({ title: "list-payload", count: 6 }), "list-payload", 6, "object_or_array payload");
+  assertPayload(
+    native.object_or_array_identity({ title: "list-payload", count: 6 }),
+    "list-payload",
+    6,
+    "object_or_array payload",
+  );
   assertArrayEqual(native.object_or_array_identity([1, 2, 3]), [1, 2, 3], "object_or_array list");
-  assertArrayEqual(native.tuple_or_text_identity([1, true, "tuple"]), [1, true, "tuple"], "tuple_or_text tuple");
+  assertArrayEqual(
+    native.tuple_or_text_identity([1, true, "tuple"]),
+    [1, true, "tuple"],
+    "tuple_or_text tuple",
+  );
   assertEqual(native.tuple_or_text_identity("tuple-text"), "tuple-text", "tuple_or_text text");
 
   assertEqual(native.flip_flag_or_increment(true), false, "flip_flag_or_increment bool");
@@ -47,23 +61,62 @@ export function testUnionsAndEnums(native: NativeAddon) {
 
   const madeBuffer = native.make_buffer_or_text(true);
   assertEqual(native.get_buffer(madeBuffer), 16, "make_buffer_or_text buffer");
-  assertEqual(native.get_buffer(native.buffer_or_text_identity(madeBuffer)), 16, "buffer_or_text buffer");
+  assertEqual(
+    native.get_buffer(native.buffer_or_text_identity(madeBuffer)),
+    16,
+    "buffer_or_text buffer",
+  );
   assertEqual(native.buffer_or_text_identity("buffer-text"), "buffer-text", "buffer_or_text text");
   assertEqual(native.make_buffer_or_text(false), "buffer-fallback", "make_buffer_or_text text");
 
   const madeArrayBuffer = native.make_arraybuffer_or_array(true);
   assertEqual(native.get_arraybuffer(madeArrayBuffer), 16, "make_arraybuffer_or_array arraybuffer");
-  assertEqual(native.get_arraybuffer(native.arraybuffer_or_array_identity(madeArrayBuffer)), 16, "arraybuffer_or_array arraybuffer");
-  assertArrayEqual(native.arraybuffer_or_array_identity([4, 5]), [4, 5], "arraybuffer_or_array list");
-  assertArrayEqual(native.make_arraybuffer_or_array(false), [1, 2, 3], "make_arraybuffer_or_array list");
+  assertEqual(
+    native.get_arraybuffer(native.arraybuffer_or_array_identity(madeArrayBuffer)),
+    16,
+    "arraybuffer_or_array arraybuffer",
+  );
+  assertArrayEqual(
+    native.arraybuffer_or_array_identity([4, 5]),
+    [4, 5],
+    "arraybuffer_or_array list",
+  );
+  assertArrayEqual(
+    native.make_arraybuffer_or_array(false),
+    [1, 2, 3],
+    "make_arraybuffer_or_array list",
+  );
 
-  assertPayload(native.payload_or_color_identity({ title: "mixed", count: 11 }), "mixed", 11, "payload_or_color payload");
+  assertPayload(
+    native.payload_or_color_identity({ title: "mixed", count: 11 }),
+    "mixed",
+    11,
+    "payload_or_color payload",
+  );
   assertEqual(native.payload_or_color_identity(1), 1, "payload_or_color color");
   assertPayload(native.make_payload_or_color(true), "mixed", 9, "make_payload_or_color payload");
   assertEqual(native.make_payload_or_color(false), 1, "make_payload_or_color color");
 
-  assertPayload(native.payload_or_string_color_identity({ title: "string-color", count: 12 }), "string-color", 12, "payload_or_string_color payload");
-  assertEqual(native.payload_or_string_color_identity("Red"), "Red", "payload_or_string_color color");
-  assertPayload(native.make_payload_or_string_color(true), "string-enum", 3, "make_payload_or_string_color payload");
-  assertEqual(native.make_payload_or_string_color(false), "Green", "make_payload_or_string_color color");
+  assertPayload(
+    native.payload_or_string_color_identity({ title: "string-color", count: 12 }),
+    "string-color",
+    12,
+    "payload_or_string_color payload",
+  );
+  assertEqual(
+    native.payload_or_string_color_identity("Red"),
+    "Red",
+    "payload_or_string_color color",
+  );
+  assertPayload(
+    native.make_payload_or_string_color(true),
+    "string-enum",
+    3,
+    "make_payload_or_string_color payload",
+  );
+  assertEqual(
+    native.make_payload_or_string_color(false),
+    "Green",
+    "make_payload_or_string_color color",
+  );
 }

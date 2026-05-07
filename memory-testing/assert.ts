@@ -14,7 +14,11 @@ export function assertEqual(actual: ESObject, expected: ESObject, message: strin
   }
 }
 
-export function assertArrayEqual(actual: Array<ESObject>, expected: Array<ESObject>, message: string) {
+export function assertArrayEqual(
+  actual: Array<ESObject>,
+  expected: Array<ESObject>,
+  message: string,
+) {
   assertEqual(actual.length, expected.length, `${message}.length`);
   for (let i = 0; i < expected.length; i++) {
     assertEqual(actual[i], expected[i], `${message}[${i}]`);

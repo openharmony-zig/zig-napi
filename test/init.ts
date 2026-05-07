@@ -14,7 +14,11 @@ runSuite("__ZIG_NAPI_INIT_TEST_RESULT__", async (native) => {
 
   assertArrayEqual(native.get_and_return_array([1, 2, 3]), [1, 2, 3], "init array roundtrip");
   assertArrayEqual(native.get_arraylist([3, 2, 1]), [3, 2, 1], "init arraylist roundtrip");
-  assertArrayEqual(native.get_named_array([7, true, "tuple"]), [7, true, "tuple"], "init tuple roundtrip");
+  assertArrayEqual(
+    native.get_named_array([7, true, "tuple"]),
+    [7, true, "tuple"],
+    "init tuple roundtrip",
+  );
 
   assertThrows(() => native.throw_error(), "test", "init throw_error");
 });
