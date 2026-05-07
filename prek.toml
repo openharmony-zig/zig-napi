@@ -1,0 +1,15 @@
+fail_fast = true
+default_install_hook_types = ["pre-commit"]
+default_stages = ["pre-commit"]
+
+[[repos]]
+repo = "local"
+
+[[repos.hooks]]
+id = "build-and-format"
+name = "build and format"
+language = "system"
+entry = "sh -c 'just build-example && just format'"
+pass_filenames = false
+always_run = true
+fail_fast = true

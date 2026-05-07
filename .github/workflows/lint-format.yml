@@ -1,0 +1,68 @@
+name: Lint and Format
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    name: Lint
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: openharmony-zig/setup-zig-ohos@v0.1.0
+        with:
+          tag: '0.16.0'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Validate prek config
+        run: npm exec --yes --package @j178/prek -- prek validate-config prek.toml
+
+      - name: Check Zig syntax
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' file; do
+            zig ast-check "$file"
+          done < <(git ls-files -z '*.zig')
+          while IFS= read -r -d '' file; do
+            zig ast-check --zon "$file"
+          done < <(git ls-files -z '*.zon')
+
+      - name: Build root package
+        run: zig build --summary all
+
+  format:
+    runs-on: ubuntu-latest
+    name: Format
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: openharmony-zig/setup-zig-ohos@v0.1.0
+        with:
+          tag: '0.16.0'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check formatting
+        run: |
+          set -euo pipefail
+          git ls-files -z '*.zig' '*.zon' | xargs -0 zig fmt
+          git ls-files -z '*.js' '*.jsx' '*.ts' '*.tsx' '*.ets' \
+            | xargs -0 npm exec --yes --package @ohos-rs/oxk -- oxk format
+          git diff --exit-code

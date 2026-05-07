@@ -10,11 +10,12 @@ pub fn build(b: *std.Build) !void {
     const napi = b.addModule("napi", .{
         .root_source_file = b.path("src/napi.zig"),
     });
-    const build_options = b.addOptions();
-    build_options.addOption(bool, "napi_tsgen", false);
+    const build_options = b.addModule("build_options", .{
+        .root_source_file = b.path("src/build/options.zig"),
+    });
 
     napi.addImport("napi-sys", napi_sys);
-    napi.addOptions("build_options", build_options);
+    napi.addImport("build_options", build_options);
 
     napi.addIncludePath(b.path("src/sys/header"));
     napi_sys.addIncludePath(b.path("src/sys/header"));

@@ -7,8 +7,16 @@ export function testFunctionsAndClasses(native: NativeAddon) {
 
   const createdFunction = native.create_function();
   assertEqual(createdFunction(19, 23), 42, "create_function");
-  assertEqual(native.call_function((left: number, right: number) => left + right + 1), 4, "call_function");
-  assertEqual(native.call_function_with_reference((left: number, right: number) => left * right), 2, "call_function_with_reference");
+  assertEqual(
+    native.call_function((left: number, right: number) => left + right + 1),
+    4,
+    "call_function",
+  );
+  assertEqual(
+    native.call_function_with_reference((left: number, right: number) => left * right),
+    2,
+    "call_function_with_reference",
+  );
 
   const classValue = new native.TestClass("Lin", 9);
   assertEqual(classValue.name, "Lin", "class.name");
@@ -24,10 +32,18 @@ export function testFunctionsAndClasses(native: NativeAddon) {
   const factoryClassValue = native.TestFactoryClass.initWithFactory(13, "Factory");
   assertEqual(factoryClassValue.name, "Factory", "class factory.name");
   assertEqual(factoryClassValue.age, 13, "class factory.age");
-  assertEqual(factoryClassValue.format(), "TestFactory { name = Factory, age = 13 }", "class factory format");
+  assertEqual(
+    factoryClassValue.format(),
+    "TestFactory { name = Factory, age = 13 }",
+    "class factory format",
+  );
 
   const constructedFactory = new native.TestFactoryClass("Ctor", 14);
   assertEqual(constructedFactory.name, "Ctor", "class factory constructor.name");
   assertEqual(constructedFactory.age, 14, "class factory constructor.age");
-  assertEqual(constructedFactory.format(), "TestFactory { name = Ctor, age = 14 }", "class factory constructor format");
+  assertEqual(
+    constructedFactory.format(),
+    "TestFactory { name = Ctor, age = 14 }",
+    "class factory constructor format",
+  );
 }

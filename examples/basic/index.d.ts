@@ -2,102 +2,102 @@
 /* eslint-disable */
 
 export interface FibProgress {
-  current: number
-  total: number
+  current: number;
+  total: number;
 }
 
 export interface FileReadSummary {
-  path: string
-  bytes: number
-  text: string
+  path: string;
+  bytes: number;
+  text: string;
 }
 
 export interface ParallelReadInput {
-  first_path: string
-  second_path: string
-  preview_bytes: number
+  first_path: string;
+  second_path: string;
+  preview_bytes: number;
 }
 
 export interface ParallelReadSummary {
-  first_bytes: number
-  second_bytes: number
-  total_bytes: number
-  preview: string
+  first_bytes: number;
+  second_bytes: number;
+  total_bytes: number;
+  preview: string;
 }
 
 export interface AsyncMathInput {
-  left: number
-  right: number
-  scale: number
+  left: number;
+  right: number;
+  scale: number;
 }
 
 export interface AsyncMathResult {
-  sum: number
-  product: number
-  scaled_sum: number
+  sum: number;
+  product: number;
+  scaled_sum: number;
 }
 
 export interface CountProgress {
-  current: number
-  total: number
+  current: number;
+  total: number;
 }
 
 export interface AbortSignal {
-  aborted: boolean
-  reason?: any
-  onabort: null | ((this: AbortSignal, event: any) => void)
-  addEventListener(name: string, listener: (this: AbortSignal, event: any) => any): void
-  removeEventListener(name: string, listener: (this: AbortSignal, event: any) => any): void
-  throwIfAborted?(): void
+  aborted: boolean;
+  reason?: any;
+  onabort: null | ((this: AbortSignal, event: any) => void);
+  addEventListener(name: string, listener: (this: AbortSignal, event: any) => any): void;
+  removeEventListener(name: string, listener: (this: AbortSignal, event: any) => any): void;
+  throwIfAborted?(): void;
 }
 
 export interface FullField {
-  name: string
-  age: number
-  is_student: boolean
+  name: string;
+  age: number;
+  is_student: boolean;
 }
 
 export interface OptionalField {
-  name: string
-  age?: number
-  is_student?: boolean
+  name: string;
+  age?: number;
+  is_student?: boolean;
 }
 
 export interface NullableField {
-  name?: string
+  name?: string;
 }
 
 export declare class TestClass {
-  constructor(name: string, age: number)
-  name: string
-  age: number
+  constructor(name: string, age: number);
+  name: string;
+  age: number;
 }
 
 export declare class TestWithInitClass {
-  constructor(age: number, name: string)
-  name: string
-  age: number
-  static readonly hello: string
+  constructor(age: number, name: string);
+  name: string;
+  age: number;
+  static readonly hello: string;
 }
 
 export declare class TestWithoutInitClass {
-  private constructor()
-  name: string
-  age: number
-  static readonly hello: string
+  private constructor();
+  name: string;
+  age: number;
+  static readonly hello: string;
 }
 
 export declare class TestFactoryClass {
-  constructor(name: string, age: number)
-  name: string
-  age: number
-  static initWithFactory(age: number, name: string): TestFactoryClass
-  format(): string
+  constructor(name: string, age: number);
+  name: string;
+  age: number;
+  static initWithFactory(age: number, name: string): TestFactoryClass;
+  format(): string;
 }
 
 export interface MessagePayload {
-  title: string
-  count: number
+  title: string;
+  count: number;
 }
 
 export declare const enum Color {
@@ -107,79 +107,117 @@ export declare const enum Color {
 }
 
 export declare const enum StringColor {
-  Red = 'Red',
-  Green = 'Green',
-  Blue = 'Blue',
+  Red = "Red",
+  Green = "Green",
+  Blue = "Blue",
 }
 
-
-export declare function test_i32(left: number, right: number): number
-export declare function test_f32(left: number, right: number): number
-export declare function test_u32(left: number, right: number): number
-export declare function hello(name: string): string
-export declare const text: string
-export declare function throw_error(): void
-export declare function fib(n: number): void
-export declare function fib_async(n: number): Promise<number>
-export declare function fib_async_progress(n: number, onEvent?: (event: FibProgress) => void): Promise<number>
-export declare function read_file_async(path: string): Promise<string>
-export declare function read_file_summary_async(path: string): Promise<FileReadSummary>
-export declare function parallel_read_files_async(input: ParallelReadInput): Promise<ParallelReadSummary>
-export declare function async_math_single(input: AsyncMathInput): Promise<AsyncMathResult>
-export declare function async_void_thread(): Promise<void>
-export declare function async_fail_thread(message: string): Promise<void>
-export declare function count_async_progress_thread(total: number, onEvent?: (event: CountProgress) => void): Promise<number>
-export declare function event_mode_progress_async(total: number, onEvent?: (event: CountProgress) => void): Promise<number>
-export declare function abortable_count_async(total: number, signal: AbortSignal): Promise<number>
-export declare function get_and_return_array(array: Array<number>): Array<number>
-export declare function get_named_array(array: [number, boolean, string]): [number, boolean, string]
-export declare function get_arraylist(array: Array<number>): Array<number>
-export declare function get_object(config: FullField): FullField
-export declare function get_object_optional(config: OptionalField): OptionalField
-export declare function get_optional_object_and_return_optional(config: OptionalField): OptionalField
-export declare function get_nullable_object(config: NullableField): NullableField
-export declare function return_nullable(): NullableField
-export declare function call_function(cb: (arg0: number, arg1: number) => number): number
-export declare function basic_function(left: number, right: number): number
-export declare function create_function(): (left: number, right: number) => number
-export declare function call_function_with_reference(cb: (arg0: number, arg1: number) => number): number
-export declare function call_thread_safe_function(tsfn: (err: Error | null, arg0: number, arg1: number) => void): void
-export declare function test_hilog(): void
-export declare function create_buffer(): Buffer
-export declare function get_buffer(buf: Buffer): number
-export declare function get_buffer_as_string(buf: Buffer): string
-export declare function create_arraybuffer(): ArrayBuffer
-export declare function get_arraybuffer(buf: ArrayBuffer): number
-export declare function get_arraybuffer_as_string(buf: ArrayBuffer): string
-export declare function create_uint8_typedarray(): Uint8Array
-export declare function get_uint8_typedarray_length(array: Uint8Array): number
-export declare function sum_float32_typedarray(array: Float32Array): number
-export declare function create_dataview(): DataView
-export declare function get_dataview_length(view: DataView): number
-export declare function get_dataview_first_byte(view: DataView): number
-export declare function get_dataview_uint32_le(view: DataView): number
-export declare function union_identity(value: number | string): number | string
-export declare function make_union(is_number: boolean): number | string
-export declare function union_kind(value: number | string): string
-export declare function object_or_text_identity(value: MessagePayload | string): MessagePayload | string
-export declare function make_object_or_text(as_object: boolean): MessagePayload | string
-export declare function object_or_array_identity(value: MessagePayload | Array<number>): MessagePayload | Array<number>
-export declare function tuple_or_text_identity(value: [number, boolean, string] | string): [number, boolean, string] | string
-export declare function flip_flag_or_increment(value: boolean | number): boolean | number
-export declare function color_or_text_identity(value: Color | string): Color | string
-export declare function favorite_color_or_text(use_color: boolean): Color | string
-export declare function maybe_text_or_count_identity(value: string | undefined | null | number): string | undefined | null | number
-export declare function make_maybe_text_or_count(as_text: boolean): string | undefined | null | number
-export declare function buffer_or_text_identity(value: Buffer | string): Buffer | string
-export declare function make_buffer_or_text(use_buffer: boolean): Buffer | string
-export declare function arraybuffer_or_array_identity(value: ArrayBuffer | Array<number>): ArrayBuffer | Array<number>
-export declare function make_arraybuffer_or_array(use_arraybuffer: boolean): ArrayBuffer | Array<number>
-export declare function payload_or_color_identity(value: MessagePayload | Color): MessagePayload | Color
-export declare function make_payload_or_color(use_payload: boolean): MessagePayload | Color
-export declare function payload_or_string_color_identity(value: MessagePayload | StringColor): MessagePayload | StringColor
-export declare function make_payload_or_string_color(use_payload: boolean): MessagePayload | StringColor
-export declare function enum_identity(color: Color): Color
-export declare function favorite_color(): Color
-export declare function is_primary(color: Color): boolean
-export declare function string_enum_identity(color: StringColor): StringColor
-export declare function favorite_string_color(): StringColor
+export declare function test_i32(left: number, right: number): number;
+export declare function test_f32(left: number, right: number): number;
+export declare function test_u32(left: number, right: number): number;
+export declare function hello(name: string): string;
+export declare const text: string;
+export declare function throw_error(): void;
+export declare function fib(n: number): void;
+export declare function fib_async(n: number): Promise<number>;
+export declare function fib_async_progress(
+  n: number,
+  onEvent?: (event: FibProgress) => void,
+): Promise<number>;
+export declare function read_file_async(path: string): Promise<string>;
+export declare function read_file_summary_async(path: string): Promise<FileReadSummary>;
+export declare function parallel_read_files_async(
+  input: ParallelReadInput,
+): Promise<ParallelReadSummary>;
+export declare function async_math_single(input: AsyncMathInput): Promise<AsyncMathResult>;
+export declare function async_void_thread(): Promise<void>;
+export declare function async_fail_thread(message: string): Promise<void>;
+export declare function count_async_progress_thread(
+  total: number,
+  onEvent?: (event: CountProgress) => void,
+): Promise<number>;
+export declare function event_mode_progress_async(
+  total: number,
+  onEvent?: (event: CountProgress) => void,
+): Promise<number>;
+export declare function abortable_count_async(total: number, signal: AbortSignal): Promise<number>;
+export declare function get_and_return_array(array: Array<number>): Array<number>;
+export declare function get_named_array(
+  array: [number, boolean, string],
+): [number, boolean, string];
+export declare function get_arraylist(array: Array<number>): Array<number>;
+export declare function get_object(config: FullField): FullField;
+export declare function get_object_optional(config: OptionalField): OptionalField;
+export declare function get_optional_object_and_return_optional(
+  config: OptionalField,
+): OptionalField;
+export declare function get_nullable_object(config: NullableField): NullableField;
+export declare function return_nullable(): NullableField;
+export declare function call_function(cb: (arg0: number, arg1: number) => number): number;
+export declare function basic_function(left: number, right: number): number;
+export declare function create_function(): (left: number, right: number) => number;
+export declare function call_function_with_reference(
+  cb: (arg0: number, arg1: number) => number,
+): number;
+export declare function call_thread_safe_function(
+  tsfn: (err: Error | null, arg0: number, arg1: number) => void,
+): void;
+export declare function test_hilog(): void;
+export declare function create_buffer(): Buffer;
+export declare function get_buffer(buf: Buffer): number;
+export declare function get_buffer_as_string(buf: Buffer): string;
+export declare function create_arraybuffer(): ArrayBuffer;
+export declare function get_arraybuffer(buf: ArrayBuffer): number;
+export declare function get_arraybuffer_as_string(buf: ArrayBuffer): string;
+export declare function create_uint8_typedarray(): Uint8Array;
+export declare function get_uint8_typedarray_length(array: Uint8Array): number;
+export declare function sum_float32_typedarray(array: Float32Array): number;
+export declare function create_dataview(): DataView;
+export declare function get_dataview_length(view: DataView): number;
+export declare function get_dataview_first_byte(view: DataView): number;
+export declare function get_dataview_uint32_le(view: DataView): number;
+export declare function union_identity(value: number | string): number | string;
+export declare function make_union(is_number: boolean): number | string;
+export declare function union_kind(value: number | string): string;
+export declare function object_or_text_identity(
+  value: MessagePayload | string,
+): MessagePayload | string;
+export declare function make_object_or_text(as_object: boolean): MessagePayload | string;
+export declare function object_or_array_identity(
+  value: MessagePayload | Array<number>,
+): MessagePayload | Array<number>;
+export declare function tuple_or_text_identity(
+  value: [number, boolean, string] | string,
+): [number, boolean, string] | string;
+export declare function flip_flag_or_increment(value: boolean | number): boolean | number;
+export declare function color_or_text_identity(value: Color | string): Color | string;
+export declare function favorite_color_or_text(use_color: boolean): Color | string;
+export declare function maybe_text_or_count_identity(
+  value: string | undefined | null | number,
+): string | undefined | null | number;
+export declare function make_maybe_text_or_count(
+  as_text: boolean,
+): string | undefined | null | number;
+export declare function buffer_or_text_identity(value: Buffer | string): Buffer | string;
+export declare function make_buffer_or_text(use_buffer: boolean): Buffer | string;
+export declare function arraybuffer_or_array_identity(
+  value: ArrayBuffer | Array<number>,
+): ArrayBuffer | Array<number>;
+export declare function make_arraybuffer_or_array(
+  use_arraybuffer: boolean,
+): ArrayBuffer | Array<number>;
+export declare function payload_or_color_identity(
+  value: MessagePayload | Color,
+): MessagePayload | Color;
+export declare function make_payload_or_color(use_payload: boolean): MessagePayload | Color;
+export declare function payload_or_string_color_identity(
+  value: MessagePayload | StringColor,
+): MessagePayload | StringColor;
+export declare function make_payload_or_string_color(
+  use_payload: boolean,
+): MessagePayload | StringColor;
+export declare function enum_identity(color: Color): Color;
+export declare function favorite_color(): Color;
+export declare function is_primary(color: Color): boolean;
+export declare function string_enum_identity(color: StringColor): StringColor;
+export declare function favorite_string_color(): StringColor;

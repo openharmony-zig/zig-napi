@@ -84,18 +84,42 @@ export async function exerciseAsyncWrappers(native: NativeAddon) {
   assertEqual(singleSummary.total, 10, "async single total");
 
   await native.memory_async_void("async-void");
-  await assertRejects(native.memory_async_fail("async memory failure"), "async memory failure", "async fail");
+  await assertRejects(
+    native.memory_async_fail("async memory failure"),
+    "async memory failure",
+    "async fail",
+  );
   assertEqual(await native.manual_resolved_promise(), 42, "manual promise wrapper");
 
   const progressEvents: Array<ESObject> = [];
-  assertEqual(await native.memory_async_progress(3, (event: ESObject) => progressEvents.push(event)), 3, "async progress result");
-  assertArrayEqual(progressEvents.map((event: ESObject) => event.current), [0, 1, 2, 3], "async progress events");
+  assertEqual(
+    await native.memory_async_progress(3, (event: ESObject) => progressEvents.push(event)),
+    3,
+    "async progress result",
+  );
+  assertArrayEqual(
+    progressEvents.map((event: ESObject) => event.current),
+    [0, 1, 2, 3],
+    "async progress events",
+  );
 
   const eventModeEvents: Array<ESObject> = [];
-  assertEqual(await native.memory_event_mode_progress(2, (event: ESObject) => eventModeEvents.push(event)), 2, "event progress result");
-  assertArrayEqual(eventModeEvents.map((event: ESObject) => event.current), [0, 1, 2], "event progress events");
+  assertEqual(
+    await native.memory_event_mode_progress(2, (event: ESObject) => eventModeEvents.push(event)),
+    2,
+    "event progress result",
+  );
+  assertArrayEqual(
+    eventModeEvents.map((event: ESObject) => event.current),
+    [0, 1, 2],
+    "event progress events",
+  );
 
-  await assertRejects(native.memory_abortable_count(1024, abortController(true).signal), "AbortError", "abort pre-cancel");
+  await assertRejects(
+    native.memory_abortable_count(1024, abortController(true).signal),
+    "AbortError",
+    "abort pre-cancel",
+  );
 
   const controller = abortController(false);
   const pending = native.memory_abortable_slow_count(100000, controller.signal);

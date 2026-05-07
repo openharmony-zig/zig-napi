@@ -61,7 +61,11 @@ export async function settleFinalizers(rounds = 8) {
   }
 }
 
-export async function withLeakTracking(native: NativeAddon, label: string, run: () => Promise<void> | void) {
+export async function withLeakTracking(
+  native: NativeAddon,
+  label: string,
+  run: () => Promise<void> | void,
+) {
   let tracking = false;
   native.leak_tracker_start();
   tracking = true;
@@ -85,7 +89,10 @@ function failResult(resultPrefix: string, err: ESObject): never {
   throw err;
 }
 
-export function runMemorySuite(resultPrefix: string, run: (native: NativeAddon) => Promise<void> | void) {
+export function runMemorySuite(
+  resultPrefix: string,
+  run: (native: NativeAddon) => Promise<void> | void,
+) {
   installTimerGlobals();
 
   let finished = false;
