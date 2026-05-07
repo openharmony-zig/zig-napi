@@ -31,6 +31,8 @@ jobs:
         run: |
           pushd examples/basic && zig build && popd
           pushd examples/init && zig build && popd
+          pushd examples/allocator-custom && zig build && popd
+          pushd examples/allocator-builtin && zig build && popd
 
   arkvm-tests:
     runs-on: ubuntu-latest

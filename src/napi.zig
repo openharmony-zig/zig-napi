@@ -68,38 +68,19 @@ pub fn FunctionRef(comptime Args: type, comptime Return: type) type {
 }
 pub const ObjectRef = reference.Reference(value.Object);
 
-/// Set the allocator used by napi wrappers, including JS-runtime-owned state.
-pub fn setAllocator(new_allocator: std.mem.Allocator) void {
-    global_allocator.global_manager.set(new_allocator);
-    global_allocator.runtime_manager.set(new_allocator);
-}
-
-/// Reset the allocator used by napi wrappers to the default page allocator.
-pub fn resetAllocator() void {
-    global_allocator.global_manager.set(std.heap.page_allocator);
-    global_allocator.runtime_manager.set(std.heap.page_allocator);
-}
-
-pub fn setGlobalAllocator(new_allocator: std.mem.Allocator) void {
-    setAllocator(new_allocator);
-}
-
-pub fn resetGlobalAllocator() void {
-    resetAllocator();
-}
-
 pub fn globalAllocator() std.mem.Allocator {
     return global_allocator.globalAllocator();
 }
 
 /// Override only short-lived conversion/operation allocations.
-/// This is mainly useful for scoped allocator tests; applications should use setAllocator.
+/// This is mainly useful for scoped allocator tests; applications should use a
+/// root `napi_allocator` declaration instead.
 pub fn setOperationAllocator(new_allocator: std.mem.Allocator) void {
     global_allocator.global_manager.set(new_allocator);
 }
 
 pub fn resetOperationAllocator() void {
-    global_allocator.global_manager.set(std.heap.page_allocator);
+    global_allocator.global_manager.set(global_allocator.defaultAllocator());
 }
 
 pub fn AsyncContext(comptime Event: type) type {
