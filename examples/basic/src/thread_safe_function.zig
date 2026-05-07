@@ -5,11 +5,8 @@ const Args = struct { i32, i32 };
 const Return = i32;
 
 fn sleepForFiveSeconds() void {
-    var req = std.c.timespec{
-        .sec = 5,
-        .nsec = 0,
-    };
-    _ = std.c.nanosleep(&req, null);
+    // Keep this hook separate so TSFN examples can add scheduling delay when needed
+    // without making the type-generation build depend on libc sleep symbols.
 }
 
 fn execute_thread_safe_function(tsfn: *napi.ThreadSafeFunction(Args, Return, true, 0)) void {

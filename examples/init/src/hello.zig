@@ -27,13 +27,13 @@ fn add(left: f64, right: f64) f64 {
     return result;
 }
 
-fn hello(name: []u8) []u8 {
+fn hello(env: napi.Env, name: []u8) napi.String {
     const allocator = std.heap.page_allocator;
 
     const message = std.fmt.allocPrint(allocator, "Hello, {s}!", .{name}) catch @panic("OOM");
     defer allocator.free(message);
 
-    return message;
+    return napi.String.New(env, message);
 }
 
 fn fib(env: napi.Env, n: f64) void {

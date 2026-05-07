@@ -12,6 +12,7 @@ const AbortRegistration = @import("./abort_signal.zig").AbortRegistration;
 
 var threaded_runtime_mutex: std.atomic.Mutex = .unlocked;
 var threaded_runtime_initialized = false;
+var threaded_runtime_active_operations: usize = 0;
 var threaded_runtime: std.Io.Threaded = undefined;
 
 pub const RuntimeModel = enum {
@@ -68,7 +69,7 @@ fn singleIo() std.Io {
     return std.Io.Threaded.global_single_threaded.io();
 }
 
-fn threadedIo() std.Io {
+fn acquireThreadedRuntime() std.Io {
     while (!threaded_runtime_mutex.tryLock()) {
         std.Thread.yield() catch {};
     }
@@ -79,13 +80,43 @@ fn threadedIo() std.Io {
         threaded_runtime_initialized = true;
     }
 
+    threaded_runtime_active_operations += 1;
     return threaded_runtime.io();
+}
+
+fn activeThreadedIo() std.Io {
+    while (!threaded_runtime_mutex.tryLock()) {
+        std.Thread.yield() catch {};
+    }
+    defer threaded_runtime_mutex.unlock();
+
+    std.debug.assert(threaded_runtime_initialized);
+    std.debug.assert(threaded_runtime_active_operations > 0);
+    return threaded_runtime.io();
+}
+
+fn releaseThreadedRuntime() void {
+    while (!threaded_runtime_mutex.tryLock()) {
+        std.Thread.yield() catch {};
+    }
+    defer threaded_runtime_mutex.unlock();
+
+    if (!threaded_runtime_initialized or threaded_runtime_active_operations == 0) {
+        return;
+    }
+
+    threaded_runtime_active_operations -= 1;
+    if (threaded_runtime_active_operations == 0) {
+        threaded_runtime.deinit();
+        threaded_runtime_initialized = false;
+        threaded_runtime = undefined;
+    }
 }
 
 fn ioForRuntime(effective_runtime: EffectiveRuntime) std.Io {
     return switch (effective_runtime) {
         .single => singleIo(),
-        .thread => threadedIo(),
+        .thread => activeThreadedIo(),
     };
 }
 
@@ -290,18 +321,25 @@ fn AsyncTaskDescriptorImpl(
     return struct {
         base: AsyncTaskDescriptorBase,
         input: Input,
+        input_moved: bool = false,
 
         const Self = @This();
 
         fn schedule(base: *AsyncTaskDescriptorBase, env_raw: napi.napi_env, listener: ?napi.napi_value, signal: ?AbortSignal) !Promise {
             const self: *Self = @alignCast(@fieldParentPtr("base", base));
+            errdefer base.destroy_fn(base);
             const operation = try AsyncTaskOperation(Input, Result, Event, runtime, run_fn).create(Env.from_raw(env_raw), self.input, listener, signal);
-            defer base.destroy_fn(base);
-            return try operation.submit();
+            self.input_moved = true;
+            const promise = try operation.submit();
+            base.destroy_fn(base);
+            return promise;
         }
 
         fn destroy(base: *AsyncTaskDescriptorBase) void {
             const self: *Self = @alignCast(@fieldParentPtr("base", base));
+            if (!self.input_moved) {
+                Napi.deinit_napi_value(Input, self.input);
+            }
             self.base.allocator.destroy(self);
         }
     };
@@ -333,6 +371,8 @@ fn AsyncTaskOperation(
         cancel_requested: bool = false,
         cancel_dispatched: bool = false,
         closed: bool = false,
+        result_ready: bool = false,
+        uses_threaded_runtime: bool = false,
 
         const Self = @This();
         const Context = AsyncContext(Event);
@@ -379,8 +419,10 @@ fn AsyncTaskOperation(
             switch (effectiveRuntime(runtime)) {
                 .single => self.runSingle(),
                 .thread => {
+                    const io = acquireThreadedRuntime();
+                    self.uses_threaded_runtime = true;
                     try self.initThreadDispatcher();
-                    self.future = std.Io.concurrent(threadedIo(), runTask, .{self}) catch |err| {
+                    self.future = std.Io.concurrent(io, runTask, .{self}) catch |err| {
                         self.err = mapAnyError(err);
                         self.dispatchCompletion(self.env);
                         return promise;
@@ -392,7 +434,7 @@ fn AsyncTaskOperation(
         }
 
         fn controllerThreadMain(self: *Self) void {
-            const io = threadedIo();
+            const io = self.operationIo();
             const should_cancel = self.waitForTaskDoneOrAbort();
             if (self.future) |*future| {
                 if (should_cancel) {
@@ -460,7 +502,7 @@ fn AsyncTaskOperation(
         }
 
         fn requestAbort(self: *Self) void {
-            const io = threadedIo();
+            const io = self.operationIo();
             self.cancel_token.cancel();
             self.state_mutex.lockUncancelable(io);
             defer self.state_mutex.unlock(io);
@@ -470,7 +512,7 @@ fn AsyncTaskOperation(
         }
 
         fn markTaskDone(self: *Self) void {
-            const io = threadedIo();
+            const io = self.operationIo();
             self.state_mutex.lockUncancelable(io);
             defer self.state_mutex.unlock(io);
             self.task_done = true;
@@ -478,7 +520,7 @@ fn AsyncTaskOperation(
         }
 
         fn waitForTaskDoneOrAbort(self: *Self) bool {
-            const io = threadedIo();
+            const io = self.operationIo();
             self.state_mutex.lockUncancelable(io);
             defer self.state_mutex.unlock(io);
 
@@ -488,6 +530,10 @@ fn AsyncTaskOperation(
             return self.cancel_requested and !self.task_done;
         }
 
+        fn operationIo(self: *const Self) std.Io {
+            return if (self.uses_threaded_runtime) activeThreadedIo() else singleIo();
+        }
+
         fn execute(self: *Self, context: Context) !void {
             if (run_info.params.len == 1) {
                 if (@typeInfo(run_info.return_type.?) == .error_union) {
@@ -495,12 +541,14 @@ fn AsyncTaskOperation(
                         try run_fn(self.input);
                     } else {
                         self.result = try run_fn(self.input);
+                        self.result_ready = true;
                     }
                 } else {
                     if (Result == void) {
                         _ = run_fn(self.input);
                     } else {
                         self.result = run_fn(self.input);
+                        self.result_ready = true;
                     }
                 }
             } else {
@@ -509,12 +557,14 @@ fn AsyncTaskOperation(
                         try run_fn(context, self.input);
                     } else {
                         self.result = try run_fn(context, self.input);
+                        self.result_ready = true;
                     }
                 } else {
                     if (Result == void) {
                         _ = run_fn(context, self.input);
                     } else {
                         self.result = run_fn(context, self.input);
+                        self.result_ready = true;
                     }
                 }
             }
@@ -649,6 +699,8 @@ fn AsyncTaskOperation(
         fn destroy(self: *Self, env_raw: napi.napi_env) void {
             if (self.closed) return;
             self.closed = true;
+            const should_release_threaded_runtime = self.uses_threaded_runtime;
+            self.uses_threaded_runtime = false;
 
             releaseCallbackRef(env_raw, &self.listener_ref);
             if (self.abort_registration) |registration| {
@@ -659,7 +711,17 @@ fn AsyncTaskOperation(
                 _ = napi.napi_release_threadsafe_function(self.tsfn_raw, napi.napi_tsfn_release);
                 self.tsfn_raw = null;
             }
+            var deinit_state = Napi.DeinitState{};
+            Napi.deinit_napi_value_with_state(Input, self.input, &deinit_state);
+            if (comptime Result != void) {
+                if (self.result_ready) {
+                    Napi.deinit_napi_value_with_state(Result, self.result, &deinit_state);
+                }
+            }
             self.allocator.destroy(self);
+            if (should_release_threaded_runtime) {
+                releaseThreadedRuntime();
+            }
         }
     };
 }

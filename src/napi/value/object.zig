@@ -79,48 +79,21 @@ pub const Object = struct {
     }
 
     pub fn Set(self: Object, comptime key: []const u8, value: anytype) !void {
-        const value_type = @TypeOf(value);
-        const infos = @typeInfo(value_type);
-
-        switch (infos) {
-            .@"fn" => {
-                const args_type = comptime helper.collectFunctionArgs(value_type);
-                const return_type = infos.@"fn".return_type.?;
-                const fn_impl = try Function(args_type, return_type).New(Env.from_raw(self.env), key, value);
-                const napi_desc = [_]napi.napi_property_descriptor{
-                    .{
-                        .utf8name = @ptrCast(key.ptr),
-                        .method = fn_impl.inner_fn,
-                        .getter = null,
-                        .setter = null,
-                        .value = null,
-                        .attributes = napi.napi_default,
-                        .data = null,
-                    },
-                };
-                const status = napi.napi_define_properties(self.env, self.raw, 1, &napi_desc);
-                if (status != napi.napi_ok) {
-                    return NapiError.Error.fromStatus(NapiError.Status.New(status));
-                }
+        const n_value = try Napi.to_napi_value(self.env, value, key);
+        const napi_desc = [_]napi.napi_property_descriptor{
+            .{
+                .utf8name = @ptrCast(key.ptr),
+                .method = null,
+                .getter = null,
+                .setter = null,
+                .value = n_value,
+                .attributes = napi.napi_default,
+                .data = null,
             },
-            else => {
-                const n_value = try Napi.to_napi_value(self.env, value, null);
-                const napi_desc = [_]napi.napi_property_descriptor{
-                    .{
-                        .utf8name = @ptrCast(key.ptr),
-                        .method = null,
-                        .getter = null,
-                        .setter = null,
-                        .value = n_value,
-                        .attributes = napi.napi_default,
-                        .data = null,
-                    },
-                };
-                const status = napi.napi_define_properties(self.env, self.raw, 1, &napi_desc);
-                if (status != napi.napi_ok) {
-                    return NapiError.Error.fromStatus(NapiError.Status.New(status));
-                }
-            },
+        };
+        const status = napi.napi_define_properties(self.env, self.raw, 1, &napi_desc);
+        if (status != napi.napi_ok) {
+            return NapiError.Error.fromStatus(NapiError.Status.New(status));
         }
     }
 

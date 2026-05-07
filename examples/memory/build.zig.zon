@@ -1,0 +1,8 @@
+.{
+    .name = .memory,
+    .version = "0.0.1",
+    .minimum_zig_version = "0.16.0",
+    .fingerprint = 0xea6d34357876ddeb,
+    .dependencies = .{ .@"zig-napi" = .{ .path = "../.." } },
+    .paths = .{ "build.zig", "build.zig.zon", "src" },
+}

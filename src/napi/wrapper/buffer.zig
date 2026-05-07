@@ -99,10 +99,14 @@ pub const Buffer = struct {
     /// // Don't free owned_data, it's now managed by JS
     /// ```
     pub fn from(env: Env, data: []u8) !Buffer {
+        return try Buffer.fromWithFinalizer(env, data, null);
+    }
+
+    pub fn fromWithFinalizer(env: Env, data: []u8, on_finalize: ?*const fn () void) !Buffer {
         var result: napi.napi_value = undefined;
 
         // Store the slice info for the finalizer
-        const hint = BufferHint.create(data) catch {
+        const hint = BufferHint.create(data, on_finalize) catch {
             return NapiError.Error.fromStatus(NapiError.Status.GenericFailure);
         };
 
@@ -208,23 +212,30 @@ pub const Buffer = struct {
 
 /// Helper struct to store buffer info for the finalizer
 const BufferHint = struct {
+    allocator: std.mem.Allocator,
     ptr: [*]u8,
     len: usize,
+    on_finalize: ?*const fn () void,
 
-    fn create(data: []u8) !*BufferHint {
+    fn create(data: []u8, on_finalize: ?*const fn () void) !*BufferHint {
         const allocator = GlobalAllocator.globalAllocator();
         const hint = try allocator.create(BufferHint);
         hint.* = .{
+            .allocator = allocator,
             .ptr = data.ptr,
             .len = data.len,
+            .on_finalize = on_finalize,
         };
         return hint;
     }
 
     fn destroy(self: *BufferHint) void {
-        const allocator = GlobalAllocator.globalAllocator();
+        const allocator = self.allocator;
         // Free the original buffer data
         allocator.free(self.ptr[0..self.len]);
+        if (self.on_finalize) |on_finalize| {
+            on_finalize();
+        }
         // Free the hint struct itself
         allocator.destroy(self);
     }
@@ -235,7 +246,7 @@ fn externalBufferFinalizer(
     _: napi.napi_env,
     _: ?*anyopaque,
     hint: ?*anyopaque,
-) callconv(.C) void {
+) callconv(.c) void {
     if (hint) |h| {
         const buffer_hint: *BufferHint = @ptrCast(@alignCast(h));
         buffer_hint.destroy();

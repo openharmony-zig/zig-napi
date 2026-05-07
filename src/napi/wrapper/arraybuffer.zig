@@ -99,10 +99,14 @@ pub const ArrayBuffer = struct {
     /// // Don't free owned_data, it's now managed by JS
     /// ```
     pub fn from(env: Env, data: []u8) !ArrayBuffer {
+        return try ArrayBuffer.fromWithFinalizer(env, data, null);
+    }
+
+    pub fn fromWithFinalizer(env: Env, data: []u8, on_finalize: ?*const fn () void) !ArrayBuffer {
         var result: napi.napi_value = undefined;
 
         // Store the slice info for the finalizer
-        const hint = ArrayBufferHint.create(data) catch {
+        const hint = ArrayBufferHint.create(data, on_finalize) catch {
             return NapiError.Error.fromStatus(NapiError.Status.GenericFailure);
         };
 
@@ -211,23 +215,30 @@ pub const ArrayBuffer = struct {
 
 /// Helper struct to store ArrayBuffer info for the finalizer
 const ArrayBufferHint = struct {
+    allocator: std.mem.Allocator,
     ptr: [*]u8,
     len: usize,
+    on_finalize: ?*const fn () void,
 
-    fn create(data: []u8) !*ArrayBufferHint {
+    fn create(data: []u8, on_finalize: ?*const fn () void) !*ArrayBufferHint {
         const allocator = GlobalAllocator.globalAllocator();
         const hint = try allocator.create(ArrayBufferHint);
         hint.* = .{
+            .allocator = allocator,
             .ptr = data.ptr,
             .len = data.len,
+            .on_finalize = on_finalize,
         };
         return hint;
     }
 
     fn destroy(self: *ArrayBufferHint) void {
-        const allocator = GlobalAllocator.globalAllocator();
+        const allocator = self.allocator;
         // Free the original buffer data
         allocator.free(self.ptr[0..self.len]);
+        if (self.on_finalize) |on_finalize| {
+            on_finalize();
+        }
         // Free the hint struct itself
         allocator.destroy(self);
     }
@@ -238,7 +249,7 @@ fn externalArrayBufferFinalizer(
     _: napi.napi_env,
     _: ?*anyopaque,
     hint: ?*anyopaque,
-) callconv(.C) void {
+) callconv(.c) void {
     if (hint) |h| {
         const arraybuffer_hint: *ArrayBufferHint = @ptrCast(@alignCast(h));
         arraybuffer_hint.destroy();

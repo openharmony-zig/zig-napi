@@ -9,11 +9,16 @@ const GlobalAllocator = @import("./util/allocator.zig");
 pub const AbortCallback = *const fn (?*anyopaque) void;
 
 const AbortRegistrationStack = struct {
+    env: napi.napi_env,
+    signal: napi.napi_value,
     allocator: std.mem.Allocator,
     registrations: std.array_list.Managed(*AbortRegistration),
+    wrapped: bool = false,
 
-    fn init(allocator: std.mem.Allocator) AbortRegistrationStack {
+    fn init(env: napi.napi_env, signal: napi.napi_value, allocator: std.mem.Allocator) AbortRegistrationStack {
         return .{
+            .env = env,
+            .signal = signal,
             .allocator = allocator,
             .registrations = std.array_list.Managed(*AbortRegistration).init(allocator),
         };
@@ -119,7 +124,7 @@ pub const AbortSignal = struct {
 };
 
 fn ensureStack(env: napi.napi_env, signal: napi.napi_value) !*AbortRegistrationStack {
-    const allocator = GlobalAllocator.globalAllocator();
+    const allocator = GlobalAllocator.runtimeAllocator();
 
     var stack_ptr: ?*anyopaque = null;
     const remove_status = napi.napi_remove_wrap(env, signal, &stack_ptr);
@@ -127,7 +132,7 @@ fn ensureStack(env: napi.napi_env, signal: napi.napi_value) !*AbortRegistrationS
         @ptrCast(@alignCast(stack_ptr.?))
     else blk: {
         const new_stack = try allocator.create(AbortRegistrationStack);
-        new_stack.* = AbortRegistrationStack.init(allocator);
+        new_stack.* = AbortRegistrationStack.init(env, signal, allocator);
         break :blk new_stack;
     };
 
@@ -141,6 +146,7 @@ fn ensureStack(env: napi.napi_env, signal: napi.napi_value) !*AbortRegistrationS
     if (wrap_status != napi.napi_ok) {
         return NapiError.Error.fromStatus(NapiError.Status.New(wrap_status));
     }
+    stack.wrapped = true;
     if (ref != null) {
         var ref_count: u32 = 0;
         _ = napi.napi_reference_unref(env, ref, &ref_count);
@@ -191,8 +197,9 @@ fn onAbort(env: napi.napi_env, info: napi.napi_callback_info) callconv(.c) napi.
 fn finalizeStack(_: napi.napi_env, finalize_data: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
     const data = finalize_data orelse return;
     const stack: *AbortRegistrationStack = @ptrCast(@alignCast(data));
+    const allocator = stack.allocator;
     stack.deinit();
-    GlobalAllocator.globalAllocator().destroy(stack);
+    allocator.destroy(stack);
 }
 
 pub fn abortErrorValue(env: Env) napi.napi_value {

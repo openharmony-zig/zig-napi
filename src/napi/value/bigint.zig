@@ -12,18 +12,18 @@ pub const BigInt = struct {
     }
 
     pub fn from_napi_value(env: napi.napi_env, raw: napi.napi_value, comptime T: type) T {
-        const value_type = @TypeOf(T);
-        const infos = @typeInfo(value_type);
-
-        switch (infos) {
-            .i64 => {
+        const value_type = T;
+        switch (value_type) {
+            i64 => {
                 var result: T = undefined;
-                _ = napi.napi_get_value_bigint_int64(env, raw, @ptrCast(&result), false);
+                var lossless = false;
+                _ = napi.napi_get_value_bigint_int64(env, raw, @ptrCast(&result), &lossless);
                 return result;
             },
-            .u64 => {
+            u64 => {
                 var result: T = undefined;
-                _ = napi.napi_get_value_bigint_uint64(env, raw, @ptrCast(&result), false);
+                var lossless = false;
+                _ = napi.napi_get_value_bigint_uint64(env, raw, @ptrCast(&result), &lossless);
                 return result;
             },
             else => {
@@ -53,7 +53,7 @@ pub const BigInt = struct {
 
                         const word_count: usize = if (words[1] != 0) 2 else 1;
 
-                        _ = napi.napi_create_bigint_words(env.raw, 0, word_count, @ptrCast(words.ptr), &result);
+                        _ = napi.napi_create_bigint_words(env.raw, 0, word_count, @ptrCast(&words), &result);
                         return BigInt.from_raw(env.raw, result);
                     },
                     i128 => {
@@ -68,7 +68,7 @@ pub const BigInt = struct {
 
                         const word_count: usize = if (words[1] != 0) 2 else 1;
 
-                        _ = napi.napi_create_bigint_words(env.raw, if (is_negative) @as(c_int, 1) else @as(c_int, 0), word_count, @ptrCast(words.ptr), &result);
+                        _ = napi.napi_create_bigint_words(env.raw, if (is_negative) @as(c_int, 1) else @as(c_int, 0), word_count, @ptrCast(&words), &result);
                         return BigInt.from_raw(env.raw, result);
                     },
                     else => {},

@@ -10,7 +10,10 @@ const object = @import("object.zig");
 const function = @import("function.zig");
 const thread_safe_function = @import("thread_safe_function.zig");
 const class = @import("class.zig");
-const log = @import("log/log.zig");
+const builtin = @import("builtin");
+const log = if (builtin.target.abi.isOpenHarmony()) @import("log/log.zig") else struct {
+    pub fn test_hilog() void {}
+};
 const buffer = @import("buffer.zig");
 const arraybuffer = @import("arraybuffer.zig");
 const typedarray = @import("typedarray.zig");

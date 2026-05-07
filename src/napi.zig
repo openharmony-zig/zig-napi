@@ -1,3 +1,4 @@
+const std = @import("std");
 const env = @import("./napi/env.zig");
 const value = @import("./napi/value.zig");
 const function = @import("./napi/value/function.zig");
@@ -14,6 +15,7 @@ const arraybuffer = @import("./napi/wrapper/arraybuffer.zig");
 const typedarray = @import("./napi/wrapper/typedarray.zig");
 const dataview = @import("./napi/wrapper/dataview.zig");
 const reference = @import("./napi/wrapper/reference.zig");
+const global_allocator = @import("./napi/util/allocator.zig");
 
 pub const napi_sys = @import("napi-sys");
 pub const Env = env.Env;
@@ -65,6 +67,41 @@ pub fn FunctionRef(comptime Args: type, comptime Return: type) type {
     return reference.Reference(function.Function(Args, Return));
 }
 pub const ObjectRef = reference.Reference(value.Object);
+
+/// Set the allocator used by napi wrappers, including JS-runtime-owned state.
+pub fn setAllocator(new_allocator: std.mem.Allocator) void {
+    global_allocator.global_manager.set(new_allocator);
+    global_allocator.runtime_manager.set(new_allocator);
+}
+
+/// Reset the allocator used by napi wrappers to the default page allocator.
+pub fn resetAllocator() void {
+    global_allocator.global_manager.set(std.heap.page_allocator);
+    global_allocator.runtime_manager.set(std.heap.page_allocator);
+}
+
+pub fn setGlobalAllocator(new_allocator: std.mem.Allocator) void {
+    setAllocator(new_allocator);
+}
+
+pub fn resetGlobalAllocator() void {
+    resetAllocator();
+}
+
+pub fn globalAllocator() std.mem.Allocator {
+    return global_allocator.globalAllocator();
+}
+
+/// Override only short-lived conversion/operation allocations.
+/// This is mainly useful for scoped allocator tests; applications should use setAllocator.
+pub fn setOperationAllocator(new_allocator: std.mem.Allocator) void {
+    global_allocator.global_manager.set(new_allocator);
+}
+
+pub fn resetOperationAllocator() void {
+    global_allocator.global_manager.set(std.heap.page_allocator);
+}
+
 pub fn AsyncContext(comptime Event: type) type {
     return async.AsyncContext(Event);
 }
