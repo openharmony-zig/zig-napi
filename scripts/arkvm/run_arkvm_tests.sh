@@ -131,6 +131,8 @@ if [[ -n "${ARKVM_TEST_SUITE:-}" ]]; then
 else
   run_case "examples/basic" "test/basic.ts" "__ZIG_NAPI_TEST_RESULT__" "test/basic" "-Darkvm-test=true -Doptimize=ReleaseSafe" "arkvm-host"
   run_case "examples/init" "test/init.ts" "__ZIG_NAPI_INIT_TEST_RESULT__" "test/init" "-Darkvm-test=true -Doptimize=ReleaseSafe" "arkvm-host"
+  run_case "examples/allocator-custom" "test/allocator-custom.ts" "__ZIG_NAPI_ALLOCATOR_CUSTOM_RESULT__" "test/allocator-custom" "-Darkvm-test=true -Doptimize=ReleaseSafe" "arkvm-host"
+  run_case "examples/allocator-builtin" "test/allocator-builtin.ts" "__ZIG_NAPI_ALLOCATOR_BUILTIN_RESULT__" "test/allocator-builtin" "-Darkvm-test=true -Doptimize=ReleaseSafe" "arkvm-host"
 fi
 
 [[ "${KEEP_WORKDIR}" == "1" ]] || rm -rf "${WORK_ROOT}"

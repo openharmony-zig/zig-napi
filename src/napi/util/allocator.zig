@@ -1,13 +1,14 @@
 const std = @import("std");
+const root = @import("root");
 
 pub const AllocatorManager = struct {
     allocator: std.mem.Allocator,
 
     const Self = @This();
 
-    pub fn init() Self {
+    pub fn init(allocator: std.mem.Allocator) Self {
         return Self{
-            .allocator = std.heap.page_allocator,
+            .allocator = allocator,
         };
     }
 
@@ -20,8 +21,23 @@ pub const AllocatorManager = struct {
     }
 };
 
-pub var global_manager = AllocatorManager.init();
-pub var runtime_manager = AllocatorManager.init();
+/// The addon root module may declare `pub const napi_allocator: std.mem.Allocator = ...;`.
+/// The export scanner treats this name as reserved, while Zig still enforces that a
+/// root declaration can only be defined once.
+pub fn defaultAllocator() std.mem.Allocator {
+    if (@hasDecl(root, "napi_allocator")) {
+        const allocator = root.napi_allocator;
+        if (@TypeOf(allocator) != std.mem.Allocator) {
+            @compileError("root.napi_allocator must be a std.mem.Allocator");
+        }
+        return allocator;
+    }
+
+    return std.heap.page_allocator;
+}
+
+pub var global_manager = AllocatorManager.init(defaultAllocator());
+pub var runtime_manager = AllocatorManager.init(defaultAllocator());
 
 /// Get the global allocator
 pub fn globalAllocator() std.mem.Allocator {

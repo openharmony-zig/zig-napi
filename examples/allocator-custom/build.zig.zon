@@ -1,0 +1,8 @@
+.{
+    .name = .allocator_custom,
+    .version = "0.0.1",
+    .minimum_zig_version = "0.16.0",
+    .fingerprint = 0x3eb28e374c2ad8c5,
+    .dependencies = .{ .@"zig-napi" = .{ .path = "../.." } },
+    .paths = .{ "build.zig", "build.zig.zon", "src" },
+}

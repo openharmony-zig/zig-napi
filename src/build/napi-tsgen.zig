@@ -1838,6 +1838,9 @@ fn generate(allocator: std.mem.Allocator, io: std.Io, root_source_path: []const 
     }
 
     inline for (root_info.decls) |decl| {
+        if (comptime std.mem.eql(u8, decl.name, "napi_allocator")) {
+            continue;
+        }
         const value = @field(root, decl.name);
         const decl_type = @TypeOf(value);
         if (comptime @typeInfo(decl_type) == .@"fn") {

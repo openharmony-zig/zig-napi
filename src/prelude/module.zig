@@ -1,3 +1,4 @@
+const std = @import("std");
 const builtin = @import("builtin");
 const build_options = @import("build_options");
 const napi = @import("napi-sys").napi_sys;
@@ -43,6 +44,9 @@ pub fn NODE_API_MODULE_WITH_INIT(
             }
 
             inline for (root_infos.@"struct".decls) |decl| {
+                if (comptime std.mem.eql(u8, decl.name, "napi_allocator")) {
+                    continue;
+                }
                 const origin_value = @field(root, decl.name);
                 const value = Napi.to_napi_value(env, origin_value, decl.name) catch {
                     if (NapiError.last_error) |last_err| {
