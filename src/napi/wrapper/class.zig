@@ -53,11 +53,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                 GlobalAllocator.global_manager.set(self.allocator);
                 defer GlobalAllocator.global_manager.set(previous_allocator);
 
-                if (@hasDecl(T, "deinit")) {
-                    self.value.deinit();
-                } else {
-                    Napi.deinit_napi_value(T, self.value);
-                }
+                Napi.deinit_napi_value(T, self.value);
                 self.allocator.destroy(self);
             }
         };

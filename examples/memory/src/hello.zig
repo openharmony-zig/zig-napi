@@ -74,6 +74,11 @@ pub const class_finalizer_count = classes.class_finalizer_count;
 
 pub const memory_async_summary = async_tests.memory_async_summary;
 pub const memory_async_summary_single = async_tests.memory_async_summary_single;
+pub const memory_async_custom_deinit = async_tests.memory_async_custom_deinit;
+pub const memory_async_custom_deinit_single = async_tests.memory_async_custom_deinit_single;
+pub const memory_async_custom_deinit_reset = async_tests.memory_async_custom_deinit_reset;
+pub const memory_async_custom_input_deinit_count = async_tests.memory_async_custom_input_deinit_count;
+pub const memory_async_custom_result_deinit_count = async_tests.memory_async_custom_result_deinit_count;
 pub const memory_async_void = async_tests.memory_async_void;
 pub const memory_async_fail = async_tests.memory_async_fail;
 pub const memory_async_progress = async_tests.memory_async_progress;

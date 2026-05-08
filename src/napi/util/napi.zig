@@ -207,6 +207,52 @@ pub const Napi = struct {
         Napi.deinit_napi_value_with_state(T, value, &state);
     }
 
+    fn deinitWithCustomStructDeinit(comptime T: type, value: T, allocator: std.mem.Allocator) bool {
+        if (!@hasDecl(T, "deinit")) return false;
+
+        const deinit_fn = @field(T, "deinit");
+        const deinit_info = @typeInfo(@TypeOf(deinit_fn));
+        if (deinit_info != .@"fn") {
+            @compileError("Struct " ++ @typeName(T) ++ ".deinit must be a function");
+        }
+
+        const params = deinit_info.@"fn".params;
+        if (params.len == 0 or params.len > 2) {
+            @compileError("Struct " ++ @typeName(T) ++ ".deinit must accept (self) or (self, allocator)");
+        }
+
+        const self_type = params[0].type orelse {
+            @compileError("Struct " ++ @typeName(T) ++ ".deinit self parameter must be typed");
+        };
+        const self_info = @typeInfo(self_type);
+        const valid_self_type = self_type == T or
+            (self_info == .pointer and self_info.pointer.size == .one and self_info.pointer.child == T);
+        if (!valid_self_type) {
+            @compileError("Struct " ++ @typeName(T) ++ ".deinit first parameter must be Self, *Self, or *const Self");
+        }
+
+        const return_type = deinit_info.@"fn".return_type orelse void;
+        if (return_type != void) {
+            @compileError("Struct " ++ @typeName(T) ++ ".deinit must return void");
+        }
+
+        var mutable = value;
+        if (params.len == 1) {
+            mutable.deinit();
+            return true;
+        }
+
+        const allocator_type = params[1].type orelse {
+            @compileError("Struct " ++ @typeName(T) ++ ".deinit allocator parameter must be typed");
+        };
+        if (allocator_type != std.mem.Allocator) {
+            @compileError("Struct " ++ @typeName(T) ++ ".deinit allocator parameter must be std.mem.Allocator");
+        }
+
+        mutable.deinit(allocator);
+        return true;
+    }
+
     pub fn deinit_napi_value_with_state(comptime T: type, value: T, state: *DeinitState) void {
         const allocator = GlobalAllocator.globalAllocator();
         const infos = @typeInfo(T);
@@ -273,6 +319,10 @@ pub const Napi = struct {
                     }
                     var mutable = value;
                     mutable.deinit(allocator);
+                    return;
+                }
+
+                if (Napi.deinitWithCustomStructDeinit(T, value, allocator)) {
                     return;
                 }
 
