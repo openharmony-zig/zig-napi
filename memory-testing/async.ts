@@ -83,6 +83,49 @@ export async function exerciseAsyncWrappers(native: NativeAddon) {
   assertEqual(singleSummary.count, 3, "async single count");
   assertEqual(singleSummary.total, 10, "async single total");
 
+  native.memory_async_custom_deinit_reset();
+  const customSummary = await native.memory_async_custom_deinit("custom-thread");
+  assertEqual(
+    customSummary.borrowed_input_marker,
+    "input-borrowed-marker",
+    "custom deinit borrowed input marker",
+  );
+  assertEqual(
+    customSummary.borrowed_result_marker,
+    "result-borrowed-marker",
+    "custom deinit borrowed result marker",
+  );
+  assertEqual(customSummary.owned_label, "custom-thread:owned", "custom deinit owned label");
+  assertEqual(customSummary.label_len, 13, "custom deinit label length");
+
+  const customSingleSummary = await native.memory_async_custom_deinit_single("custom-single");
+  assertEqual(
+    customSingleSummary.borrowed_input_marker,
+    "input-borrowed-marker",
+    "custom single deinit borrowed input marker",
+  );
+  assertEqual(
+    customSingleSummary.borrowed_result_marker,
+    "result-borrowed-marker",
+    "custom single deinit borrowed result marker",
+  );
+  assertEqual(
+    customSingleSummary.owned_label,
+    "custom-single:owned",
+    "custom single deinit owned label",
+  );
+  assertEqual(customSingleSummary.label_len, 13, "custom single deinit label length");
+  assertEqual(
+    native.memory_async_custom_input_deinit_count(),
+    2,
+    "custom async input deinit count",
+  );
+  assertEqual(
+    native.memory_async_custom_result_deinit_count(),
+    2,
+    "custom async result deinit count",
+  );
+
   await native.memory_async_void("async-void");
   await assertRejects(
     native.memory_async_fail("async memory failure"),

@@ -1,15 +1,57 @@
 const std = @import("std");
 const napi = @import("napi");
 
+var custom_async_input_deinits = std.atomic.Value(usize).init(0);
+var custom_async_result_deinits = std.atomic.Value(usize).init(0);
+
 const AsyncInput = struct {
     label: []u8,
     values: []f32,
+
+    const Self = @This();
+
+    pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+        allocator.free(self.label);
+        allocator.free(self.values);
+    }
 };
 
 const AsyncSummary = struct {
     label: []u8,
     count: usize,
     total: f64,
+
+    const Self = @This();
+
+    pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+        allocator.free(self.label);
+    }
+};
+
+const CustomDeinitInput = struct {
+    owned_label: []u8,
+    borrowed_marker: []const u8,
+
+    const Self = @This();
+
+    pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+        _ = custom_async_input_deinits.fetchAdd(1, .monotonic);
+        allocator.free(self.owned_label);
+    }
+};
+
+const CustomDeinitSummary = struct {
+    borrowed_input_marker: []const u8,
+    borrowed_result_marker: []const u8,
+    owned_label: []u8,
+    label_len: usize,
+
+    const Self = @This();
+
+    pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+        _ = custom_async_result_deinits.fetchAdd(1, .monotonic);
+        allocator.free(self.owned_label);
+    }
 };
 
 const CountProgress = struct {
@@ -27,6 +69,16 @@ fn async_summary_execute(ctx: napi.AsyncContext(void), input: AsyncInput) !Async
     }
     const label = try ctx.allocator.dupe(u8, input.label);
     return .{ .label = label, .count = input.values.len, .total = total };
+}
+
+fn custom_deinit_execute(ctx: napi.AsyncContext(void), input: CustomDeinitInput) !CustomDeinitSummary {
+    const owned_label = try std.fmt.allocPrint(ctx.allocator, "{s}:owned", .{input.owned_label});
+    return .{
+        .borrowed_input_marker = input.borrowed_marker,
+        .borrowed_result_marker = "result-borrowed-marker",
+        .owned_label = owned_label,
+        .label_len = input.owned_label.len,
+    };
 }
 
 fn async_void_execute(_: []u8) void {}
@@ -74,6 +126,33 @@ pub fn memory_async_summary(input: AsyncInput) napi.Async(AsyncSummary, .thread)
 
 pub fn memory_async_summary_single(input: AsyncInput) napi.Async(AsyncSummary, .single) {
     return napi.Async(AsyncSummary, .single).from(input, async_summary_execute);
+}
+
+pub fn memory_async_custom_deinit(label: []u8) napi.Async(CustomDeinitSummary, .thread) {
+    return napi.Async(CustomDeinitSummary, .thread).from(CustomDeinitInput{
+        .owned_label = label,
+        .borrowed_marker = "input-borrowed-marker",
+    }, custom_deinit_execute);
+}
+
+pub fn memory_async_custom_deinit_single(label: []u8) napi.Async(CustomDeinitSummary, .single) {
+    return napi.Async(CustomDeinitSummary, .single).from(CustomDeinitInput{
+        .owned_label = label,
+        .borrowed_marker = "input-borrowed-marker",
+    }, custom_deinit_execute);
+}
+
+pub fn memory_async_custom_deinit_reset() void {
+    custom_async_input_deinits.store(0, .monotonic);
+    custom_async_result_deinits.store(0, .monotonic);
+}
+
+pub fn memory_async_custom_input_deinit_count() usize {
+    return custom_async_input_deinits.load(.monotonic);
+}
+
+pub fn memory_async_custom_result_deinit_count() usize {
+    return custom_async_result_deinits.load(.monotonic);
 }
 
 pub fn memory_async_void(label: []u8) napi.Async(void, .thread) {

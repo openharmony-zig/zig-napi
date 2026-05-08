@@ -7,6 +7,7 @@ const Undefined = @import("./value/undefined.zig").Undefined;
 const Napi = @import("./util/napi.zig").Napi;
 const NapiError = @import("./wrapper/error.zig");
 const GlobalAllocator = @import("./util/allocator.zig");
+const AbortSignalModule = @import("./abort_signal.zig");
 const AbortSignal = @import("./abort_signal.zig").AbortSignal;
 const AbortRegistration = @import("./abort_signal.zig").AbortRegistration;
 
@@ -624,17 +625,31 @@ fn AsyncTaskOperation(
                 self.controller_thread = null;
             }
 
+            const promise = self.promise;
+            var settled_value: ?napi.napi_value = null;
+            var should_reject = false;
+
             if (self.cancel_dispatched or self.cancel_requested) {
-                self.promise.RejectAbortError() catch {};
+                settled_value = AbortSignalModule.abortErrorValue(Env.from_raw(env_raw));
+                should_reject = true;
             } else if (self.err) |err| {
-                self.promise.Reject(err) catch {};
+                settled_value = err.to_napi_error(Env.from_raw(env_raw));
+                should_reject = true;
             } else if (Result == void) {
-                self.promise.Resolve({}) catch {};
+                settled_value = Undefined.New(Env.from_raw(env_raw)).raw;
             } else {
-                self.promise.Resolve(self.result) catch {};
+                settled_value = Napi.to_napi_value(env_raw, self.result, null) catch null;
             }
 
             self.destroy(env_raw);
+
+            if (settled_value) |value| {
+                const status = if (should_reject)
+                    napi.napi_reject_deferred(env_raw, promise.deferred, value)
+                else
+                    napi.napi_resolve_deferred(env_raw, promise.deferred, value);
+                _ = status;
+            }
         }
 
         fn initThreadDispatcher(self: *Self) !void {
@@ -682,17 +697,21 @@ fn AsyncTaskOperation(
             const self: *Self = @ptrCast(@alignCast(context));
             const data: *DispatchData = @ptrCast(@alignCast(raw_data));
             const allocator = self.allocator;
-            defer allocator.destroy(data);
 
             switch (data.kind) {
                 .event => {
+                    defer allocator.destroy(data);
                     if (Event != void and data.payload != null) {
                         const payload = data.payload.?;
                         defer allocator.destroy(payload);
                         self.dispatchEvent(inner_env, payload.*);
                     }
                 },
-                .completion => self.dispatchCompletion(inner_env),
+                .completion => {
+                    allocator.destroy(data);
+                    self.dispatchCompletion(inner_env);
+                    return;
+                },
             }
         }
 

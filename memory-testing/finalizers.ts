@@ -3,7 +3,7 @@ import { assertEqual } from "./assert";
 type NativeAddon = ESObject;
 
 export function exerciseFinalizerWrappers(native: NativeAddon) {
-  native.begin_finalizer_state_check(128, 96);
+  native.begin_finalizer_state_check(128, 128);
 
   for (let i = 0; i < 32; i++) {
     let bufferValue: ESObject | null = native.create_external_buffer(32);
