@@ -27,6 +27,8 @@ pub const test_f32 = number.test_f32;
 pub const test_u32 = number.test_u32;
 
 pub const hello = string.hello;
+pub const raw_string_len = string.raw_string_len;
+pub const copied_string_len = string.copied_string_len;
 pub const text = string.text;
 
 pub const throw_error = err.throw_error;
@@ -47,12 +49,16 @@ pub const abortable_count_async = async_examples.abortable_count_async;
 pub const get_and_return_array = array.get_and_return_array;
 pub const get_named_array = array.get_named_array;
 pub const get_arraylist = array.get_arraylist;
+pub const raw_array_sum = array.raw_array_sum;
+pub const raw_array_create = array.raw_array_create;
 
 pub const get_object = object.get_object;
 pub const get_object_optional = object.get_object_optional;
 pub const get_optional_object_and_return_optional = object.get_optional_object_and_return_optional;
 pub const get_nullable_object = object.get_nullable_object;
 pub const return_nullable = object.return_nullable;
+pub const raw_object_read = object.raw_object_read;
+pub const raw_object_create = object.raw_object_create;
 
 pub const call_function = function.call_function;
 pub const basic_function = function.basic_function;

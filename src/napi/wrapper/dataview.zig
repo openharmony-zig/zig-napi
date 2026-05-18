@@ -58,7 +58,14 @@ pub const DataView = struct {
             return NapiError.Error.fromStatus(NapiError.Status.New(status));
         }
 
-        return DataView.from_raw(env.raw, raw);
+        return DataView{
+            .env = env.raw,
+            .raw = raw,
+            .data = if (byte_length == 0) &[_]u8{} else arraybuffer.data + byte_offset,
+            .byte_length = byte_length,
+            .byte_offset = byte_offset,
+            .arraybuffer = arraybuffer,
+        };
     }
 
     pub fn New(env: Env, byte_length: usize) !DataView {

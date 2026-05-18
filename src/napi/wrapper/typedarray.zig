@@ -111,7 +111,15 @@ pub fn TypedArray(comptime T: type) type {
                 return NapiError.Error.fromStatus(NapiError.Status.New(status));
             }
 
-            return Self.from_raw(env.raw, raw);
+            return Self{
+                .env = env.raw,
+                .raw = raw,
+                .data = if (len == 0) &[_]T{} else @ptrCast(@alignCast(arraybuffer.data + byte_offset)),
+                .len = len,
+                .typedarray_type = defaultTypeFor(T),
+                .byte_offset = byte_offset,
+                .arraybuffer = arraybuffer,
+            };
         }
 
         pub fn New(env: Env, len: usize) !Self {

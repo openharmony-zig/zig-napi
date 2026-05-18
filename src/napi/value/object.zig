@@ -36,7 +36,7 @@ pub const Object = struct {
                 inline for (infos.@"struct".fields) |field| {
                     var element: napi.napi_value = undefined;
                     _ = napi.napi_get_named_property(env, raw, @ptrCast(field.name.ptr), &element);
-                    @field(result, field.name) = Napi.from_napi_value(env, element, field.type);
+                    @field(result, field.name) = Napi.from_napi_value_auto(env, element, field.type);
                 }
                 return result;
             },
@@ -44,6 +44,16 @@ pub const Object = struct {
                 @compileError("Unsupported type: " ++ @typeName(infos));
             },
         }
+    }
+
+    pub fn Create(env: Env) !Object {
+        var raw: napi.napi_value = undefined;
+        const status = napi.napi_create_object(env.raw, &raw);
+        if (status != napi.napi_ok) {
+            return NapiError.Error.fromStatus(NapiError.Status.New(status));
+        }
+
+        return Object.from_raw(env.raw, raw);
     }
 
     pub fn New(env: Env, obj: anytype) !Object {
@@ -57,18 +67,12 @@ pub const Object = struct {
             @compileError("Object.New does not support tuple type");
         }
 
-        var raw: napi.napi_value = undefined;
-        const status = napi.napi_create_object(env.raw, &raw);
-        if (status != napi.napi_ok) {
-            return NapiError.Error.fromStatus(NapiError.Status.New(status));
-        }
-
-        var self = Object.from_raw(env.raw, raw);
+        var self = try Object.Create(env);
 
         const obj_fields = obj_infos.@"struct".fields;
 
         inline for (obj_fields) |field| {
-            const n_value = try Napi.to_napi_value(env.raw, @field(obj, field.name), field.name);
+            const n_value = try Napi.to_napi_value_auto(env.raw, @field(obj, field.name), field.name);
             try self.Set(
                 field.name,
                 n_value,
@@ -78,41 +82,35 @@ pub const Object = struct {
         return self;
     }
 
-    pub fn Set(self: Object, comptime key: []const u8, value: anytype) !void {
-        const n_value = try Napi.to_napi_value(self.env, value, key);
-        const napi_desc = [_]napi.napi_property_descriptor{
-            .{
-                .utf8name = @ptrCast(key.ptr),
-                .method = null,
-                .getter = null,
-                .setter = null,
-                .value = n_value,
-                .attributes = napi.napi_default,
-                .data = null,
-            },
-        };
-        const status = napi.napi_define_properties(self.env, self.raw, 1, &napi_desc);
+    fn keyToNapiValue(self: Object, key: []const u8) !napi.napi_value {
+        var key_raw: napi.napi_value = undefined;
+        const status = napi.napi_create_string_utf8(self.env, key.ptr, key.len, &key_raw);
+        if (status != napi.napi_ok) {
+            return NapiError.Error.fromStatus(NapiError.Status.New(status));
+        }
+        return key_raw;
+    }
+
+    pub fn Set(self: Object, key: []const u8, value: anytype) !void {
+        const key_raw = try self.keyToNapiValue(key);
+        const n_value = try Napi.to_napi_value_auto(self.env, value, null);
+        const status = napi.napi_set_property(self.env, self.raw, key_raw, n_value);
         if (status != napi.napi_ok) {
             return NapiError.Error.fromStatus(NapiError.Status.New(status));
         }
     }
 
-    /// Get a property from the object
-    /// If key is []u8 or likely, key will marked as a string, it will try to get a named property
-    /// Otherwise, key will be marked as a NapiValue and get a property by napi_get_property
-    pub fn Get(self: Object, comptime key: type, comptime T: type) T {
-        const is_string = helper.isString(key);
+    pub fn Get(self: Object, key: []const u8, comptime T: type) T {
+        const key_raw = self.keyToNapiValue(key) catch @panic("Failed to create object property key");
+        var raw: napi.napi_value = undefined;
+        _ = napi.napi_get_property(self.env, self.raw, key_raw, &raw);
+        return Napi.from_napi_value_auto(self.env, raw, T);
+    }
 
-        switch (is_string) {
-            .true => {
-                var raw: napi.napi_value = undefined;
-                _ = napi.napi_get_named_property(self.env, self.raw, @ptrCast(key.ptr), &raw);
-                return Value.from_raw(self.env, raw);
-            },
-            .false => {
-                return Napi.ToNapiValue(self.env, key);
-            },
-        }
+    pub fn GetNamed(self: Object, comptime key: []const u8, comptime T: type) T {
+        var raw: napi.napi_value = undefined;
+        _ = napi.napi_get_named_property(self.env, self.raw, @ptrCast(key.ptr), &raw);
+        return Napi.from_napi_value_auto(self.env, raw, T);
     }
 
     /// Check if the object has a property

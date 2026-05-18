@@ -28,3 +28,19 @@ pub fn get_arraylist(array: ArrayList(f32)) ArrayList(f32) {
     defer pg.free(message);
     return array;
 }
+
+pub fn raw_array_sum(array: napi.Array) f64 {
+    var total: f64 = 0;
+    for (0..array.length()) |i| {
+        total += array.Get(@intCast(i), f64);
+    }
+    return total;
+}
+
+pub fn raw_array_create(env: napi.Env) !napi.Array {
+    var array = try napi.Array.Create(env);
+    try array.Push(@as(i32, 1));
+    try array.Push(@as(i32, 2));
+    try array.Set(1, @as(i32, 4));
+    return array;
+}

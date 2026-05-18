@@ -202,6 +202,117 @@ pub const Napi = struct {
         }
     };
 
+    pub fn canFastFrom(comptime T: type) bool {
+        return switch (@typeInfo(T)) {
+            .bool => true,
+            .float => |float| float.bits <= 64,
+            .int => |int| int.bits <= 64,
+            else => false,
+        };
+    }
+
+    pub fn canFastTo(comptime T: type) bool {
+        return switch (@typeInfo(T)) {
+            .bool => true,
+            .float => |float| float.bits <= 64,
+            .int => |int| int.bits <= 64,
+            else => false,
+        };
+    }
+
+    pub fn from_napi_value_fast(env: napi.napi_env, raw: napi.napi_value, comptime T: type) T {
+        switch (@typeInfo(T)) {
+            .bool => {
+                var result: bool = false;
+                _ = napi.napi_get_value_bool(env, raw, &result);
+                return result;
+            },
+            .float => {
+                var result: f64 = 0;
+                _ = napi.napi_get_value_double(env, raw, &result);
+                return @floatCast(result);
+            },
+            .int => |int| {
+                if (int.signedness == .signed) {
+                    if (int.bits <= 32) {
+                        var result: i32 = 0;
+                        _ = napi.napi_get_value_int32(env, raw, &result);
+                        return @intCast(result);
+                    }
+
+                    var result: i64 = 0;
+                    _ = napi.napi_get_value_int64(env, raw, &result);
+                    return @intCast(result);
+                }
+
+                if (int.bits <= 32) {
+                    var result: u32 = 0;
+                    _ = napi.napi_get_value_uint32(env, raw, &result);
+                    return @intCast(result);
+                }
+
+                var result: i64 = 0;
+                _ = napi.napi_get_value_int64(env, raw, &result);
+                return @intCast(result);
+            },
+            else => @compileError("Unsupported fast from_napi_value type: " ++ @typeName(T)),
+        }
+    }
+
+    pub fn from_napi_value_auto(env: napi.napi_env, raw: napi.napi_value, comptime T: type) T {
+        if (comptime Napi.canFastFrom(T)) {
+            return Napi.from_napi_value_fast(env, raw, T);
+        }
+        return Napi.from_napi_value(env, raw, T);
+    }
+
+    pub fn to_napi_value_fast(env: napi.napi_env, value: anytype) napi.napi_value {
+        const T = @TypeOf(value);
+        const value_type = switch (T) {
+            comptime_int => comptime helper.comptimeIntMode(value),
+            comptime_float => comptime helper.comptimeFloatMode(value),
+            else => T,
+        };
+
+        switch (@typeInfo(value_type)) {
+            .bool => {
+                var raw: napi.napi_value = undefined;
+                _ = napi.napi_get_boolean(env, value, &raw);
+                return raw;
+            },
+            .float => {
+                var raw: napi.napi_value = undefined;
+                _ = napi.napi_create_double(env, @floatCast(value), &raw);
+                return raw;
+            },
+            .int => |int| {
+                var raw: napi.napi_value = undefined;
+                if (int.signedness == .signed) {
+                    if (int.bits <= 32) {
+                        _ = napi.napi_create_int32(env, @intCast(value), &raw);
+                    } else {
+                        _ = napi.napi_create_int64(env, @intCast(value), &raw);
+                    }
+                } else {
+                    if (int.bits <= 32) {
+                        _ = napi.napi_create_uint32(env, @intCast(value), &raw);
+                    } else {
+                        _ = napi.napi_create_int64(env, @intCast(value), &raw);
+                    }
+                }
+                return raw;
+            },
+            else => @compileError("Unsupported fast to_napi_value type: " ++ @typeName(T)),
+        }
+    }
+
+    pub fn to_napi_value_auto(env: napi.napi_env, value: anytype, comptime name: ?[]const u8) !napi.napi_value {
+        if (comptime Napi.canFastTo(@TypeOf(value))) {
+            return Napi.to_napi_value_fast(env, value);
+        }
+        return try Napi.to_napi_value(env, value, name);
+    }
+
     pub fn deinit_napi_value(comptime T: type, value: T) void {
         var state = DeinitState{};
         Napi.deinit_napi_value_with_state(T, value, &state);

@@ -21,6 +21,16 @@ pub const Array = struct {
         return Array{ .env = env, .raw = raw, .len = len, .type = napi.napi_object };
     }
 
+    pub fn length(self: Array) u32 {
+        return self.len;
+    }
+
+    pub fn Get(self: Array, index: u32, comptime T: type) T {
+        var raw: napi.napi_value = undefined;
+        _ = napi.napi_get_element(self.env, self.raw, index, &raw);
+        return Napi.from_napi_value_auto(self.env, raw, T);
+    }
+
     pub fn from_napi_value(env: napi.napi_env, raw: napi.napi_value, comptime T: type) T {
         const infos = @typeInfo(T);
         var is_typedarray = false;
@@ -37,7 +47,7 @@ pub const Array = struct {
                 for (0..array_len) |i| {
                     var element: napi.napi_value = undefined;
                     _ = napi.napi_get_element(env, raw, @intCast(i), &element);
-                    T[i] = Napi.from_napi_value(env, element, infos.array.child);
+                    T[i] = Napi.from_napi_value_auto(env, element, infos.array.child);
                 }
 
                 return T;
@@ -54,7 +64,7 @@ pub const Array = struct {
                     for (0..len) |i| {
                         var element: napi.napi_value = undefined;
                         _ = napi.napi_get_element(env, raw, @intCast(i), &element);
-                        buf[i] = Napi.from_napi_value(env, element, infos.pointer.child);
+                        buf[i] = Napi.from_napi_value_auto(env, element, infos.pointer.child);
                     }
                     return buf;
                 }
@@ -67,7 +77,7 @@ pub const Array = struct {
                     inline for (infos.@"struct".fields, 0..) |field, i| {
                         var element: napi.napi_value = undefined;
                         _ = napi.napi_get_element(env, raw, @intCast(i), &element);
-                        @field(result, field.name) = Napi.from_napi_value(env, element, field.type);
+                        @field(result, field.name) = Napi.from_napi_value_auto(env, element, field.type);
                     }
                     return result;
                 }
@@ -84,7 +94,7 @@ pub const Array = struct {
                     for (0..len) |i| {
                         var element: napi.napi_value = undefined;
                         _ = napi.napi_get_element(env, raw, @intCast(i), &element);
-                        result.append(allocator, Napi.from_napi_value(env, element, child)) catch @panic("OOM");
+                        result.append(allocator, Napi.from_napi_value_auto(env, element, child)) catch @panic("OOM");
                     }
                     return result;
                 }
@@ -261,18 +271,18 @@ pub const Array = struct {
 
         if (infos == .array or comptime helper.isSlice(array_type)) {
             for (array, 0..) |item, i| {
-                const napi_value = try Napi.to_napi_value(env.raw, item, null);
+                const napi_value = try Napi.to_napi_value_auto(env.raw, item, null);
                 _ = napi.napi_set_element(env.raw, raw, @intCast(i), napi_value);
             }
         } else if (comptime helper.isTuple(array_type)) {
             inline for (infos.@"struct".fields, 0..) |item, i| {
                 const value = @field(array, item.name);
-                const napi_value = try Napi.to_napi_value(env.raw, value, null);
+                const napi_value = try Napi.to_napi_value_auto(env.raw, value, null);
                 _ = napi.napi_set_element(env.raw, raw, @intCast(i), napi_value);
             }
         } else if (comptime helper.isArrayList(array_type)) {
             for (array.items, 0..) |item, i| {
-                const napi_value = try Napi.to_napi_value(env.raw, item, null);
+                const napi_value = try Napi.to_napi_value_auto(env.raw, item, null);
                 _ = napi.napi_set_element(env.raw, raw, @intCast(i), napi_value);
             }
         }
@@ -283,5 +293,33 @@ pub const Array = struct {
             .len = len,
             .type = napi.napi_object,
         };
+    }
+
+    pub fn Create(env: Env) !Array {
+        var raw: napi.napi_value = undefined;
+        const status = napi.napi_create_array(env.raw, &raw);
+        if (status != napi.napi_ok) {
+            return NapiError.Error.fromStatus(NapiError.Status.New(status));
+        }
+
+        return Array{
+            .env = env.raw,
+            .raw = raw,
+            .len = 0,
+            .type = napi.napi_object,
+        };
+    }
+
+    pub fn Set(self: *Array, index: u32, value: anytype) !void {
+        const napi_value = try Napi.to_napi_value_auto(self.env, value, null);
+        const status = napi.napi_set_element(self.env, self.raw, index, napi_value);
+        if (status != napi.napi_ok) {
+            return NapiError.Error.fromStatus(NapiError.Status.New(status));
+        }
+        self.len = @max(self.len, index + 1);
+    }
+
+    pub fn Push(self: *Array, value: anytype) !void {
+        try self.Set(self.len, value);
     }
 };

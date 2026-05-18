@@ -1,6 +1,5 @@
 const std = @import("std");
 const napi = @import("napi-sys").napi_sys;
-const CallbackInfo = @import("./callback_info.zig").CallbackInfo;
 const napi_env = @import("../env.zig");
 const Napi = @import("../util/napi.zig").Napi;
 const helper = @import("../util/helper.zig");
@@ -58,9 +57,30 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
             }
         };
 
+        fn readCallbackInfo(
+            comptime Argc: usize,
+            env: napi.napi_env,
+            callback_info: napi.napi_callback_info,
+            args_raw: *[Argc]napi.napi_value,
+            this_obj: *napi.napi_value,
+        ) ?usize {
+            var argc: usize = Argc;
+            const argv = if (Argc == 0) null else args_raw[0..].ptr;
+            const status = napi.napi_get_cb_info(env, callback_info, &argc, argv, this_obj, null);
+            if (status != napi.napi_ok) return null;
+            return argc;
+        }
+
         fn constructor_callback(env: napi.napi_env, callback_info: napi.napi_callback_info) callconv(.c) napi.napi_value {
-            const infos = CallbackInfo.from_raw(env, callback_info);
-            defer infos.deinit();
+            const constructor_arg_count = comptime blk: {
+                if (HasInit and @hasDecl(T, "init")) {
+                    break :blk @typeInfo(@TypeOf(T.init)).@"fn".params.len;
+                }
+                break :blk if (HasInit) fields.len else 0;
+            };
+            var args_raw: [constructor_arg_count]napi.napi_value = undefined;
+            var this_obj: napi.napi_value = undefined;
+            _ = readCallbackInfo(constructor_arg_count, env, callback_info, &args_raw, &this_obj) orelse return null;
 
             const instance = InstanceData.create() catch return null;
             const data = &instance.value;
@@ -75,7 +95,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                     if (comptime @typeInfo(arg.type.?) == .@"union") {
                         NapiError.clearLastError();
                     }
-                    tuple_args[i] = Napi.from_napi_value(infos.env, infos.args[i].raw, arg.type.?);
+                    tuple_args[i] = Napi.from_napi_value_auto(env, args_raw[i], arg.type.?);
                     if (comptime @typeInfo(arg.type.?) == .@"union") {
                         if (NapiError.last_error) |last_err| {
                             last_err.throwInto(napi_env.Env.from_raw(env));
@@ -103,7 +123,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                         if (comptime @typeInfo(field.type) == .@"union") {
                             NapiError.clearLastError();
                         }
-                        @field(data.*, field.name) = Napi.from_napi_value(env, infos.args[i].raw, field.type);
+                        @field(data.*, field.name) = Napi.from_napi_value_auto(env, args_raw[i], field.type);
                         if (comptime @typeInfo(field.type) == .@"union") {
                             if (NapiError.last_error) |last_err| {
                                 last_err.throwInto(napi_env.Env.from_raw(env));
@@ -114,8 +134,6 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                     }
                 }
             }
-
-            const this_obj = infos.This();
 
             const status = napi.napi_wrap(env, this_obj, instance, finalize_callback, null, null);
             if (status != napi.napi_ok) {
@@ -129,13 +147,14 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
         fn factory_method_callback(comptime factory_name: []const u8) type {
             return struct {
                 fn call(env: napi.napi_env, callback_info: napi.napi_callback_info) callconv(.c) napi.napi_value {
-                    const infos = CallbackInfo.from_raw(env, callback_info);
-                    defer infos.deinit();
-
                     const factory_fn = @field(T, factory_name);
                     const factory_fn_type = @TypeOf(factory_fn);
                     const factory_fn_info = @typeInfo(factory_fn_type);
                     const params = factory_fn_info.@"fn".params;
+
+                    var args_raw: [params.len]napi.napi_value = undefined;
+                    var this_obj: napi.napi_value = undefined;
+                    _ = readCallbackInfo(params.len, env, callback_info, &args_raw, &this_obj) orelse return null;
 
                     var instance_data: T = undefined;
 
@@ -144,16 +163,14 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                     } else {
                         var tuple_args: std.meta.ArgsTuple(factory_fn_type) = undefined;
                         inline for (params, 0..) |param, i| {
-                            if (i < infos.args.len) {
-                                if (comptime @typeInfo(param.type.?) == .@"union") {
-                                    NapiError.clearLastError();
-                                }
-                                tuple_args[i] = Napi.from_napi_value(infos.env, infos.args[i].raw, param.type.?);
-                                if (comptime @typeInfo(param.type.?) == .@"union") {
-                                    if (NapiError.last_error) |last_err| {
-                                        last_err.throwInto(napi_env.Env.from_raw(env));
-                                        return null;
-                                    }
+                            if (comptime @typeInfo(param.type.?) == .@"union") {
+                                NapiError.clearLastError();
+                            }
+                            tuple_args[i] = Napi.from_napi_value_auto(env, args_raw[i], param.type.?);
+                            if (comptime @typeInfo(param.type.?) == .@"union") {
+                                if (NapiError.last_error) |last_err| {
+                                    last_err.throwInto(napi_env.Env.from_raw(env));
+                                    return null;
                                 }
                             }
                         }
@@ -169,7 +186,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
 
                     var constructor_args: [fields.len]napi.napi_value = undefined;
                     inline for (fields, 0..) |field, i| {
-                        constructor_args[i] = Napi.to_napi_value(env, @field(instance_data, field.name), field.name) catch return null;
+                        constructor_args[i] = Napi.to_napi_value_auto(env, @field(instance_data, field.name), field.name) catch return null;
                     }
 
                     var constructor: napi.napi_value = undefined;
@@ -249,31 +266,34 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
             inline for (fields) |field| {
                 const FieldAccessor = struct {
                     fn getter(getter_env: napi.napi_env, info: napi.napi_callback_info) callconv(.c) napi.napi_value {
-                        const cb_info = CallbackInfo.from_raw(getter_env, info);
-                        defer cb_info.deinit();
+                        var args_raw: [0]napi.napi_value = undefined;
+                        var this_obj: napi.napi_value = undefined;
+                        _ = readCallbackInfo(0, getter_env, info, &args_raw, &this_obj) orelse return null;
+
                         var data: ?*anyopaque = null;
-                        _ = napi.napi_unwrap(getter_env, cb_info.This(), &data);
+                        _ = napi.napi_unwrap(getter_env, this_obj, &data);
                         if (data == null) return null;
 
                         const instance: *InstanceData = @ptrCast(@alignCast(data.?));
                         const field_value = @field(instance.value, field.name);
-                        return Napi.to_napi_value(getter_env, field_value, field.name) catch null;
+                        return Napi.to_napi_value_auto(getter_env, field_value, field.name) catch null;
                     }
 
                     fn setter(setter_env: napi.napi_env, info: napi.napi_callback_info) callconv(.c) napi.napi_value {
-                        const cb_info = CallbackInfo.from_raw(setter_env, info);
-                        defer cb_info.deinit();
+                        var args_raw: [1]napi.napi_value = undefined;
+                        var this_obj: napi.napi_value = undefined;
+                        const actual_argc = readCallbackInfo(1, setter_env, info, &args_raw, &this_obj) orelse return null;
+
                         var data: ?*anyopaque = null;
-                        _ = napi.napi_unwrap(setter_env, cb_info.This(), &data);
+                        _ = napi.napi_unwrap(setter_env, this_obj, &data);
                         if (data == null) return null;
 
                         const instance: *InstanceData = @ptrCast(@alignCast(data.?));
-                        const args = cb_info.args;
-                        if (args.len > 0) {
+                        if (actual_argc > 0) {
                             if (comptime @typeInfo(field.type) == .@"union") {
                                 NapiError.clearLastError();
                             }
-                            const new_value = Napi.from_napi_value(setter_env, args[0].raw, field.type);
+                            const new_value = Napi.from_napi_value_auto(setter_env, args_raw[0], field.type);
                             if (comptime @typeInfo(field.type) == .@"union") {
                                 if (NapiError.last_error) |last_err| {
                                     last_err.throwInto(napi_env.Env.from_raw(setter_env));
@@ -314,7 +334,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                             if (cached_value) |val| {
                                 return val;
                             }
-                            const val = Napi.to_napi_value(holder_env, const_value, decl.name) catch return null;
+                            const val = Napi.to_napi_value_auto(holder_env, const_value, decl.name) catch return null;
                             cached_value = val;
                             return val;
                         }
@@ -384,10 +404,13 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                                 }
 
                                 fn call(method_env: napi.napi_env, info: napi.napi_callback_info) callconv(.c) napi.napi_value {
-                                    const cb_info = CallbackInfo.from_raw(method_env, info);
-                                    defer cb_info.deinit();
+                                    const method_arg_count = params.len - method_args_offset;
+                                    var args_raw: [method_arg_count]napi.napi_value = undefined;
+                                    var this_obj: napi.napi_value = undefined;
+                                    _ = readCallbackInfo(method_arg_count, method_env, info, &args_raw, &this_obj) orelse return null;
+
                                     var data: ?*anyopaque = null;
-                                    _ = napi.napi_unwrap(method_env, cb_info.This(), &data);
+                                    _ = napi.napi_unwrap(method_env, this_obj, &data);
                                     if (data == null) return null;
 
                                     var tuple_args: std.meta.ArgsTuple(@TypeOf(method)) = undefined;
@@ -409,7 +432,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                                         if (comptime @typeInfo(param.type.?) == .@"union") {
                                             NapiError.clearLastError();
                                         }
-                                        tuple_args[i] = Napi.from_napi_value(method_env, cb_info.args[i - method_args_offset].raw, param.type.?);
+                                        tuple_args[i] = Napi.from_napi_value_auto(method_env, args_raw[i - method_args_offset], param.type.?);
                                         initialized_args = i + 1;
                                         if (comptime @typeInfo(param.type.?) == .@"union") {
                                             if (NapiError.last_error) |last_err| {
@@ -419,7 +442,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                                         }
                                     }
                                     const result = @call(.auto, method, tuple_args);
-                                    return Napi.to_napi_value(method_env, result, fn_name) catch null;
+                                    return Napi.to_napi_value_auto(method_env, result, fn_name) catch null;
                                 }
                             };
 

@@ -10,6 +10,8 @@ export function testPrimitives(native: NativeAddon) {
 
   assertEqual(native.hello("ArkTS"), "Hello, ArkTS!", "hello");
   assertEqual(native.hello(""), "Hello, !", "hello empty");
+  assertEqual(native.raw_string_len("ArkTS"), 5, "raw_string_len");
+  assertEqual(native.copied_string_len("ArkTS"), 5, "copied_string_len");
   assertEqual(native.text, "Hello World", "const text");
 
   assertThrows(() => native.throw_error(), "test", "throw_error");

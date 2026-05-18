@@ -1,59 +1,57 @@
-const std = @import("std");
 const napi = @import("napi-sys").napi_sys;
 const value = @import("../value.zig");
 const NapiEnv = @import("../env.zig").Env;
 const GlobalAllocator = @import("../util/allocator.zig");
 
 pub const CallbackInfo = struct {
+    const inline_arg_count = 8;
+
     raw: napi.napi_callback_info,
     env: napi.napi_env,
-    args: []const value.NapiValue,
-    args_raw: []napi.napi_value,
     args_count: usize,
     this: napi.napi_value,
+    inline_args_raw: [inline_arg_count]napi.napi_value = undefined,
+    heap_args_raw: ?[]napi.napi_value = null,
 
     pub fn from_raw(env: napi.napi_env, raw: napi.napi_callback_info) CallbackInfo {
-        var init_argc: usize = 0;
-        const status = napi.napi_get_cb_info(env, raw, &init_argc, null, null, null);
+        var result = CallbackInfo{
+            .raw = raw,
+            .env = env,
+            .args_count = 0,
+            .this = undefined,
+        };
+
+        var argc: usize = inline_arg_count;
+        const status = napi.napi_get_cb_info(env, raw, &argc, result.inline_args_raw[0..].ptr, &result.this, null);
         if (status != napi.napi_ok) {
             @panic("Failed to get callback info");
         }
 
+        result.args_count = argc;
+        if (argc <= inline_arg_count) {
+            return result;
+        }
+
         const allocator = GlobalAllocator.globalAllocator();
-        const args_raw = allocator.alloc(napi.napi_value, init_argc) catch @panic("OOM");
-
-        var this: napi.napi_value = undefined;
-
-        const status2 = napi.napi_get_cb_info(env, raw, &init_argc, args_raw.ptr, &this, null);
-        if (status2 != napi.napi_ok) {
-            allocator.free(args_raw);
+        const heap_args_raw = allocator.alloc(napi.napi_value, argc) catch @panic("OOM");
+        var heap_argc = argc;
+        const heap_status = napi.napi_get_cb_info(env, raw, &heap_argc, heap_args_raw.ptr, &result.this, null);
+        if (heap_status != napi.napi_ok) {
+            allocator.free(heap_args_raw);
             @panic("Failed to get callback info");
         }
 
-        const result = allocator.alloc(value.NapiValue, init_argc) catch {
-            allocator.free(args_raw);
-            @panic("OOM");
-        };
-
-        for (0..init_argc) |i| {
-            result[i] = value.NapiValue.from_raw(env, args_raw[i]);
-        }
-
-        return CallbackInfo{
-            .raw = raw,
-            .env = env,
-            .args = result,
-            .this = this,
-            .args_raw = args_raw,
-            .args_count = init_argc,
-        };
+        result.args_count = heap_argc;
+        result.heap_args_raw = heap_args_raw;
+        return result;
     }
 
-    /// Free the allocated memory for args and args_raw
+    /// Free the allocated memory for heap-backed args, if any.
     pub fn deinit(self: *const CallbackInfo) void {
-        const allocator = GlobalAllocator.globalAllocator();
-        allocator.free(self.args_raw);
-        allocator.free(self.args);
+        if (self.heap_args_raw) |args_raw| {
+            const allocator = GlobalAllocator.globalAllocator();
+            allocator.free(args_raw);
+        }
     }
 
     pub fn Env(self: CallbackInfo) NapiEnv {
@@ -61,7 +59,22 @@ pub const CallbackInfo = struct {
     }
 
     pub fn Get(self: CallbackInfo, index: usize) value.NapiValue {
-        return self.args[index];
+        return value.NapiValue.from_raw(self.env, self.ArgRaw(index));
+    }
+
+    pub fn Len(self: CallbackInfo) usize {
+        return self.args_count;
+    }
+
+    pub fn ArgsRaw(self: CallbackInfo) []const napi.napi_value {
+        if (self.heap_args_raw) |args_raw| {
+            return args_raw[0..self.args_count];
+        }
+        return self.inline_args_raw[0..self.args_count];
+    }
+
+    pub fn ArgRaw(self: CallbackInfo, index: usize) napi.napi_value {
+        return self.ArgsRaw()[index];
     }
 
     pub fn This(self: CallbackInfo) napi.napi_value {
