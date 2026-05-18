@@ -5,7 +5,6 @@ const CallbackInfo = @import("../wrapper/callback_info.zig").CallbackInfo;
 const Napi = @import("../util/napi.zig").Napi;
 const NapiError = @import("../wrapper/error.zig");
 const Undefined = @import("./undefined.zig").Undefined;
-const GlobalAllocator = @import("../util/allocator.zig");
 const Reference = @import("../wrapper/reference.zig").Reference;
 const helper = @import("../util/helper.zig");
 const AbortSignal = @import("../abort_signal.zig").AbortSignal;
@@ -52,7 +51,6 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                 }
 
                 fn inner_fn(inner_env: napi.napi_env, info: napi.napi_callback_info) callconv(.c) napi.napi_value {
-                    const undefined_value = Undefined.New(Env.from_raw(inner_env));
                     const return_info = infos.@"fn".return_type.?;
                     const return_payload = switch (@typeInfo(return_info)) {
                         .error_union => |eu| eu.payload,
@@ -63,12 +61,10 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                     const expected_argc = params.len - env_index + if (has_async_events) 1 else 0;
 
                     var init_argc: usize = expected_argc;
+                    var args_raw: [expected_argc]napi.napi_value = undefined;
+                    const args_ptr = if (expected_argc == 0) null else args_raw[0..].ptr;
 
-                    const allocator = GlobalAllocator.globalAllocator();
-                    const args_raw = allocator.alloc(napi.napi_value, init_argc) catch @panic("OOM");
-                    defer allocator.free(args_raw);
-
-                    const cb_status = napi.napi_get_cb_info(inner_env, info, &init_argc, args_raw.ptr, null, null);
+                    const cb_status = napi.napi_get_cb_info(inner_env, info, &init_argc, args_ptr, null, null);
                     if (cb_status != napi.napi_ok) {
                         return NapiError.checkNapiStatus(inner_env, NapiError.Status.New(cb_status));
                     }
@@ -88,7 +84,7 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                         if (comptime @typeInfo(param_index.type.?) == .@"union") {
                             NapiError.clearLastError();
                         }
-                        napi_params[i] = Napi.from_napi_value(inner_env, args_raw[i - env_index], param_index.type.?);
+                        napi_params[i] = Napi.from_napi_value_auto(inner_env, args_raw[i - env_index], param_index.type.?);
                         initialized_params = i + 1;
                         if (comptime helper.isAbortSignal(param_index.type.?)) {
                             abort_signal = napi_params[i];
@@ -96,13 +92,15 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                         if (comptime @typeInfo(param_index.type.?) == .@"union") {
                             if (NapiError.last_error) |last_err| {
                                 last_err.throwInto(Env.from_raw(inner_env));
+                                const undefined_value = Undefined.New(Env.from_raw(inner_env));
                                 return undefined_value.raw;
                             }
                         }
                     }
 
-                    const event_listener = if (has_async_events and init_argc > params.len - env_index)
-                        args_raw[init_argc - 1]
+                    const copied_argc = @min(init_argc, expected_argc);
+                    const event_listener = if (has_async_events and copied_argc > params.len - env_index)
+                        args_raw[copied_argc - 1]
                     else
                         null;
 
@@ -111,6 +109,7 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                             if (NapiError.last_error) |last_err| {
                                 last_err.throwInto(Env.from_raw(inner_env));
                             }
+                            const undefined_value = Undefined.New(Env.from_raw(inner_env));
                             return undefined_value.raw;
                         };
                         if (comptime async_returns_descriptor) {
@@ -120,14 +119,16 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                                 if (NapiError.last_error) |last_err| {
                                     last_err.throwInto(Env.from_raw(inner_env));
                                 }
+                                const undefined_value = Undefined.New(Env.from_raw(inner_env));
                                 return undefined_value.raw;
                             };
                             return promise.raw;
                         }
-                        const n_value = Napi.to_napi_value(inner_env, ret, null) catch {
+                        const n_value = Napi.to_napi_value_auto(inner_env, ret, null) catch {
                             if (NapiError.last_error) |last_err| {
                                 last_err.throwInto(Env.from_raw(inner_env));
                             }
+                            const undefined_value = Undefined.New(Env.from_raw(inner_env));
                             return undefined_value.raw;
                         };
                         return n_value;
@@ -140,14 +141,16 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                                 if (NapiError.last_error) |last_err| {
                                     last_err.throwInto(Env.from_raw(inner_env));
                                 }
+                                const undefined_value = Undefined.New(Env.from_raw(inner_env));
                                 return undefined_value.raw;
                             };
                             return promise.raw;
                         }
-                        const n_value = Napi.to_napi_value(inner_env, ret, null) catch {
+                        const n_value = Napi.to_napi_value_auto(inner_env, ret, null) catch {
                             if (NapiError.last_error) |last_err| {
                                 last_err.throwInto(Env.from_raw(inner_env));
                             }
+                            const undefined_value = Undefined.New(Env.from_raw(inner_env));
                             return undefined_value.raw;
                         };
                         return n_value;
@@ -179,36 +182,34 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
 
             const args_len = if (isTuple) ArgsInfos.@"struct".fields.len else 1;
 
-            const allocator = GlobalAllocator.globalAllocator();
-            const args_raw = allocator.alloc(napi.napi_value, args_len) catch @panic("OOM");
-            defer allocator.free(args_raw);
+            var args_raw: [args_len]napi.napi_value = undefined;
 
             if (isTuple) {
                 inline for (ArgsInfos.@"struct".fields, 0..) |arg, i| {
-                    args_raw[i] = try Napi.to_napi_value(self.env, @field(args, arg.name), null);
+                    args_raw[i] = try Napi.to_napi_value_auto(self.env, @field(args, arg.name), null);
                 }
             } else {
-                args_raw[0] = try Napi.to_napi_value(self.env, args, null);
+                args_raw[0] = try Napi.to_napi_value_auto(self.env, args, null);
             }
 
             const this = Undefined.New(Env.from_raw(self.env));
 
             var result: napi.napi_value = undefined;
 
-            const status = napi.napi_call_function(self.env, this.raw, self.raw, args_len, args_raw.ptr, &result);
+            const status = napi.napi_call_function(self.env, this.raw, self.raw, args_len, args_raw[0..].ptr, &result);
             if (status != napi.napi_ok) {
                 return NapiError.Error.fromStatus(NapiError.Status.New(status));
             }
 
             if (comptime @typeInfo(Return) == .@"union") {
                 NapiError.clearLastError();
-                const converted = Napi.from_napi_value(self.env, result, Return);
+                const converted = Napi.from_napi_value_auto(self.env, result, Return);
                 if (NapiError.last_error) |_| {
                     return error.GenericFailure;
                 }
                 return converted;
             }
-            return Napi.from_napi_value(self.env, result, Return);
+            return Napi.from_napi_value_auto(self.env, result, Return);
         }
 
         pub fn CreateRef(self: Self) !Reference(Self) {
