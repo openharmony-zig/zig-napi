@@ -21,7 +21,11 @@ export function testObjectsAndArrays(native: NativeAddon) {
   assertEqual(objectResult.name, "Ada", "object.name");
   assertEqual(objectResult.age, 36, "object.age");
   assertEqual(objectResult.is_student, false, "object.is_student");
-  assertEqual(native.raw_object_read({ dynamic_count: 41 }, "dynamic_count"), 41, "raw object read");
+  assertEqual(
+    native.raw_object_read({ dynamic_count: 41 }, "dynamic_count"),
+    41,
+    "raw object read",
+  );
   assertEqual(native.raw_object_create("answer", 42).answer, 42, "raw object create");
 
   const optionalDefaults = native.get_object_optional({ name: "Defaulted" });
