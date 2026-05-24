@@ -2,8 +2,6 @@
 
 This project can help us to build a native module library for OpenHarmony/HarmonyNext with zig-lang.
 
-> Note: This project is still in the early stage of development and is not ready for use. You can use it as a toy.
-
 ## Require
 
 For openharmony, we must use a patched zig library to build. See detail with [zig-patch](https://github.com/openharmony-zig/zig-patch).

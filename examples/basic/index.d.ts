@@ -51,6 +51,13 @@ export interface AbortSignal {
   throwIfAborted?(): void;
 }
 
+export interface Array {
+  env?: unknown;
+  raw?: unknown;
+  len: number;
+  type: number;
+}
+
 export interface FullField {
   name: string;
   age: number;
@@ -65,6 +72,11 @@ export interface OptionalField {
 
 export interface NullableField {
   name?: string;
+}
+
+export interface Object {
+  env?: unknown;
+  raw?: unknown;
 }
 
 export declare class TestClass {
@@ -116,6 +128,8 @@ export declare function test_i32(left: number, right: number): number;
 export declare function test_f32(left: number, right: number): number;
 export declare function test_u32(left: number, right: number): number;
 export declare function hello(name: string): string;
+export declare function raw_string_len(value: string): number;
+export declare function copied_string_len(value: string): number;
 export declare const text: string;
 export declare function throw_error(): void;
 export declare function fib(n: number): void;
@@ -146,6 +160,8 @@ export declare function get_named_array(
   array: [number, boolean, string],
 ): [number, boolean, string];
 export declare function get_arraylist(array: Array<number>): Array<number>;
+export declare function raw_array_sum(array: Array): number;
+export declare function raw_array_create(): Array;
 export declare function get_object(config: FullField): FullField;
 export declare function get_object_optional(config: OptionalField): OptionalField;
 export declare function get_optional_object_and_return_optional(
@@ -153,6 +169,8 @@ export declare function get_optional_object_and_return_optional(
 ): OptionalField;
 export declare function get_nullable_object(config: NullableField): NullableField;
 export declare function return_nullable(): NullableField;
+export declare function raw_object_read(config: Object, key: string): number;
+export declare function raw_object_create(key: string, value: number): Object;
 export declare function call_function(cb: (arg0: number, arg1: number) => number): number;
 export declare function basic_function(left: number, right: number): number;
 export declare function create_function(): (left: number, right: number) => number;
