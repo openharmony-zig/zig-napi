@@ -166,7 +166,7 @@ pub const ArrayBuffer = struct {
         return ArrayBuffer{
             .env = env.raw,
             .raw = result,
-            .data = dest,
+            .data = if (data.len == 0 or result_data == null) &[_]u8{} else dest,
             .len = data.len,
         };
     }
@@ -192,7 +192,7 @@ pub const ArrayBuffer = struct {
         return ArrayBuffer{
             .env = env.raw,
             .raw = result,
-            .data = @ptrCast(data),
+            .data = if (len == 0 or data == null) &[_]u8{} else @ptrCast(data),
             .len = len,
         };
     }

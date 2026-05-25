@@ -163,7 +163,7 @@ pub const Buffer = struct {
         return Buffer{
             .env = env.raw,
             .raw = result,
-            .data = @ptrCast(result_data),
+            .data = if (data.len == 0 or result_data == null) &[_]u8{} else @ptrCast(result_data),
             .len = data.len,
         };
     }

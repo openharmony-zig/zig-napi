@@ -1,5 +1,6 @@
 .DS_Store
 .zig-cache
 zig-out
+node_modules
 .tmp_arkvm_runner
 .tmp_arkvm_memory_runner

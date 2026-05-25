@@ -7,6 +7,8 @@ const ArrayList = std.ArrayList;
 const NapiError = @import("../wrapper/error.zig");
 const GlobalAllocator = @import("../util/allocator.zig");
 const typedarray = @import("../wrapper/typedarray.zig");
+const ArrayBuffer = @import("../wrapper/arraybuffer.zig").ArrayBuffer;
+const options = @import("../options.zig");
 
 pub const Array = struct {
     env: napi.napi_env,
@@ -174,15 +176,17 @@ pub const Array = struct {
                 const source: []const f64 = if (len == 0 or data == null) &[_]f64{} else @as([*]const f64, @ptrCast(@alignCast(data)))[0..len];
                 for (out, source) |*dst, src| dst.* = numericCast(Dst, src);
             },
-            napi.napi_bigint64_array => {
-                const source: []const i64 = if (len == 0 or data == null) &[_]i64{} else @as([*]const i64, @ptrCast(@alignCast(data)))[0..len];
-                for (out, source) |*dst, src| dst.* = numericCast(Dst, src);
+            else => {
+                if (options.selectedNapiVersion().isAtLeast(.v6) and raw_type == napi.napi_bigint64_array) {
+                    const source: []const i64 = if (len == 0 or data == null) &[_]i64{} else @as([*]const i64, @ptrCast(@alignCast(data)))[0..len];
+                    for (out, source) |*dst, src| dst.* = numericCast(Dst, src);
+                } else if (options.selectedNapiVersion().isAtLeast(.v6) and raw_type == napi.napi_biguint64_array) {
+                    const source: []const u64 = if (len == 0 or data == null) &[_]u64{} else @as([*]const u64, @ptrCast(@alignCast(data)))[0..len];
+                    for (out, source) |*dst, src| dst.* = numericCast(Dst, src);
+                } else {
+                    unreachable;
+                }
             },
-            napi.napi_biguint64_array => {
-                const source: []const u64 = if (len == 0 or data == null) &[_]u64{} else @as([*]const u64, @ptrCast(@alignCast(data)))[0..len];
-                for (out, source) |*dst, src| dst.* = numericCast(Dst, src);
-            },
-            else => unreachable,
         }
     }
 
@@ -195,6 +199,9 @@ pub const Array = struct {
 
         _ = napi.napi_get_typedarray_info(env, raw, &raw_type, &len, &data, &arraybuffer, &byte_offset);
 
+        const arraybuffer_value = ArrayBuffer.from_raw(env, arraybuffer);
+        const element_len = typedarray.normalizeElementLength(len, raw_type, arraybuffer_value.length(), byte_offset);
+
         const infos = @typeInfo(T);
 
         switch (infos) {
@@ -204,7 +211,7 @@ pub const Array = struct {
                 }
 
                 var result: T = std.mem.zeroes(T);
-                const copy_len = @min(len, arr.len);
+                const copy_len = @min(element_len, arr.len);
                 fillFromTypedArray(arr.child, result[0..copy_len], raw_type, data, copy_len);
                 return result;
             },
@@ -217,8 +224,8 @@ pub const Array = struct {
                 }
 
                 const allocator = GlobalAllocator.globalAllocator();
-                const buf = allocator.alloc(ptr.child, len) catch @panic("OOM");
-                fillFromTypedArray(ptr.child, buf, raw_type, data, len);
+                const buf = allocator.alloc(ptr.child, element_len) catch @panic("OOM");
+                fillFromTypedArray(ptr.child, buf, raw_type, data, element_len);
                 return buf;
             },
             .@"struct" => {
@@ -230,10 +237,10 @@ pub const Array = struct {
 
                     const allocator = GlobalAllocator.globalAllocator();
                     var result: T = ArrayList(child).empty;
-                    result.ensureTotalCapacity(allocator, len) catch @panic("OOM");
-                    const items = allocator.alloc(child, len) catch @panic("OOM");
+                    result.ensureTotalCapacity(allocator, element_len) catch @panic("OOM");
+                    const items = allocator.alloc(child, element_len) catch @panic("OOM");
                     defer allocator.free(items);
-                    fillFromTypedArray(child, items, raw_type, data, len);
+                    fillFromTypedArray(child, items, raw_type, data, element_len);
                     for (items) |item| {
                         result.append(allocator, item) catch @panic("OOM");
                     }

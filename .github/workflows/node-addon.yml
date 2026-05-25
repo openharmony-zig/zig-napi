@@ -1,0 +1,57 @@
+name: Node Addon Matrix
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  node-addon-tests:
+    runs-on: ${{ matrix.os }}
+    name: Node.js addon tests ${{ matrix.os }} node@${{ matrix.node }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, macos-13, windows-latest ]
+        node: [ '12', '14', '16', '18', '20', '22' ]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: openharmony-zig/setup-zig-ohos@v0.1.0
+        with:
+          tag: '0.16.0'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Configure Windows Node import library
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $node = (Get-Command node).Source
+          $nodeDir = Split-Path -Parent $node
+          $candidates = @(
+            (Join-Path $nodeDir 'node.lib'),
+            (Join-Path (Split-Path -Parent $nodeDir) 'node.lib')
+          )
+          $nodeLib = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $nodeLib) {
+            throw "Unable to locate node.lib next to the Node.js installation at $node"
+          }
+          "NODE_LIB_FILE=$nodeLib" >> $env:GITHUB_ENV
+
+      - name: Build and test Node addon matrix
+        run: |
+          cd node-test
+          npm install --no-package-lock
+          zig build --summary all
+          npm test

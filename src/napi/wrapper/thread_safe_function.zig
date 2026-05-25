@@ -7,6 +7,17 @@ const Env = @import("../env.zig").Env;
 const NapiError = @import("./error.zig");
 const String = @import("../value/string.zig").String;
 const GlobalAllocator = @import("../util/allocator.zig");
+const options = @import("../options.zig");
+
+const ThreadSafeFunctionCallModeRaw = if (options.selectedNapiVersion().isAtLeast(.v4))
+    napi.napi_threadsafe_function_call_mode
+else
+    c_int;
+
+const ThreadSafeFunctionReleaseModeRaw = if (options.selectedNapiVersion().isAtLeast(.v4))
+    napi.napi_threadsafe_function_release_mode
+else
+    c_int;
 
 pub const ThreadSafeFunctionMode = enum {
     NonBlocking,
@@ -14,7 +25,8 @@ pub const ThreadSafeFunctionMode = enum {
 
     const Self = @This();
 
-    pub fn to_raw(self: Self) napi.napi_threadsafe_function_call_mode {
+    pub fn to_raw(self: Self) ThreadSafeFunctionCallModeRaw {
+        comptime options.requireNapiVersion(.v4);
         return switch (self) {
             .NonBlocking => napi.napi_tsfn_nonblocking,
             .Blocking => napi.napi_tsfn_blocking,
@@ -28,7 +40,8 @@ pub const ThreadSafeFunctionReleaseMode = enum {
 
     const Self = @This();
 
-    pub fn to_raw(self: Self) napi.napi_threadsafe_function_release_mode {
+    pub fn to_raw(self: Self) ThreadSafeFunctionReleaseModeRaw {
+        comptime options.requireNapiVersion(.v4);
         return switch (self) {
             .Release => napi.napi_tsfn_release,
             .Abort => napi.napi_tsfn_abort,
@@ -49,6 +62,8 @@ fn CallData(comptime Args: type) type {
 }
 
 pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime ThreadSafeFunctionCalleeHandled: anytype, comptime MaxQueueSize: anytype) type {
+    comptime options.requireNapiVersion(.v4);
+
     return struct {
         env: napi.napi_env,
         raw: napi.napi_value,

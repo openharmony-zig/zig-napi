@@ -1,0 +1,22 @@
+{
+  "name": "zig-napi-node-test",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "build": "zig build --summary all",
+    "test": "ava --serial",
+    "test:compat": "ava --serial \"napi-compat-mode/__tests__/**/*.spec.js\"",
+    "test:napi": "ava --serial \"napi/__tests__/**/*.spec.js\""
+  },
+  "devDependencies": {
+    "ava": "3.15.0"
+  },
+  "ava": {
+    "files": [
+      "napi-compat-mode/__tests__/**/*.spec.js",
+      "napi/__tests__/**/*.spec.js"
+    ],
+    "workerThreads": false,
+    "timeout": "30s"
+  }
+}

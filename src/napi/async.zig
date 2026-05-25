@@ -10,6 +10,7 @@ const GlobalAllocator = @import("./util/allocator.zig");
 const AbortSignalModule = @import("./abort_signal.zig");
 const AbortSignal = @import("./abort_signal.zig").AbortSignal;
 const AbortRegistration = @import("./abort_signal.zig").AbortRegistration;
+const options = @import("./options.zig");
 
 var threaded_runtime_mutex: std.atomic.Mutex = .unlocked;
 var threaded_runtime_initialized = false;
@@ -287,14 +288,18 @@ fn validateTaskRunSignature(comptime Input: type, comptime Result: type, comptim
 }
 
 pub fn Async(comptime Result: type, comptime runtime: RuntimeModel) type {
+    comptime options.requireNapiVersion(.v4);
     return AsyncTaskDescriptor(Result, void, runtime);
 }
 
 pub fn AsyncWithEvents(comptime Result: type, comptime Event: type, comptime runtime: RuntimeModel) type {
+    comptime options.requireNapiVersion(.v4);
     return AsyncTaskDescriptor(Result, Event, runtime);
 }
 
 fn AsyncTaskDescriptor(comptime Result: type, comptime Event: type, comptime runtime: RuntimeModel) type {
+    comptime options.requireNapiVersion(.v4);
+
     return struct {
         pub const is_napi_async_descriptor = true;
         pub const async_result_type = Result;

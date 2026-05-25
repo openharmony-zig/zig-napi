@@ -7,6 +7,7 @@ const Object = @import("../napi/value.zig").Object;
 const NapiError = @import("../napi/wrapper/error.zig");
 const Napi = @import("../napi/util/napi.zig").Napi;
 const Undefined = @import("../napi/value/undefined.zig").Undefined;
+const options = @import("../napi/options.zig");
 
 pub fn NODE_API_MODULE_WITH_INIT(
     comptime name: []const u8,
@@ -102,12 +103,26 @@ pub fn NODE_API_MODULE_WITH_INIT(
         fn module_init() callconv(.c) void {
             napi.napi_module_register(@constCast(&module));
         }
+
+        fn node_init(env: napi.napi_env, exports: napi.napi_value) callconv(.c) napi.napi_value {
+            return InitFn.inner_init(env, exports);
+        }
+
+        fn node_api_version() callconv(.c) i32 {
+            return @intFromEnum(options.selectedNapiVersion());
+        }
     };
 
     comptime {
-        if (builtin.object_format == .elf) {
-            const init_array = [1]*const fn () callconv(.c) void{&ModuleImpl.module_init};
-            @export(&init_array, .{ .linkage = .strong, .name = "init_array", .section = ".init_array" });
+        if (build_options.node_addon) {
+            @export(&ModuleImpl.node_init, .{ .linkage = .strong, .name = "napi_register_module_v1" });
+            @export(&ModuleImpl.node_api_version, .{ .linkage = .strong, .name = "node_api_module_get_api_version_v1" });
+        } else if (builtin.object_format == .elf) {
+            const InitFnPtr = *const fn () callconv(.c) void;
+            const ElfInit = struct {
+                export const init_array: [1]InitFnPtr linksection(".init_array") = .{&ModuleImpl.module_init};
+            };
+            _ = ElfInit;
         }
     }
 }

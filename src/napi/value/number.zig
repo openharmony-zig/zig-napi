@@ -90,7 +90,7 @@ pub const Number = struct {
             },
             u64 => {
                 var result: napi.napi_value = undefined;
-                _ = napi.napi_create_uint64(env.raw, @intCast(value), &result);
+                _ = napi.napi_create_double(env.raw, @floatFromInt(value), &result);
                 return Number.from_raw(env.raw, result);
             },
             else => {

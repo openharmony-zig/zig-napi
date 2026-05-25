@@ -16,7 +16,8 @@ pub fn build(b: *std.Build) !void {
 
     napi.addImport("napi-sys", napi_sys);
     napi.addImport("build_options", build_options);
+    napi_sys.addImport("build_options", build_options);
 
-    napi.addIncludePath(b.path("src/sys/header"));
-    napi_sys.addIncludePath(b.path("src/sys/header"));
+    napi.addIncludePath(b.path("src/sys/ohos"));
+    napi_sys.addIncludePath(b.path("src/sys/ohos"));
 }
