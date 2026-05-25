@@ -5,14 +5,25 @@ const { napiVersion } = require("../napi-version");
 const test = napiVersion >= 7 ? ava : ava.skip;
 
 test("should be able to detach ArrayBuffer", (t) => {
-  const buffer = new ArrayBuffer(8);
-  bindings.detachArrayBuffer(buffer);
-  t.is(buffer.byteLength, 0);
+  const buf = Buffer.from("hello world");
+  const ab = buf.buffer.slice(0, buf.length);
+  try {
+    bindings.detachArrayBuffer(ab);
+    t.is(ab.byteLength, 0);
+  } catch (e) {
+    t.is(e.code, "DetachableArraybufferExpected");
+  }
 });
 
 test("is detached arraybuffer should work fine", (t) => {
-  const buffer = new ArrayBuffer(8);
-  t.false(bindings.isDetachedArrayBuffer(buffer));
-  bindings.detachArrayBuffer(buffer);
-  t.true(bindings.isDetachedArrayBuffer(buffer));
+  const buf = Buffer.from("hello world");
+  const ab = buf.buffer.slice(0, buf.length);
+  try {
+    bindings.detachArrayBuffer(ab);
+    const nonDetachedArrayBuffer = new ArrayBuffer(10);
+    t.true(bindings.isDetachedArrayBuffer(ab));
+    t.false(bindings.isDetachedArrayBuffer(nonDetachedArrayBuffer));
+  } catch (e) {
+    t.is(e.code, "DetachableArraybufferExpected");
+  }
 });
