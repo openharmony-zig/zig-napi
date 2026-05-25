@@ -105,6 +105,9 @@ pub fn NODE_API_MODULE_WITH_INIT(
         }
 
         fn node_init(env: napi.napi_env, exports: napi.napi_value) callconv(.c) napi.napi_value {
+            if (@hasDecl(napi, "setup")) {
+                napi.setup();
+            }
             return InitFn.inner_init(env, exports);
         }
 

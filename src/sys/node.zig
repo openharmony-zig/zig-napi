@@ -1,3 +1,6 @@
+const std = @import("std");
+const builtin = @import("builtin");
+
 pub const napi_env__ = opaque {};
 pub const napi_value__ = opaque {};
 pub const napi_ref__ = opaque {};
@@ -121,123 +124,1165 @@ pub const napi_module = extern struct {
     reserved: [4]?*anyopaque,
 };
 
-pub extern fn napi_get_last_error_info(env: node_api_basic_env, result: [*c][*c]const napi_extended_error_info) napi_status;
-pub extern fn napi_get_undefined(env: napi_env, result: [*c]napi_value) napi_status;
-pub extern fn napi_get_null(env: napi_env, result: [*c]napi_value) napi_status;
-pub extern fn napi_get_global(env: napi_env, result: [*c]napi_value) napi_status;
-pub extern fn napi_get_boolean(env: napi_env, value: bool, result: [*c]napi_value) napi_status;
-pub extern fn napi_create_object(env: napi_env, result: [*c]napi_value) napi_status;
-pub extern fn napi_create_array(env: napi_env, result: [*c]napi_value) napi_status;
-pub extern fn napi_create_array_with_length(env: napi_env, length: usize, result: [*c]napi_value) napi_status;
-pub extern fn napi_create_double(env: napi_env, value: f64, result: [*c]napi_value) napi_status;
-pub extern fn napi_create_int32(env: napi_env, value: i32, result: [*c]napi_value) napi_status;
-pub extern fn napi_create_uint32(env: napi_env, value: u32, result: [*c]napi_value) napi_status;
-pub extern fn napi_create_int64(env: napi_env, value: i64, result: [*c]napi_value) napi_status;
-pub extern fn napi_create_string_latin1(env: napi_env, str: [*c]const u8, length: usize, result: [*c]napi_value) napi_status;
-pub extern fn napi_create_string_utf8(env: napi_env, str: [*c]const u8, length: usize, result: [*c]napi_value) napi_status;
-pub extern fn napi_create_string_utf16(env: napi_env, str: [*c]const u16, length: usize, result: [*c]napi_value) napi_status;
-pub extern fn napi_create_symbol(env: napi_env, description: napi_value, result: [*c]napi_value) napi_status;
-pub extern fn napi_create_function(env: napi_env, utf8name: [*c]const u8, length: usize, cb: napi_callback, data: ?*anyopaque, result: [*c]napi_value) napi_status;
-pub extern fn napi_create_error(env: napi_env, code: napi_value, msg: napi_value, result: [*c]napi_value) napi_status;
-pub extern fn napi_create_type_error(env: napi_env, code: napi_value, msg: napi_value, result: [*c]napi_value) napi_status;
-pub extern fn napi_create_range_error(env: napi_env, code: napi_value, msg: napi_value, result: [*c]napi_value) napi_status;
-pub extern fn napi_typeof(env: napi_env, value: napi_value, result: [*c]napi_valuetype) napi_status;
-pub extern fn napi_get_value_double(env: napi_env, value: napi_value, result: [*c]f64) napi_status;
-pub extern fn napi_get_value_int32(env: napi_env, value: napi_value, result: [*c]i32) napi_status;
-pub extern fn napi_get_value_uint32(env: napi_env, value: napi_value, result: [*c]u32) napi_status;
-pub extern fn napi_get_value_int64(env: napi_env, value: napi_value, result: [*c]i64) napi_status;
-pub extern fn napi_get_value_bool(env: napi_env, value: napi_value, result: [*c]bool) napi_status;
-pub extern fn napi_get_value_string_latin1(env: napi_env, value: napi_value, buf: [*c]u8, bufsize: usize, result: ?*usize) napi_status;
-pub extern fn napi_get_value_string_utf8(env: napi_env, value: napi_value, buf: [*c]u8, bufsize: usize, result: ?*usize) napi_status;
-pub extern fn napi_get_value_string_utf16(env: napi_env, value: napi_value, buf: [*c]u16, bufsize: usize, result: ?*usize) napi_status;
-pub extern fn napi_coerce_to_bool(env: napi_env, value: napi_value, result: [*c]napi_value) napi_status;
-pub extern fn napi_coerce_to_number(env: napi_env, value: napi_value, result: [*c]napi_value) napi_status;
-pub extern fn napi_coerce_to_object(env: napi_env, value: napi_value, result: [*c]napi_value) napi_status;
-pub extern fn napi_coerce_to_string(env: napi_env, value: napi_value, result: [*c]napi_value) napi_status;
-pub extern fn napi_get_prototype(env: napi_env, object: napi_value, result: [*c]napi_value) napi_status;
-pub extern fn napi_get_property_names(env: napi_env, object: napi_value, result: [*c]napi_value) napi_status;
-pub extern fn napi_set_property(env: napi_env, object: napi_value, key: napi_value, value: napi_value) napi_status;
-pub extern fn napi_has_property(env: napi_env, object: napi_value, key: napi_value, result: [*c]bool) napi_status;
-pub extern fn napi_get_property(env: napi_env, object: napi_value, key: napi_value, result: [*c]napi_value) napi_status;
-pub extern fn napi_delete_property(env: napi_env, object: napi_value, key: napi_value, result: [*c]bool) napi_status;
-pub extern fn napi_has_own_property(env: napi_env, object: napi_value, key: napi_value, result: [*c]bool) napi_status;
-pub extern fn napi_set_named_property(env: napi_env, object: napi_value, utf8name: [*c]const u8, value: napi_value) napi_status;
-pub extern fn napi_has_named_property(env: napi_env, object: napi_value, utf8name: [*c]const u8, result: [*c]bool) napi_status;
-pub extern fn napi_get_named_property(env: napi_env, object: napi_value, utf8name: [*c]const u8, result: [*c]napi_value) napi_status;
-pub extern fn napi_set_element(env: napi_env, object: napi_value, index: u32, value: napi_value) napi_status;
-pub extern fn napi_has_element(env: napi_env, object: napi_value, index: u32, result: [*c]bool) napi_status;
-pub extern fn napi_get_element(env: napi_env, object: napi_value, index: u32, result: [*c]napi_value) napi_status;
-pub extern fn napi_delete_element(env: napi_env, object: napi_value, index: u32, result: [*c]bool) napi_status;
-pub extern fn napi_define_properties(env: napi_env, object: napi_value, property_count: usize, properties: [*c]const napi_property_descriptor) napi_status;
-pub extern fn napi_is_array(env: napi_env, value: napi_value, result: [*c]bool) napi_status;
-pub extern fn napi_get_array_length(env: napi_env, value: napi_value, result: [*c]u32) napi_status;
-pub extern fn napi_strict_equals(env: napi_env, lhs: napi_value, rhs: napi_value, result: [*c]bool) napi_status;
-pub extern fn napi_call_function(env: napi_env, recv: napi_value, func: napi_value, argc: usize, argv: [*c]const napi_value, result: [*c]napi_value) napi_status;
-pub extern fn napi_new_instance(env: napi_env, constructor: napi_value, argc: usize, argv: [*c]const napi_value, result: [*c]napi_value) napi_status;
-pub extern fn napi_instanceof(env: napi_env, object: napi_value, constructor: napi_value, result: [*c]bool) napi_status;
-pub extern fn napi_get_cb_info(env: napi_env, cbinfo: napi_callback_info, argc: ?*usize, argv: [*c]napi_value, this_arg: [*c]napi_value, data: [*c]?*anyopaque) napi_status;
-pub extern fn napi_get_new_target(env: napi_env, cbinfo: napi_callback_info, result: [*c]napi_value) napi_status;
-pub extern fn napi_define_class(env: napi_env, utf8name: [*c]const u8, length: usize, constructor: napi_callback, data: ?*anyopaque, property_count: usize, properties: [*c]const napi_property_descriptor, result: [*c]napi_value) napi_status;
-pub extern fn napi_wrap(env: napi_env, js_object: napi_value, native_object: ?*anyopaque, finalize_cb: node_api_basic_finalize, finalize_hint: ?*anyopaque, result: [*c]napi_ref) napi_status;
-pub extern fn napi_unwrap(env: napi_env, js_object: napi_value, result: [*c]?*anyopaque) napi_status;
-pub extern fn napi_remove_wrap(env: napi_env, js_object: napi_value, result: [*c]?*anyopaque) napi_status;
-pub extern fn napi_create_external(env: napi_env, data: ?*anyopaque, finalize_cb: node_api_basic_finalize, finalize_hint: ?*anyopaque, result: [*c]napi_value) napi_status;
-pub extern fn napi_get_value_external(env: napi_env, value: napi_value, result: [*c]?*anyopaque) napi_status;
-pub extern fn napi_create_reference(env: napi_env, value: napi_value, initial_refcount: u32, result: [*c]napi_ref) napi_status;
-pub extern fn napi_delete_reference(env: node_api_basic_env, ref: napi_ref) napi_status;
-pub extern fn napi_reference_ref(env: napi_env, ref: napi_ref, result: [*c]u32) napi_status;
-pub extern fn napi_reference_unref(env: napi_env, ref: napi_ref, result: [*c]u32) napi_status;
-pub extern fn napi_get_reference_value(env: napi_env, ref: napi_ref, result: [*c]napi_value) napi_status;
-pub extern fn napi_open_handle_scope(env: napi_env, result: [*c]napi_handle_scope) napi_status;
-pub extern fn napi_close_handle_scope(env: napi_env, scope: napi_handle_scope) napi_status;
-pub extern fn napi_open_escapable_handle_scope(env: napi_env, result: [*c]napi_escapable_handle_scope) napi_status;
-pub extern fn napi_close_escapable_handle_scope(env: napi_env, scope: napi_escapable_handle_scope) napi_status;
-pub extern fn napi_escape_handle(env: napi_env, scope: napi_escapable_handle_scope, escapee: napi_value, result: [*c]napi_value) napi_status;
-pub extern fn napi_throw(env: napi_env, error_value: napi_value) napi_status;
-pub extern fn napi_throw_error(env: napi_env, code: [*c]const u8, msg: [*c]const u8) napi_status;
-pub extern fn napi_throw_type_error(env: napi_env, code: [*c]const u8, msg: [*c]const u8) napi_status;
-pub extern fn napi_throw_range_error(env: napi_env, code: [*c]const u8, msg: [*c]const u8) napi_status;
-pub extern fn napi_is_error(env: napi_env, value: napi_value, result: [*c]bool) napi_status;
-pub extern fn napi_is_exception_pending(env: napi_env, result: [*c]bool) napi_status;
-pub extern fn napi_get_and_clear_last_exception(env: napi_env, result: [*c]napi_value) napi_status;
-pub extern fn napi_is_arraybuffer(env: napi_env, value: napi_value, result: [*c]bool) napi_status;
-pub extern fn napi_create_arraybuffer(env: napi_env, byte_length: usize, data: [*c]?*anyopaque, result: [*c]napi_value) napi_status;
-pub extern fn napi_create_external_arraybuffer(env: napi_env, external_data: ?*anyopaque, byte_length: usize, finalize_cb: node_api_basic_finalize, finalize_hint: ?*anyopaque, result: [*c]napi_value) napi_status;
-pub extern fn napi_get_arraybuffer_info(env: napi_env, arraybuffer: napi_value, data: [*c]?*anyopaque, byte_length: [*c]usize) napi_status;
-pub extern fn napi_is_typedarray(env: napi_env, value: napi_value, result: [*c]bool) napi_status;
-pub extern fn napi_create_typedarray(env: napi_env, type: napi_typedarray_type, length: usize, arraybuffer: napi_value, byte_offset: usize, result: [*c]napi_value) napi_status;
-pub extern fn napi_get_typedarray_info(env: napi_env, typedarray: napi_value, type: [*c]napi_typedarray_type, length: [*c]usize, data: [*c]?*anyopaque, arraybuffer: [*c]napi_value, byte_offset: [*c]usize) napi_status;
-pub extern fn napi_create_dataview(env: napi_env, length: usize, arraybuffer: napi_value, byte_offset: usize, result: [*c]napi_value) napi_status;
-pub extern fn napi_is_dataview(env: napi_env, value: napi_value, result: [*c]bool) napi_status;
-pub extern fn napi_get_dataview_info(env: napi_env, dataview: napi_value, bytelength: [*c]usize, data: [*c]?*anyopaque, arraybuffer: [*c]napi_value, byte_offset: [*c]usize) napi_status;
-pub extern fn napi_get_version(env: node_api_basic_env, result: [*c]u32) napi_status;
-pub extern fn napi_create_promise(env: napi_env, deferred: [*c]napi_deferred, promise: [*c]napi_value) napi_status;
-pub extern fn napi_resolve_deferred(env: napi_env, deferred: napi_deferred, resolution: napi_value) napi_status;
-pub extern fn napi_reject_deferred(env: napi_env, deferred: napi_deferred, rejection: napi_value) napi_status;
-pub extern fn napi_is_promise(env: napi_env, value: napi_value, is_promise: [*c]bool) napi_status;
-pub extern fn napi_run_script(env: napi_env, script: napi_value, result: [*c]napi_value) napi_status;
-pub extern fn napi_adjust_external_memory(env: node_api_basic_env, change_in_bytes: i64, adjusted_value: [*c]i64) napi_status;
-pub extern fn napi_module_register(module: [*c]napi_module) void;
-pub extern fn napi_fatal_error(location: [*c]const u8, location_len: usize, message: [*c]const u8, message_len: usize) noreturn;
-pub extern fn napi_async_init(env: napi_env, async_resource: napi_value, async_resource_name: napi_value, result: [*c]napi_async_context) napi_status;
-pub extern fn napi_async_destroy(env: napi_env, async_context: napi_async_context) napi_status;
-pub extern fn napi_make_callback(env: napi_env, async_context: napi_async_context, recv: napi_value, func: napi_value, argc: usize, argv: [*c]const napi_value, result: [*c]napi_value) napi_status;
-pub extern fn napi_create_buffer(env: napi_env, length: usize, data: [*c]?*anyopaque, result: [*c]napi_value) napi_status;
-pub extern fn napi_create_external_buffer(env: napi_env, length: usize, data: ?*anyopaque, finalize_cb: node_api_basic_finalize, finalize_hint: ?*anyopaque, result: [*c]napi_value) napi_status;
-pub extern fn napi_create_buffer_copy(env: napi_env, length: usize, data: ?*const anyopaque, result_data: [*c]?*anyopaque, result: [*c]napi_value) napi_status;
-pub extern fn napi_is_buffer(env: napi_env, value: napi_value, result: [*c]bool) napi_status;
-pub extern fn napi_get_buffer_info(env: napi_env, value: napi_value, data: [*c]?*anyopaque, length: [*c]usize) napi_status;
-pub extern fn napi_create_async_work(env: napi_env, async_resource: napi_value, async_resource_name: napi_value, execute: napi_async_execute_callback, complete: napi_async_complete_callback, data: ?*anyopaque, result: [*c]napi_async_work) napi_status;
-pub extern fn napi_delete_async_work(env: napi_env, work: napi_async_work) napi_status;
-pub extern fn napi_queue_async_work(env: node_api_basic_env, work: napi_async_work) napi_status;
-pub extern fn napi_cancel_async_work(env: node_api_basic_env, work: napi_async_work) napi_status;
-pub extern fn napi_get_node_version(env: node_api_basic_env, version: [*c][*c]const napi_node_version) napi_status;
+const use_windows_msvc_dynamic_symbols = builtin.os.tag == .windows and builtin.abi == .msvc;
 
-pub extern fn napi_fatal_exception(env: napi_env, err: napi_value) napi_status;
-pub extern fn napi_add_env_cleanup_hook(env: node_api_basic_env, fun: napi_cleanup_hook, arg: ?*anyopaque) napi_status;
-pub extern fn napi_remove_env_cleanup_hook(env: node_api_basic_env, fun: napi_cleanup_hook, arg: ?*anyopaque) napi_status;
-pub extern fn napi_open_callback_scope(env: napi_env, resource_object: napi_value, context: napi_async_context, result: [*c]napi_callback_scope) napi_status;
-pub extern fn napi_close_callback_scope(env: napi_env, scope: napi_callback_scope) napi_status;
+const WindowsMsvcLoader = struct {
+    const windows = std.os.windows;
+
+    extern "kernel32" fn GetModuleHandleW(lpModuleName: ?windows.LPCWSTR) callconv(.winapi) ?windows.HMODULE;
+    extern "kernel32" fn GetProcAddress(hModule: windows.HMODULE, lpProcName: windows.LPCSTR) callconv(.winapi) ?windows.FARPROC;
+
+    var initialized = false;
+    var host: ?windows.HMODULE = null;
+
+    fn setup() void {
+        if (initialized) return;
+        host = GetModuleHandleW(null);
+        initialized = true;
+    }
+
+    fn lookup(comptime Fn: type, comptime name: [:0]const u8) ?Fn {
+        @This().setup();
+        const module = host orelse return null;
+        const proc = GetProcAddress(module, name.ptr) orelse return null;
+        return @as(Fn, @ptrCast(@alignCast(proc)));
+    }
+
+    fn lookupCached(comptime Fn: type, comptime name: [:0]const u8) ?Fn {
+        const Cache = struct {
+            var initialized = false;
+            var symbol: ?Fn = null;
+        };
+        if (!Cache.initialized) {
+            Cache.symbol = lookup(Fn, name);
+            Cache.initialized = true;
+        }
+        return Cache.symbol;
+    }
+};
+
+pub fn setup() void {
+    if (use_windows_msvc_dynamic_symbols) {
+        WindowsMsvcLoader.setup();
+        loadAllNodeApiSymbols();
+    }
+}
+
+fn nodeApiReturnType(comptime Fn: type) type {
+    return @typeInfo(@typeInfo(Fn).pointer.child).@"fn".return_type.?;
+}
+
+fn missingNodeApiSymbol(comptime name: [:0]const u8, comptime Return: type) Return {
+    std.debug.print("Node-API symbol {s} has not been loaded\n", .{name});
+    if (Return == napi_status) return napi_invalid_arg;
+    if (Return == void) return;
+    if (Return == noreturn) @panic("Node-API symbol has not been loaded");
+    return std.mem.zeroes(Return);
+}
+
+fn callNodeApi(comptime name: [:0]const u8, comptime Fn: type, args: anytype) nodeApiReturnType(Fn) {
+    if (use_windows_msvc_dynamic_symbols) {
+        const function = WindowsMsvcLoader.lookupCached(Fn, name) orelse return missingNodeApiSymbol(name, nodeApiReturnType(Fn));
+        return @call(.auto, function, args);
+    }
+
+    const function = @extern(Fn, .{ .name = name });
+    return @call(.auto, function, args);
+}
+
+fn loadAllNodeApiSymbols() void {
+    if (!use_windows_msvc_dynamic_symbols) return;
+
+    {
+        const Fn = *const fn (node_api_basic_env, [*c][*c]const napi_extended_error_info) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_last_error_info");
+    }
+    {
+        const Fn = *const fn (napi_env, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_undefined");
+    }
+    {
+        const Fn = *const fn (napi_env, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_null");
+    }
+    {
+        const Fn = *const fn (napi_env, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_global");
+    }
+    {
+        const Fn = *const fn (napi_env, bool, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_boolean");
+    }
+    {
+        const Fn = *const fn (napi_env, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_object");
+    }
+    {
+        const Fn = *const fn (napi_env, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_array");
+    }
+    {
+        const Fn = *const fn (napi_env, usize, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_array_with_length");
+    }
+    {
+        const Fn = *const fn (napi_env, f64, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_double");
+    }
+    {
+        const Fn = *const fn (napi_env, i32, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_int32");
+    }
+    {
+        const Fn = *const fn (napi_env, u32, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_uint32");
+    }
+    {
+        const Fn = *const fn (napi_env, i64, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_int64");
+    }
+    {
+        const Fn = *const fn (napi_env, [*c]const u8, usize, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_string_latin1");
+    }
+    {
+        const Fn = *const fn (napi_env, [*c]const u8, usize, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_string_utf8");
+    }
+    {
+        const Fn = *const fn (napi_env, [*c]const u16, usize, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_string_utf16");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_symbol");
+    }
+    {
+        const Fn = *const fn (napi_env, [*c]const u8, usize, napi_callback, ?*anyopaque, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_function");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, napi_value, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_error");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, napi_value, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_type_error");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, napi_value, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_range_error");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]napi_valuetype) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_typeof");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]f64) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_value_double");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]i32) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_value_int32");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]u32) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_value_uint32");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]i64) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_value_int64");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]bool) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_value_bool");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]u8, usize, ?*usize) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_value_string_latin1");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]u8, usize, ?*usize) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_value_string_utf8");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]u16, usize, ?*usize) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_value_string_utf16");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_coerce_to_bool");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_coerce_to_number");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_coerce_to_object");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_coerce_to_string");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_prototype");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_property_names");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, napi_value, napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_set_property");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, napi_value, [*c]bool) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_has_property");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, napi_value, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_property");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, napi_value, [*c]bool) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_delete_property");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, napi_value, [*c]bool) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_has_own_property");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]const u8, napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_set_named_property");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]const u8, [*c]bool) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_has_named_property");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]const u8, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_named_property");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, u32, napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_set_element");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, u32, [*c]bool) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_has_element");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, u32, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_element");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, u32, [*c]bool) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_delete_element");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, usize, [*c]const napi_property_descriptor) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_define_properties");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]bool) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_is_array");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]u32) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_array_length");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, napi_value, [*c]bool) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_strict_equals");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, napi_value, usize, [*c]const napi_value, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_call_function");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, usize, [*c]const napi_value, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_new_instance");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, napi_value, [*c]bool) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_instanceof");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_callback_info, ?*usize, [*c]napi_value, [*c]napi_value, [*c]?*anyopaque) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_cb_info");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_callback_info, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_new_target");
+    }
+    {
+        const Fn = *const fn (napi_env, [*c]const u8, usize, napi_callback, ?*anyopaque, usize, [*c]const napi_property_descriptor, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_define_class");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, ?*anyopaque, node_api_basic_finalize, ?*anyopaque, [*c]napi_ref) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_wrap");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]?*anyopaque) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_unwrap");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]?*anyopaque) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_remove_wrap");
+    }
+    {
+        const Fn = *const fn (napi_env, ?*anyopaque, node_api_basic_finalize, ?*anyopaque, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_external");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]?*anyopaque) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_value_external");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, u32, [*c]napi_ref) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_reference");
+    }
+    {
+        const Fn = *const fn (node_api_basic_env, napi_ref) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_delete_reference");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_ref, [*c]u32) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_reference_ref");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_ref, [*c]u32) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_reference_unref");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_ref, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_reference_value");
+    }
+    {
+        const Fn = *const fn (napi_env, [*c]napi_handle_scope) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_open_handle_scope");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_handle_scope) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_close_handle_scope");
+    }
+    {
+        const Fn = *const fn (napi_env, [*c]napi_escapable_handle_scope) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_open_escapable_handle_scope");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_escapable_handle_scope) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_close_escapable_handle_scope");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_escapable_handle_scope, napi_value, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_escape_handle");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_throw");
+    }
+    {
+        const Fn = *const fn (napi_env, [*c]const u8, [*c]const u8) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_throw_error");
+    }
+    {
+        const Fn = *const fn (napi_env, [*c]const u8, [*c]const u8) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_throw_type_error");
+    }
+    {
+        const Fn = *const fn (napi_env, [*c]const u8, [*c]const u8) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_throw_range_error");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]bool) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_is_error");
+    }
+    {
+        const Fn = *const fn (napi_env, [*c]bool) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_is_exception_pending");
+    }
+    {
+        const Fn = *const fn (napi_env, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_and_clear_last_exception");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]bool) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_is_arraybuffer");
+    }
+    {
+        const Fn = *const fn (napi_env, usize, [*c]?*anyopaque, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_arraybuffer");
+    }
+    {
+        const Fn = *const fn (napi_env, ?*anyopaque, usize, node_api_basic_finalize, ?*anyopaque, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_external_arraybuffer");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]?*anyopaque, [*c]usize) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_arraybuffer_info");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]bool) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_is_typedarray");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_typedarray_type, usize, napi_value, usize, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_typedarray");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]napi_typedarray_type, [*c]usize, [*c]?*anyopaque, [*c]napi_value, [*c]usize) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_typedarray_info");
+    }
+    {
+        const Fn = *const fn (napi_env, usize, napi_value, usize, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_dataview");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]bool) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_is_dataview");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]usize, [*c]?*anyopaque, [*c]napi_value, [*c]usize) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_dataview_info");
+    }
+    {
+        const Fn = *const fn (node_api_basic_env, [*c]u32) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_version");
+    }
+    {
+        const Fn = *const fn (napi_env, [*c]napi_deferred, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_promise");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_deferred, napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_resolve_deferred");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_deferred, napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_reject_deferred");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]bool) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_is_promise");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_run_script");
+    }
+    {
+        const Fn = *const fn (node_api_basic_env, i64, [*c]i64) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_adjust_external_memory");
+    }
+    {
+        const Fn = *const fn ([*c]napi_module) callconv(.c) void;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_module_register");
+    }
+    {
+        const Fn = *const fn ([*c]const u8, usize, [*c]const u8, usize) callconv(.c) noreturn;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_fatal_error");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, napi_value, [*c]napi_async_context) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_async_init");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_async_context) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_async_destroy");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_async_context, napi_value, napi_value, usize, [*c]const napi_value, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_make_callback");
+    }
+    {
+        const Fn = *const fn (napi_env, usize, [*c]?*anyopaque, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_buffer");
+    }
+    {
+        const Fn = *const fn (napi_env, usize, ?*anyopaque, node_api_basic_finalize, ?*anyopaque, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_external_buffer");
+    }
+    {
+        const Fn = *const fn (napi_env, usize, ?*const anyopaque, [*c]?*anyopaque, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_buffer_copy");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]bool) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_is_buffer");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]?*anyopaque, [*c]usize) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_buffer_info");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, napi_value, napi_async_execute_callback, napi_async_complete_callback, ?*anyopaque, [*c]napi_async_work) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_async_work");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_async_work) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_delete_async_work");
+    }
+    {
+        const Fn = *const fn (node_api_basic_env, napi_async_work) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_queue_async_work");
+    }
+    {
+        const Fn = *const fn (node_api_basic_env, napi_async_work) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_cancel_async_work");
+    }
+    {
+        const Fn = *const fn (node_api_basic_env, [*c][*c]const napi_node_version) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_node_version");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_fatal_exception");
+    }
+    {
+        const Fn = *const fn (node_api_basic_env, napi_cleanup_hook, ?*anyopaque) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_add_env_cleanup_hook");
+    }
+    {
+        const Fn = *const fn (node_api_basic_env, napi_cleanup_hook, ?*anyopaque) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_remove_env_cleanup_hook");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, napi_async_context, [*c]napi_callback_scope) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_open_callback_scope");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_callback_scope) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_close_callback_scope");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, napi_value, napi_value, usize, usize, ?*anyopaque, napi_finalize, ?*anyopaque, napi_threadsafe_function_call_js, [*c]napi_threadsafe_function) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_threadsafe_function");
+    }
+    {
+        const Fn = *const fn (napi_threadsafe_function, [*c]?*anyopaque) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_threadsafe_function_context");
+    }
+    {
+        const Fn = *const fn (napi_threadsafe_function, ?*anyopaque, napi_threadsafe_function_call_mode) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_call_threadsafe_function");
+    }
+    {
+        const Fn = *const fn (napi_threadsafe_function) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_acquire_threadsafe_function");
+    }
+    {
+        const Fn = *const fn (napi_threadsafe_function, napi_threadsafe_function_release_mode) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_release_threadsafe_function");
+    }
+    {
+        const Fn = *const fn (node_api_basic_env, napi_threadsafe_function) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_unref_threadsafe_function");
+    }
+    {
+        const Fn = *const fn (node_api_basic_env, napi_threadsafe_function) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_ref_threadsafe_function");
+    }
+    {
+        const Fn = *const fn (napi_env, f64, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_date");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]bool) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_is_date");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]f64) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_date_value");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, ?*anyopaque, node_api_basic_finalize, ?*anyopaque, [*c]napi_ref) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_add_finalizer");
+    }
+    {
+        const Fn = *const fn (napi_env, i64, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_bigint_int64");
+    }
+    {
+        const Fn = *const fn (napi_env, u64, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_bigint_uint64");
+    }
+    {
+        const Fn = *const fn (napi_env, c_int, usize, [*c]const u64, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_bigint_words");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]i64, [*c]bool) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_value_bigint_int64");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]u64, [*c]bool) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_value_bigint_uint64");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]c_int, [*c]usize, [*c]u64) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_value_bigint_words");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, napi_key_collection_mode, napi_key_filter, napi_key_conversion, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_all_property_names");
+    }
+    {
+        const Fn = *const fn (node_api_basic_env, ?*anyopaque, napi_finalize, ?*anyopaque) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_set_instance_data");
+    }
+    {
+        const Fn = *const fn (node_api_basic_env, [*c]?*anyopaque) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_instance_data");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_detach_arraybuffer");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]bool) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_is_detached_arraybuffer");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]const napi_type_tag) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_type_tag_object");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]const napi_type_tag, [*c]bool) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_check_object_type_tag");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_object_freeze");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_object_seal");
+    }
+    {
+        const Fn = *const fn (node_api_basic_env, napi_async_cleanup_hook, ?*anyopaque, [*c]napi_async_cleanup_hook_handle) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_add_async_cleanup_hook");
+    }
+    {
+        const Fn = *const fn (napi_async_cleanup_hook_handle) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_remove_async_cleanup_hook");
+    }
+    {
+        const Fn = *const fn (napi_env, [*c]const u8, usize, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "node_api_symbol_for");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, napi_value, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "node_api_create_syntax_error");
+    }
+    {
+        const Fn = *const fn (napi_env, [*c]const u8, [*c]const u8) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "node_api_throw_syntax_error");
+    }
+    {
+        const Fn = *const fn (node_api_basic_env, [*c][*c]const u8) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "node_api_get_module_file_name");
+    }
+    {
+        const Fn = *const fn (napi_env, [*c]u8, usize, node_api_basic_finalize, ?*anyopaque, [*c]napi_value, [*c]bool) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "node_api_create_external_string_latin1");
+    }
+    {
+        const Fn = *const fn (napi_env, [*c]u16, usize, node_api_basic_finalize, ?*anyopaque, [*c]napi_value, [*c]bool) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "node_api_create_external_string_utf16");
+    }
+    {
+        const Fn = *const fn (napi_env, [*c]const u8, usize, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "node_api_create_property_key_latin1");
+    }
+    {
+        const Fn = *const fn (napi_env, [*c]const u8, usize, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "node_api_create_property_key_utf8");
+    }
+    {
+        const Fn = *const fn (napi_env, [*c]const u16, usize, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "node_api_create_property_key_utf16");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, usize, usize, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "node_api_create_buffer_from_arraybuffer");
+    }
+    {
+        const Fn = *const fn (node_api_basic_env, napi_finalize, ?*anyopaque, ?*anyopaque) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "node_api_post_finalizer");
+    }
+    {
+        const Fn = *const fn (napi_env, napi_value, [*c]const napi_value, [*c]const napi_value, usize, [*c]napi_value) callconv(.c) napi_status;
+        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_object_with_properties");
+    }
+}
+pub fn napi_get_last_error_info(arg0: node_api_basic_env, arg1: [*c][*c]const napi_extended_error_info) callconv(.c) napi_status {
+    const Fn = *const fn (node_api_basic_env, [*c][*c]const napi_extended_error_info) callconv(.c) napi_status;
+    return callNodeApi("napi_get_last_error_info", Fn, .{ arg0, arg1 });
+}
+pub fn napi_get_undefined(arg0: napi_env, arg1: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_get_undefined", Fn, .{ arg0, arg1 });
+}
+pub fn napi_get_null(arg0: napi_env, arg1: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_get_null", Fn, .{ arg0, arg1 });
+}
+pub fn napi_get_global(arg0: napi_env, arg1: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_get_global", Fn, .{ arg0, arg1 });
+}
+pub fn napi_get_boolean(arg0: napi_env, arg1: bool, arg2: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, bool, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_get_boolean", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_create_object(arg0: napi_env, arg1: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_create_object", Fn, .{ arg0, arg1 });
+}
+pub fn napi_create_array(arg0: napi_env, arg1: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_create_array", Fn, .{ arg0, arg1 });
+}
+pub fn napi_create_array_with_length(arg0: napi_env, arg1: usize, arg2: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, usize, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_create_array_with_length", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_create_double(arg0: napi_env, arg1: f64, arg2: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, f64, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_create_double", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_create_int32(arg0: napi_env, arg1: i32, arg2: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, i32, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_create_int32", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_create_uint32(arg0: napi_env, arg1: u32, arg2: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, u32, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_create_uint32", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_create_int64(arg0: napi_env, arg1: i64, arg2: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, i64, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_create_int64", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_create_string_latin1(arg0: napi_env, arg1: [*c]const u8, arg2: usize, arg3: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, [*c]const u8, usize, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_create_string_latin1", Fn, .{ arg0, arg1, arg2, arg3 });
+}
+pub fn napi_create_string_utf8(arg0: napi_env, arg1: [*c]const u8, arg2: usize, arg3: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, [*c]const u8, usize, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_create_string_utf8", Fn, .{ arg0, arg1, arg2, arg3 });
+}
+pub fn napi_create_string_utf16(arg0: napi_env, arg1: [*c]const u16, arg2: usize, arg3: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, [*c]const u16, usize, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_create_string_utf16", Fn, .{ arg0, arg1, arg2, arg3 });
+}
+pub fn napi_create_symbol(arg0: napi_env, arg1: napi_value, arg2: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_create_symbol", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_create_function(arg0: napi_env, arg1: [*c]const u8, arg2: usize, arg3: napi_callback, arg4: ?*anyopaque, arg5: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, [*c]const u8, usize, napi_callback, ?*anyopaque, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_create_function", Fn, .{ arg0, arg1, arg2, arg3, arg4, arg5 });
+}
+pub fn napi_create_error(arg0: napi_env, arg1: napi_value, arg2: napi_value, arg3: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, napi_value, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_create_error", Fn, .{ arg0, arg1, arg2, arg3 });
+}
+pub fn napi_create_type_error(arg0: napi_env, arg1: napi_value, arg2: napi_value, arg3: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, napi_value, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_create_type_error", Fn, .{ arg0, arg1, arg2, arg3 });
+}
+pub fn napi_create_range_error(arg0: napi_env, arg1: napi_value, arg2: napi_value, arg3: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, napi_value, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_create_range_error", Fn, .{ arg0, arg1, arg2, arg3 });
+}
+pub fn napi_typeof(arg0: napi_env, arg1: napi_value, arg2: [*c]napi_valuetype) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]napi_valuetype) callconv(.c) napi_status;
+    return callNodeApi("napi_typeof", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_get_value_double(arg0: napi_env, arg1: napi_value, arg2: [*c]f64) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]f64) callconv(.c) napi_status;
+    return callNodeApi("napi_get_value_double", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_get_value_int32(arg0: napi_env, arg1: napi_value, arg2: [*c]i32) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]i32) callconv(.c) napi_status;
+    return callNodeApi("napi_get_value_int32", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_get_value_uint32(arg0: napi_env, arg1: napi_value, arg2: [*c]u32) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]u32) callconv(.c) napi_status;
+    return callNodeApi("napi_get_value_uint32", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_get_value_int64(arg0: napi_env, arg1: napi_value, arg2: [*c]i64) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]i64) callconv(.c) napi_status;
+    return callNodeApi("napi_get_value_int64", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_get_value_bool(arg0: napi_env, arg1: napi_value, arg2: [*c]bool) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]bool) callconv(.c) napi_status;
+    return callNodeApi("napi_get_value_bool", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_get_value_string_latin1(arg0: napi_env, arg1: napi_value, arg2: [*c]u8, arg3: usize, arg4: ?*usize) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]u8, usize, ?*usize) callconv(.c) napi_status;
+    return callNodeApi("napi_get_value_string_latin1", Fn, .{ arg0, arg1, arg2, arg3, arg4 });
+}
+pub fn napi_get_value_string_utf8(arg0: napi_env, arg1: napi_value, arg2: [*c]u8, arg3: usize, arg4: ?*usize) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]u8, usize, ?*usize) callconv(.c) napi_status;
+    return callNodeApi("napi_get_value_string_utf8", Fn, .{ arg0, arg1, arg2, arg3, arg4 });
+}
+pub fn napi_get_value_string_utf16(arg0: napi_env, arg1: napi_value, arg2: [*c]u16, arg3: usize, arg4: ?*usize) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]u16, usize, ?*usize) callconv(.c) napi_status;
+    return callNodeApi("napi_get_value_string_utf16", Fn, .{ arg0, arg1, arg2, arg3, arg4 });
+}
+pub fn napi_coerce_to_bool(arg0: napi_env, arg1: napi_value, arg2: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_coerce_to_bool", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_coerce_to_number(arg0: napi_env, arg1: napi_value, arg2: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_coerce_to_number", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_coerce_to_object(arg0: napi_env, arg1: napi_value, arg2: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_coerce_to_object", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_coerce_to_string(arg0: napi_env, arg1: napi_value, arg2: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_coerce_to_string", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_get_prototype(arg0: napi_env, arg1: napi_value, arg2: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_get_prototype", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_get_property_names(arg0: napi_env, arg1: napi_value, arg2: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_get_property_names", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_set_property(arg0: napi_env, arg1: napi_value, arg2: napi_value, arg3: napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, napi_value, napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_set_property", Fn, .{ arg0, arg1, arg2, arg3 });
+}
+pub fn napi_has_property(arg0: napi_env, arg1: napi_value, arg2: napi_value, arg3: [*c]bool) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, napi_value, [*c]bool) callconv(.c) napi_status;
+    return callNodeApi("napi_has_property", Fn, .{ arg0, arg1, arg2, arg3 });
+}
+pub fn napi_get_property(arg0: napi_env, arg1: napi_value, arg2: napi_value, arg3: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, napi_value, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_get_property", Fn, .{ arg0, arg1, arg2, arg3 });
+}
+pub fn napi_delete_property(arg0: napi_env, arg1: napi_value, arg2: napi_value, arg3: [*c]bool) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, napi_value, [*c]bool) callconv(.c) napi_status;
+    return callNodeApi("napi_delete_property", Fn, .{ arg0, arg1, arg2, arg3 });
+}
+pub fn napi_has_own_property(arg0: napi_env, arg1: napi_value, arg2: napi_value, arg3: [*c]bool) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, napi_value, [*c]bool) callconv(.c) napi_status;
+    return callNodeApi("napi_has_own_property", Fn, .{ arg0, arg1, arg2, arg3 });
+}
+pub fn napi_set_named_property(arg0: napi_env, arg1: napi_value, arg2: [*c]const u8, arg3: napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]const u8, napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_set_named_property", Fn, .{ arg0, arg1, arg2, arg3 });
+}
+pub fn napi_has_named_property(arg0: napi_env, arg1: napi_value, arg2: [*c]const u8, arg3: [*c]bool) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]const u8, [*c]bool) callconv(.c) napi_status;
+    return callNodeApi("napi_has_named_property", Fn, .{ arg0, arg1, arg2, arg3 });
+}
+pub fn napi_get_named_property(arg0: napi_env, arg1: napi_value, arg2: [*c]const u8, arg3: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]const u8, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_get_named_property", Fn, .{ arg0, arg1, arg2, arg3 });
+}
+pub fn napi_set_element(arg0: napi_env, arg1: napi_value, arg2: u32, arg3: napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, u32, napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_set_element", Fn, .{ arg0, arg1, arg2, arg3 });
+}
+pub fn napi_has_element(arg0: napi_env, arg1: napi_value, arg2: u32, arg3: [*c]bool) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, u32, [*c]bool) callconv(.c) napi_status;
+    return callNodeApi("napi_has_element", Fn, .{ arg0, arg1, arg2, arg3 });
+}
+pub fn napi_get_element(arg0: napi_env, arg1: napi_value, arg2: u32, arg3: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, u32, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_get_element", Fn, .{ arg0, arg1, arg2, arg3 });
+}
+pub fn napi_delete_element(arg0: napi_env, arg1: napi_value, arg2: u32, arg3: [*c]bool) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, u32, [*c]bool) callconv(.c) napi_status;
+    return callNodeApi("napi_delete_element", Fn, .{ arg0, arg1, arg2, arg3 });
+}
+pub fn napi_define_properties(arg0: napi_env, arg1: napi_value, arg2: usize, arg3: [*c]const napi_property_descriptor) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, usize, [*c]const napi_property_descriptor) callconv(.c) napi_status;
+    return callNodeApi("napi_define_properties", Fn, .{ arg0, arg1, arg2, arg3 });
+}
+pub fn napi_is_array(arg0: napi_env, arg1: napi_value, arg2: [*c]bool) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]bool) callconv(.c) napi_status;
+    return callNodeApi("napi_is_array", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_get_array_length(arg0: napi_env, arg1: napi_value, arg2: [*c]u32) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]u32) callconv(.c) napi_status;
+    return callNodeApi("napi_get_array_length", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_strict_equals(arg0: napi_env, arg1: napi_value, arg2: napi_value, arg3: [*c]bool) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, napi_value, [*c]bool) callconv(.c) napi_status;
+    return callNodeApi("napi_strict_equals", Fn, .{ arg0, arg1, arg2, arg3 });
+}
+pub fn napi_call_function(arg0: napi_env, arg1: napi_value, arg2: napi_value, arg3: usize, arg4: [*c]const napi_value, arg5: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, napi_value, usize, [*c]const napi_value, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_call_function", Fn, .{ arg0, arg1, arg2, arg3, arg4, arg5 });
+}
+pub fn napi_new_instance(arg0: napi_env, arg1: napi_value, arg2: usize, arg3: [*c]const napi_value, arg4: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, usize, [*c]const napi_value, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_new_instance", Fn, .{ arg0, arg1, arg2, arg3, arg4 });
+}
+pub fn napi_instanceof(arg0: napi_env, arg1: napi_value, arg2: napi_value, arg3: [*c]bool) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, napi_value, [*c]bool) callconv(.c) napi_status;
+    return callNodeApi("napi_instanceof", Fn, .{ arg0, arg1, arg2, arg3 });
+}
+pub fn napi_get_cb_info(arg0: napi_env, arg1: napi_callback_info, arg2: ?*usize, arg3: [*c]napi_value, arg4: [*c]napi_value, arg5: [*c]?*anyopaque) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_callback_info, ?*usize, [*c]napi_value, [*c]napi_value, [*c]?*anyopaque) callconv(.c) napi_status;
+    return callNodeApi("napi_get_cb_info", Fn, .{ arg0, arg1, arg2, arg3, arg4, arg5 });
+}
+pub fn napi_get_new_target(arg0: napi_env, arg1: napi_callback_info, arg2: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_callback_info, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_get_new_target", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_define_class(arg0: napi_env, arg1: [*c]const u8, arg2: usize, arg3: napi_callback, arg4: ?*anyopaque, arg5: usize, arg6: [*c]const napi_property_descriptor, arg7: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, [*c]const u8, usize, napi_callback, ?*anyopaque, usize, [*c]const napi_property_descriptor, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_define_class", Fn, .{ arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7 });
+}
+pub fn napi_wrap(arg0: napi_env, arg1: napi_value, arg2: ?*anyopaque, arg3: node_api_basic_finalize, arg4: ?*anyopaque, arg5: [*c]napi_ref) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, ?*anyopaque, node_api_basic_finalize, ?*anyopaque, [*c]napi_ref) callconv(.c) napi_status;
+    return callNodeApi("napi_wrap", Fn, .{ arg0, arg1, arg2, arg3, arg4, arg5 });
+}
+pub fn napi_unwrap(arg0: napi_env, arg1: napi_value, arg2: [*c]?*anyopaque) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]?*anyopaque) callconv(.c) napi_status;
+    return callNodeApi("napi_unwrap", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_remove_wrap(arg0: napi_env, arg1: napi_value, arg2: [*c]?*anyopaque) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]?*anyopaque) callconv(.c) napi_status;
+    return callNodeApi("napi_remove_wrap", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_create_external(arg0: napi_env, arg1: ?*anyopaque, arg2: node_api_basic_finalize, arg3: ?*anyopaque, arg4: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, ?*anyopaque, node_api_basic_finalize, ?*anyopaque, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_create_external", Fn, .{ arg0, arg1, arg2, arg3, arg4 });
+}
+pub fn napi_get_value_external(arg0: napi_env, arg1: napi_value, arg2: [*c]?*anyopaque) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]?*anyopaque) callconv(.c) napi_status;
+    return callNodeApi("napi_get_value_external", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_create_reference(arg0: napi_env, arg1: napi_value, arg2: u32, arg3: [*c]napi_ref) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, u32, [*c]napi_ref) callconv(.c) napi_status;
+    return callNodeApi("napi_create_reference", Fn, .{ arg0, arg1, arg2, arg3 });
+}
+pub fn napi_delete_reference(arg0: node_api_basic_env, arg1: napi_ref) callconv(.c) napi_status {
+    const Fn = *const fn (node_api_basic_env, napi_ref) callconv(.c) napi_status;
+    return callNodeApi("napi_delete_reference", Fn, .{ arg0, arg1 });
+}
+pub fn napi_reference_ref(arg0: napi_env, arg1: napi_ref, arg2: [*c]u32) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_ref, [*c]u32) callconv(.c) napi_status;
+    return callNodeApi("napi_reference_ref", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_reference_unref(arg0: napi_env, arg1: napi_ref, arg2: [*c]u32) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_ref, [*c]u32) callconv(.c) napi_status;
+    return callNodeApi("napi_reference_unref", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_get_reference_value(arg0: napi_env, arg1: napi_ref, arg2: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_ref, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_get_reference_value", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_open_handle_scope(arg0: napi_env, arg1: [*c]napi_handle_scope) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, [*c]napi_handle_scope) callconv(.c) napi_status;
+    return callNodeApi("napi_open_handle_scope", Fn, .{ arg0, arg1 });
+}
+pub fn napi_close_handle_scope(arg0: napi_env, arg1: napi_handle_scope) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_handle_scope) callconv(.c) napi_status;
+    return callNodeApi("napi_close_handle_scope", Fn, .{ arg0, arg1 });
+}
+pub fn napi_open_escapable_handle_scope(arg0: napi_env, arg1: [*c]napi_escapable_handle_scope) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, [*c]napi_escapable_handle_scope) callconv(.c) napi_status;
+    return callNodeApi("napi_open_escapable_handle_scope", Fn, .{ arg0, arg1 });
+}
+pub fn napi_close_escapable_handle_scope(arg0: napi_env, arg1: napi_escapable_handle_scope) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_escapable_handle_scope) callconv(.c) napi_status;
+    return callNodeApi("napi_close_escapable_handle_scope", Fn, .{ arg0, arg1 });
+}
+pub fn napi_escape_handle(arg0: napi_env, arg1: napi_escapable_handle_scope, arg2: napi_value, arg3: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_escapable_handle_scope, napi_value, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_escape_handle", Fn, .{ arg0, arg1, arg2, arg3 });
+}
+pub fn napi_throw(arg0: napi_env, arg1: napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_throw", Fn, .{ arg0, arg1 });
+}
+pub fn napi_throw_error(arg0: napi_env, arg1: [*c]const u8, arg2: [*c]const u8) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, [*c]const u8, [*c]const u8) callconv(.c) napi_status;
+    return callNodeApi("napi_throw_error", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_throw_type_error(arg0: napi_env, arg1: [*c]const u8, arg2: [*c]const u8) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, [*c]const u8, [*c]const u8) callconv(.c) napi_status;
+    return callNodeApi("napi_throw_type_error", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_throw_range_error(arg0: napi_env, arg1: [*c]const u8, arg2: [*c]const u8) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, [*c]const u8, [*c]const u8) callconv(.c) napi_status;
+    return callNodeApi("napi_throw_range_error", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_is_error(arg0: napi_env, arg1: napi_value, arg2: [*c]bool) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]bool) callconv(.c) napi_status;
+    return callNodeApi("napi_is_error", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_is_exception_pending(arg0: napi_env, arg1: [*c]bool) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, [*c]bool) callconv(.c) napi_status;
+    return callNodeApi("napi_is_exception_pending", Fn, .{ arg0, arg1 });
+}
+pub fn napi_get_and_clear_last_exception(arg0: napi_env, arg1: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_get_and_clear_last_exception", Fn, .{ arg0, arg1 });
+}
+pub fn napi_is_arraybuffer(arg0: napi_env, arg1: napi_value, arg2: [*c]bool) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]bool) callconv(.c) napi_status;
+    return callNodeApi("napi_is_arraybuffer", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_create_arraybuffer(arg0: napi_env, arg1: usize, arg2: [*c]?*anyopaque, arg3: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, usize, [*c]?*anyopaque, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_create_arraybuffer", Fn, .{ arg0, arg1, arg2, arg3 });
+}
+pub fn napi_create_external_arraybuffer(arg0: napi_env, arg1: ?*anyopaque, arg2: usize, arg3: node_api_basic_finalize, arg4: ?*anyopaque, arg5: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, ?*anyopaque, usize, node_api_basic_finalize, ?*anyopaque, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_create_external_arraybuffer", Fn, .{ arg0, arg1, arg2, arg3, arg4, arg5 });
+}
+pub fn napi_get_arraybuffer_info(arg0: napi_env, arg1: napi_value, arg2: [*c]?*anyopaque, arg3: [*c]usize) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]?*anyopaque, [*c]usize) callconv(.c) napi_status;
+    return callNodeApi("napi_get_arraybuffer_info", Fn, .{ arg0, arg1, arg2, arg3 });
+}
+pub fn napi_is_typedarray(arg0: napi_env, arg1: napi_value, arg2: [*c]bool) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]bool) callconv(.c) napi_status;
+    return callNodeApi("napi_is_typedarray", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_create_typedarray(arg0: napi_env, arg1: napi_typedarray_type, arg2: usize, arg3: napi_value, arg4: usize, arg5: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_typedarray_type, usize, napi_value, usize, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_create_typedarray", Fn, .{ arg0, arg1, arg2, arg3, arg4, arg5 });
+}
+pub fn napi_get_typedarray_info(arg0: napi_env, arg1: napi_value, arg2: [*c]napi_typedarray_type, arg3: [*c]usize, arg4: [*c]?*anyopaque, arg5: [*c]napi_value, arg6: [*c]usize) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]napi_typedarray_type, [*c]usize, [*c]?*anyopaque, [*c]napi_value, [*c]usize) callconv(.c) napi_status;
+    return callNodeApi("napi_get_typedarray_info", Fn, .{ arg0, arg1, arg2, arg3, arg4, arg5, arg6 });
+}
+pub fn napi_create_dataview(arg0: napi_env, arg1: usize, arg2: napi_value, arg3: usize, arg4: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, usize, napi_value, usize, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_create_dataview", Fn, .{ arg0, arg1, arg2, arg3, arg4 });
+}
+pub fn napi_is_dataview(arg0: napi_env, arg1: napi_value, arg2: [*c]bool) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]bool) callconv(.c) napi_status;
+    return callNodeApi("napi_is_dataview", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_get_dataview_info(arg0: napi_env, arg1: napi_value, arg2: [*c]usize, arg3: [*c]?*anyopaque, arg4: [*c]napi_value, arg5: [*c]usize) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]usize, [*c]?*anyopaque, [*c]napi_value, [*c]usize) callconv(.c) napi_status;
+    return callNodeApi("napi_get_dataview_info", Fn, .{ arg0, arg1, arg2, arg3, arg4, arg5 });
+}
+pub fn napi_get_version(arg0: node_api_basic_env, arg1: [*c]u32) callconv(.c) napi_status {
+    const Fn = *const fn (node_api_basic_env, [*c]u32) callconv(.c) napi_status;
+    return callNodeApi("napi_get_version", Fn, .{ arg0, arg1 });
+}
+pub fn napi_create_promise(arg0: napi_env, arg1: [*c]napi_deferred, arg2: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, [*c]napi_deferred, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_create_promise", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_resolve_deferred(arg0: napi_env, arg1: napi_deferred, arg2: napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_deferred, napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_resolve_deferred", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_reject_deferred(arg0: napi_env, arg1: napi_deferred, arg2: napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_deferred, napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_reject_deferred", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_is_promise(arg0: napi_env, arg1: napi_value, arg2: [*c]bool) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]bool) callconv(.c) napi_status;
+    return callNodeApi("napi_is_promise", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_run_script(arg0: napi_env, arg1: napi_value, arg2: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_run_script", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_adjust_external_memory(arg0: node_api_basic_env, arg1: i64, arg2: [*c]i64) callconv(.c) napi_status {
+    const Fn = *const fn (node_api_basic_env, i64, [*c]i64) callconv(.c) napi_status;
+    return callNodeApi("napi_adjust_external_memory", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_module_register(arg0: [*c]napi_module) callconv(.c) void {
+    const Fn = *const fn ([*c]napi_module) callconv(.c) void;
+    return callNodeApi("napi_module_register", Fn, .{arg0});
+}
+pub fn napi_fatal_error(arg0: [*c]const u8, arg1: usize, arg2: [*c]const u8, arg3: usize) callconv(.c) noreturn {
+    const Fn = *const fn ([*c]const u8, usize, [*c]const u8, usize) callconv(.c) noreturn;
+    return callNodeApi("napi_fatal_error", Fn, .{ arg0, arg1, arg2, arg3 });
+}
+pub fn napi_async_init(arg0: napi_env, arg1: napi_value, arg2: napi_value, arg3: [*c]napi_async_context) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, napi_value, [*c]napi_async_context) callconv(.c) napi_status;
+    return callNodeApi("napi_async_init", Fn, .{ arg0, arg1, arg2, arg3 });
+}
+pub fn napi_async_destroy(arg0: napi_env, arg1: napi_async_context) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_async_context) callconv(.c) napi_status;
+    return callNodeApi("napi_async_destroy", Fn, .{ arg0, arg1 });
+}
+pub fn napi_make_callback(arg0: napi_env, arg1: napi_async_context, arg2: napi_value, arg3: napi_value, arg4: usize, arg5: [*c]const napi_value, arg6: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_async_context, napi_value, napi_value, usize, [*c]const napi_value, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_make_callback", Fn, .{ arg0, arg1, arg2, arg3, arg4, arg5, arg6 });
+}
+pub fn napi_create_buffer(arg0: napi_env, arg1: usize, arg2: [*c]?*anyopaque, arg3: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, usize, [*c]?*anyopaque, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_create_buffer", Fn, .{ arg0, arg1, arg2, arg3 });
+}
+pub fn napi_create_external_buffer(arg0: napi_env, arg1: usize, arg2: ?*anyopaque, arg3: node_api_basic_finalize, arg4: ?*anyopaque, arg5: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, usize, ?*anyopaque, node_api_basic_finalize, ?*anyopaque, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_create_external_buffer", Fn, .{ arg0, arg1, arg2, arg3, arg4, arg5 });
+}
+pub fn napi_create_buffer_copy(arg0: napi_env, arg1: usize, arg2: ?*const anyopaque, arg3: [*c]?*anyopaque, arg4: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, usize, ?*const anyopaque, [*c]?*anyopaque, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_create_buffer_copy", Fn, .{ arg0, arg1, arg2, arg3, arg4 });
+}
+pub fn napi_is_buffer(arg0: napi_env, arg1: napi_value, arg2: [*c]bool) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]bool) callconv(.c) napi_status;
+    return callNodeApi("napi_is_buffer", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_get_buffer_info(arg0: napi_env, arg1: napi_value, arg2: [*c]?*anyopaque, arg3: [*c]usize) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]?*anyopaque, [*c]usize) callconv(.c) napi_status;
+    return callNodeApi("napi_get_buffer_info", Fn, .{ arg0, arg1, arg2, arg3 });
+}
+pub fn napi_create_async_work(arg0: napi_env, arg1: napi_value, arg2: napi_value, arg3: napi_async_execute_callback, arg4: napi_async_complete_callback, arg5: ?*anyopaque, arg6: [*c]napi_async_work) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, napi_value, napi_async_execute_callback, napi_async_complete_callback, ?*anyopaque, [*c]napi_async_work) callconv(.c) napi_status;
+    return callNodeApi("napi_create_async_work", Fn, .{ arg0, arg1, arg2, arg3, arg4, arg5, arg6 });
+}
+pub fn napi_delete_async_work(arg0: napi_env, arg1: napi_async_work) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_async_work) callconv(.c) napi_status;
+    return callNodeApi("napi_delete_async_work", Fn, .{ arg0, arg1 });
+}
+pub fn napi_queue_async_work(arg0: node_api_basic_env, arg1: napi_async_work) callconv(.c) napi_status {
+    const Fn = *const fn (node_api_basic_env, napi_async_work) callconv(.c) napi_status;
+    return callNodeApi("napi_queue_async_work", Fn, .{ arg0, arg1 });
+}
+pub fn napi_cancel_async_work(arg0: node_api_basic_env, arg1: napi_async_work) callconv(.c) napi_status {
+    const Fn = *const fn (node_api_basic_env, napi_async_work) callconv(.c) napi_status;
+    return callNodeApi("napi_cancel_async_work", Fn, .{ arg0, arg1 });
+}
+pub fn napi_get_node_version(arg0: node_api_basic_env, arg1: [*c][*c]const napi_node_version) callconv(.c) napi_status {
+    const Fn = *const fn (node_api_basic_env, [*c][*c]const napi_node_version) callconv(.c) napi_status;
+    return callNodeApi("napi_get_node_version", Fn, .{ arg0, arg1 });
+}
+
+pub fn napi_fatal_exception(arg0: napi_env, arg1: napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_fatal_exception", Fn, .{ arg0, arg1 });
+}
+pub fn napi_add_env_cleanup_hook(arg0: node_api_basic_env, arg1: napi_cleanup_hook, arg2: ?*anyopaque) callconv(.c) napi_status {
+    const Fn = *const fn (node_api_basic_env, napi_cleanup_hook, ?*anyopaque) callconv(.c) napi_status;
+    return callNodeApi("napi_add_env_cleanup_hook", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_remove_env_cleanup_hook(arg0: node_api_basic_env, arg1: napi_cleanup_hook, arg2: ?*anyopaque) callconv(.c) napi_status {
+    const Fn = *const fn (node_api_basic_env, napi_cleanup_hook, ?*anyopaque) callconv(.c) napi_status;
+    return callNodeApi("napi_remove_env_cleanup_hook", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_open_callback_scope(arg0: napi_env, arg1: napi_value, arg2: napi_async_context, arg3: [*c]napi_callback_scope) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, napi_async_context, [*c]napi_callback_scope) callconv(.c) napi_status;
+    return callNodeApi("napi_open_callback_scope", Fn, .{ arg0, arg1, arg2, arg3 });
+}
+pub fn napi_close_callback_scope(arg0: napi_env, arg1: napi_callback_scope) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_callback_scope) callconv(.c) napi_status;
+    return callNodeApi("napi_close_callback_scope", Fn, .{ arg0, arg1 });
+}
 
 pub const napi_threadsafe_function__ = opaque {};
 pub const napi_threadsafe_function = ?*napi_threadsafe_function__;
@@ -249,18 +1294,51 @@ pub const napi_tsfn_nonblocking: napi_threadsafe_function_call_mode = 0;
 pub const napi_tsfn_blocking: napi_threadsafe_function_call_mode = 1;
 pub const napi_threadsafe_function_call_js = ?*const fn (env: napi_env, js_callback: napi_value, context: ?*anyopaque, data: ?*anyopaque) callconv(.c) void;
 
-pub extern fn napi_create_threadsafe_function(env: napi_env, func: napi_value, async_resource: napi_value, async_resource_name: napi_value, max_queue_size: usize, initial_thread_count: usize, thread_finalize_data: ?*anyopaque, thread_finalize_cb: napi_finalize, context: ?*anyopaque, call_js_cb: napi_threadsafe_function_call_js, result: [*c]napi_threadsafe_function) napi_status;
-pub extern fn napi_get_threadsafe_function_context(func: napi_threadsafe_function, result: [*c]?*anyopaque) napi_status;
-pub extern fn napi_call_threadsafe_function(func: napi_threadsafe_function, data: ?*anyopaque, is_blocking: napi_threadsafe_function_call_mode) napi_status;
-pub extern fn napi_acquire_threadsafe_function(func: napi_threadsafe_function) napi_status;
-pub extern fn napi_release_threadsafe_function(func: napi_threadsafe_function, mode: napi_threadsafe_function_release_mode) napi_status;
-pub extern fn napi_unref_threadsafe_function(env: node_api_basic_env, func: napi_threadsafe_function) napi_status;
-pub extern fn napi_ref_threadsafe_function(env: node_api_basic_env, func: napi_threadsafe_function) napi_status;
+pub fn napi_create_threadsafe_function(arg0: napi_env, arg1: napi_value, arg2: napi_value, arg3: napi_value, arg4: usize, arg5: usize, arg6: ?*anyopaque, arg7: napi_finalize, arg8: ?*anyopaque, arg9: napi_threadsafe_function_call_js, arg10: [*c]napi_threadsafe_function) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, napi_value, napi_value, usize, usize, ?*anyopaque, napi_finalize, ?*anyopaque, napi_threadsafe_function_call_js, [*c]napi_threadsafe_function) callconv(.c) napi_status;
+    return callNodeApi("napi_create_threadsafe_function", Fn, .{ arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10 });
+}
+pub fn napi_get_threadsafe_function_context(arg0: napi_threadsafe_function, arg1: [*c]?*anyopaque) callconv(.c) napi_status {
+    const Fn = *const fn (napi_threadsafe_function, [*c]?*anyopaque) callconv(.c) napi_status;
+    return callNodeApi("napi_get_threadsafe_function_context", Fn, .{ arg0, arg1 });
+}
+pub fn napi_call_threadsafe_function(arg0: napi_threadsafe_function, arg1: ?*anyopaque, arg2: napi_threadsafe_function_call_mode) callconv(.c) napi_status {
+    const Fn = *const fn (napi_threadsafe_function, ?*anyopaque, napi_threadsafe_function_call_mode) callconv(.c) napi_status;
+    return callNodeApi("napi_call_threadsafe_function", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_acquire_threadsafe_function(arg0: napi_threadsafe_function) callconv(.c) napi_status {
+    const Fn = *const fn (napi_threadsafe_function) callconv(.c) napi_status;
+    return callNodeApi("napi_acquire_threadsafe_function", Fn, .{arg0});
+}
+pub fn napi_release_threadsafe_function(arg0: napi_threadsafe_function, arg1: napi_threadsafe_function_release_mode) callconv(.c) napi_status {
+    const Fn = *const fn (napi_threadsafe_function, napi_threadsafe_function_release_mode) callconv(.c) napi_status;
+    return callNodeApi("napi_release_threadsafe_function", Fn, .{ arg0, arg1 });
+}
+pub fn napi_unref_threadsafe_function(arg0: node_api_basic_env, arg1: napi_threadsafe_function) callconv(.c) napi_status {
+    const Fn = *const fn (node_api_basic_env, napi_threadsafe_function) callconv(.c) napi_status;
+    return callNodeApi("napi_unref_threadsafe_function", Fn, .{ arg0, arg1 });
+}
+pub fn napi_ref_threadsafe_function(arg0: node_api_basic_env, arg1: napi_threadsafe_function) callconv(.c) napi_status {
+    const Fn = *const fn (node_api_basic_env, napi_threadsafe_function) callconv(.c) napi_status;
+    return callNodeApi("napi_ref_threadsafe_function", Fn, .{ arg0, arg1 });
+}
 
-pub extern fn napi_create_date(env: napi_env, time: f64, result: [*c]napi_value) napi_status;
-pub extern fn napi_is_date(env: napi_env, value: napi_value, is_date: [*c]bool) napi_status;
-pub extern fn napi_get_date_value(env: napi_env, value: napi_value, result: [*c]f64) napi_status;
-pub extern fn napi_add_finalizer(env: napi_env, js_object: napi_value, finalize_data: ?*anyopaque, finalize_cb: node_api_basic_finalize, finalize_hint: ?*anyopaque, result: [*c]napi_ref) napi_status;
+pub fn napi_create_date(arg0: napi_env, arg1: f64, arg2: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, f64, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_create_date", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_is_date(arg0: napi_env, arg1: napi_value, arg2: [*c]bool) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]bool) callconv(.c) napi_status;
+    return callNodeApi("napi_is_date", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_get_date_value(arg0: napi_env, arg1: napi_value, arg2: [*c]f64) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]f64) callconv(.c) napi_status;
+    return callNodeApi("napi_get_date_value", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_add_finalizer(arg0: napi_env, arg1: napi_value, arg2: ?*anyopaque, arg3: node_api_basic_finalize, arg4: ?*anyopaque, arg5: [*c]napi_ref) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, ?*anyopaque, node_api_basic_finalize, ?*anyopaque, [*c]napi_ref) callconv(.c) napi_status;
+    return callNodeApi("napi_add_finalizer", Fn, .{ arg0, arg1, arg2, arg3, arg4, arg5 });
+}
 
 pub const napi_bigint: napi_valuetype = 9;
 pub const napi_bigint64_array: napi_typedarray_type = 9;
@@ -279,18 +1357,51 @@ pub const napi_key_conversion = c_int;
 pub const napi_key_keep_numbers: napi_key_conversion = 0;
 pub const napi_key_numbers_to_strings: napi_key_conversion = 1;
 
-pub extern fn napi_create_bigint_int64(env: napi_env, value: i64, result: [*c]napi_value) napi_status;
-pub extern fn napi_create_bigint_uint64(env: napi_env, value: u64, result: [*c]napi_value) napi_status;
-pub extern fn napi_create_bigint_words(env: napi_env, sign_bit: c_int, word_count: usize, words: [*c]const u64, result: [*c]napi_value) napi_status;
-pub extern fn napi_get_value_bigint_int64(env: napi_env, value: napi_value, result: [*c]i64, lossless: [*c]bool) napi_status;
-pub extern fn napi_get_value_bigint_uint64(env: napi_env, value: napi_value, result: [*c]u64, lossless: [*c]bool) napi_status;
-pub extern fn napi_get_value_bigint_words(env: napi_env, value: napi_value, sign_bit: [*c]c_int, word_count: [*c]usize, words: [*c]u64) napi_status;
-pub extern fn napi_get_all_property_names(env: napi_env, object: napi_value, key_mode: napi_key_collection_mode, key_filter: napi_key_filter, key_conversion: napi_key_conversion, result: [*c]napi_value) napi_status;
-pub extern fn napi_set_instance_data(env: node_api_basic_env, data: ?*anyopaque, finalize_cb: napi_finalize, finalize_hint: ?*anyopaque) napi_status;
-pub extern fn napi_get_instance_data(env: node_api_basic_env, data: [*c]?*anyopaque) napi_status;
+pub fn napi_create_bigint_int64(arg0: napi_env, arg1: i64, arg2: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, i64, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_create_bigint_int64", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_create_bigint_uint64(arg0: napi_env, arg1: u64, arg2: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, u64, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_create_bigint_uint64", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_create_bigint_words(arg0: napi_env, arg1: c_int, arg2: usize, arg3: [*c]const u64, arg4: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, c_int, usize, [*c]const u64, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_create_bigint_words", Fn, .{ arg0, arg1, arg2, arg3, arg4 });
+}
+pub fn napi_get_value_bigint_int64(arg0: napi_env, arg1: napi_value, arg2: [*c]i64, arg3: [*c]bool) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]i64, [*c]bool) callconv(.c) napi_status;
+    return callNodeApi("napi_get_value_bigint_int64", Fn, .{ arg0, arg1, arg2, arg3 });
+}
+pub fn napi_get_value_bigint_uint64(arg0: napi_env, arg1: napi_value, arg2: [*c]u64, arg3: [*c]bool) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]u64, [*c]bool) callconv(.c) napi_status;
+    return callNodeApi("napi_get_value_bigint_uint64", Fn, .{ arg0, arg1, arg2, arg3 });
+}
+pub fn napi_get_value_bigint_words(arg0: napi_env, arg1: napi_value, arg2: [*c]c_int, arg3: [*c]usize, arg4: [*c]u64) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]c_int, [*c]usize, [*c]u64) callconv(.c) napi_status;
+    return callNodeApi("napi_get_value_bigint_words", Fn, .{ arg0, arg1, arg2, arg3, arg4 });
+}
+pub fn napi_get_all_property_names(arg0: napi_env, arg1: napi_value, arg2: napi_key_collection_mode, arg3: napi_key_filter, arg4: napi_key_conversion, arg5: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, napi_key_collection_mode, napi_key_filter, napi_key_conversion, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_get_all_property_names", Fn, .{ arg0, arg1, arg2, arg3, arg4, arg5 });
+}
+pub fn napi_set_instance_data(arg0: node_api_basic_env, arg1: ?*anyopaque, arg2: napi_finalize, arg3: ?*anyopaque) callconv(.c) napi_status {
+    const Fn = *const fn (node_api_basic_env, ?*anyopaque, napi_finalize, ?*anyopaque) callconv(.c) napi_status;
+    return callNodeApi("napi_set_instance_data", Fn, .{ arg0, arg1, arg2, arg3 });
+}
+pub fn napi_get_instance_data(arg0: node_api_basic_env, arg1: [*c]?*anyopaque) callconv(.c) napi_status {
+    const Fn = *const fn (node_api_basic_env, [*c]?*anyopaque) callconv(.c) napi_status;
+    return callNodeApi("napi_get_instance_data", Fn, .{ arg0, arg1 });
+}
 
-pub extern fn napi_detach_arraybuffer(env: napi_env, arraybuffer: napi_value) napi_status;
-pub extern fn napi_is_detached_arraybuffer(env: napi_env, value: napi_value, result: [*c]bool) napi_status;
+pub fn napi_detach_arraybuffer(arg0: napi_env, arg1: napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_detach_arraybuffer", Fn, .{ arg0, arg1 });
+}
+pub fn napi_is_detached_arraybuffer(arg0: napi_env, arg1: napi_value, arg2: [*c]bool) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]bool) callconv(.c) napi_status;
+    return callNodeApi("napi_is_detached_arraybuffer", Fn, .{ arg0, arg1, arg2 });
+}
 
 pub const napi_type_tag = extern struct {
     lower: u64,
@@ -300,24 +1411,78 @@ pub const napi_async_cleanup_hook_handle__ = opaque {};
 pub const napi_async_cleanup_hook_handle = ?*napi_async_cleanup_hook_handle__;
 pub const napi_async_cleanup_hook = ?*const fn (handle: napi_async_cleanup_hook_handle, data: ?*anyopaque) callconv(.c) void;
 
-pub extern fn napi_type_tag_object(env: napi_env, value: napi_value, type_tag: [*c]const napi_type_tag) napi_status;
-pub extern fn napi_check_object_type_tag(env: napi_env, value: napi_value, type_tag: [*c]const napi_type_tag, result: [*c]bool) napi_status;
-pub extern fn napi_object_freeze(env: napi_env, object: napi_value) napi_status;
-pub extern fn napi_object_seal(env: napi_env, object: napi_value) napi_status;
-pub extern fn napi_add_async_cleanup_hook(env: node_api_basic_env, hook: napi_async_cleanup_hook, arg: ?*anyopaque, remove_handle: [*c]napi_async_cleanup_hook_handle) napi_status;
-pub extern fn napi_remove_async_cleanup_hook(remove_handle: napi_async_cleanup_hook_handle) napi_status;
+pub fn napi_type_tag_object(arg0: napi_env, arg1: napi_value, arg2: [*c]const napi_type_tag) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]const napi_type_tag) callconv(.c) napi_status;
+    return callNodeApi("napi_type_tag_object", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn napi_check_object_type_tag(arg0: napi_env, arg1: napi_value, arg2: [*c]const napi_type_tag, arg3: [*c]bool) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]const napi_type_tag, [*c]bool) callconv(.c) napi_status;
+    return callNodeApi("napi_check_object_type_tag", Fn, .{ arg0, arg1, arg2, arg3 });
+}
+pub fn napi_object_freeze(arg0: napi_env, arg1: napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_object_freeze", Fn, .{ arg0, arg1 });
+}
+pub fn napi_object_seal(arg0: napi_env, arg1: napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_object_seal", Fn, .{ arg0, arg1 });
+}
+pub fn napi_add_async_cleanup_hook(arg0: node_api_basic_env, arg1: napi_async_cleanup_hook, arg2: ?*anyopaque, arg3: [*c]napi_async_cleanup_hook_handle) callconv(.c) napi_status {
+    const Fn = *const fn (node_api_basic_env, napi_async_cleanup_hook, ?*anyopaque, [*c]napi_async_cleanup_hook_handle) callconv(.c) napi_status;
+    return callNodeApi("napi_add_async_cleanup_hook", Fn, .{ arg0, arg1, arg2, arg3 });
+}
+pub fn napi_remove_async_cleanup_hook(arg0: napi_async_cleanup_hook_handle) callconv(.c) napi_status {
+    const Fn = *const fn (napi_async_cleanup_hook_handle) callconv(.c) napi_status;
+    return callNodeApi("napi_remove_async_cleanup_hook", Fn, .{arg0});
+}
 
-pub extern fn node_api_symbol_for(env: napi_env, utf8description: [*c]const u8, length: usize, result: [*c]napi_value) napi_status;
-pub extern fn node_api_create_syntax_error(env: napi_env, code: napi_value, msg: napi_value, result: [*c]napi_value) napi_status;
-pub extern fn node_api_throw_syntax_error(env: napi_env, code: [*c]const u8, msg: [*c]const u8) napi_status;
-pub extern fn node_api_get_module_file_name(env: node_api_basic_env, result: [*c][*c]const u8) napi_status;
+pub fn node_api_symbol_for(arg0: napi_env, arg1: [*c]const u8, arg2: usize, arg3: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, [*c]const u8, usize, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("node_api_symbol_for", Fn, .{ arg0, arg1, arg2, arg3 });
+}
+pub fn node_api_create_syntax_error(arg0: napi_env, arg1: napi_value, arg2: napi_value, arg3: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, napi_value, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("node_api_create_syntax_error", Fn, .{ arg0, arg1, arg2, arg3 });
+}
+pub fn node_api_throw_syntax_error(arg0: napi_env, arg1: [*c]const u8, arg2: [*c]const u8) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, [*c]const u8, [*c]const u8) callconv(.c) napi_status;
+    return callNodeApi("node_api_throw_syntax_error", Fn, .{ arg0, arg1, arg2 });
+}
+pub fn node_api_get_module_file_name(arg0: node_api_basic_env, arg1: [*c][*c]const u8) callconv(.c) napi_status {
+    const Fn = *const fn (node_api_basic_env, [*c][*c]const u8) callconv(.c) napi_status;
+    return callNodeApi("node_api_get_module_file_name", Fn, .{ arg0, arg1 });
+}
 
-pub extern fn node_api_create_external_string_latin1(env: napi_env, str: [*c]u8, length: usize, finalize_callback: node_api_basic_finalize, finalize_hint: ?*anyopaque, result: [*c]napi_value, copied: [*c]bool) napi_status;
-pub extern fn node_api_create_external_string_utf16(env: napi_env, str: [*c]u16, length: usize, finalize_callback: node_api_basic_finalize, finalize_hint: ?*anyopaque, result: [*c]napi_value, copied: [*c]bool) napi_status;
-pub extern fn node_api_create_property_key_latin1(env: napi_env, str: [*c]const u8, length: usize, result: [*c]napi_value) napi_status;
-pub extern fn node_api_create_property_key_utf8(env: napi_env, str: [*c]const u8, length: usize, result: [*c]napi_value) napi_status;
-pub extern fn node_api_create_property_key_utf16(env: napi_env, str: [*c]const u16, length: usize, result: [*c]napi_value) napi_status;
-pub extern fn node_api_create_buffer_from_arraybuffer(env: napi_env, arraybuffer: napi_value, byte_offset: usize, byte_length: usize, result: [*c]napi_value) napi_status;
+pub fn node_api_create_external_string_latin1(arg0: napi_env, arg1: [*c]u8, arg2: usize, arg3: node_api_basic_finalize, arg4: ?*anyopaque, arg5: [*c]napi_value, arg6: [*c]bool) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, [*c]u8, usize, node_api_basic_finalize, ?*anyopaque, [*c]napi_value, [*c]bool) callconv(.c) napi_status;
+    return callNodeApi("node_api_create_external_string_latin1", Fn, .{ arg0, arg1, arg2, arg3, arg4, arg5, arg6 });
+}
+pub fn node_api_create_external_string_utf16(arg0: napi_env, arg1: [*c]u16, arg2: usize, arg3: node_api_basic_finalize, arg4: ?*anyopaque, arg5: [*c]napi_value, arg6: [*c]bool) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, [*c]u16, usize, node_api_basic_finalize, ?*anyopaque, [*c]napi_value, [*c]bool) callconv(.c) napi_status;
+    return callNodeApi("node_api_create_external_string_utf16", Fn, .{ arg0, arg1, arg2, arg3, arg4, arg5, arg6 });
+}
+pub fn node_api_create_property_key_latin1(arg0: napi_env, arg1: [*c]const u8, arg2: usize, arg3: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, [*c]const u8, usize, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("node_api_create_property_key_latin1", Fn, .{ arg0, arg1, arg2, arg3 });
+}
+pub fn node_api_create_property_key_utf8(arg0: napi_env, arg1: [*c]const u8, arg2: usize, arg3: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, [*c]const u8, usize, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("node_api_create_property_key_utf8", Fn, .{ arg0, arg1, arg2, arg3 });
+}
+pub fn node_api_create_property_key_utf16(arg0: napi_env, arg1: [*c]const u16, arg2: usize, arg3: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, [*c]const u16, usize, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("node_api_create_property_key_utf16", Fn, .{ arg0, arg1, arg2, arg3 });
+}
+pub fn node_api_create_buffer_from_arraybuffer(arg0: napi_env, arg1: napi_value, arg2: usize, arg3: usize, arg4: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, usize, usize, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("node_api_create_buffer_from_arraybuffer", Fn, .{ arg0, arg1, arg2, arg3, arg4 });
+}
 
-pub extern fn node_api_post_finalizer(env: node_api_basic_env, finalize_cb: napi_finalize, finalize_data: ?*anyopaque, finalize_hint: ?*anyopaque) napi_status;
-pub extern fn napi_create_object_with_properties(env: napi_env, prototype_or_null: napi_value, property_names: [*c]const napi_value, property_values: [*c]const napi_value, property_count: usize, result: [*c]napi_value) napi_status;
+pub fn node_api_post_finalizer(arg0: node_api_basic_env, arg1: napi_finalize, arg2: ?*anyopaque, arg3: ?*anyopaque) callconv(.c) napi_status {
+    const Fn = *const fn (node_api_basic_env, napi_finalize, ?*anyopaque, ?*anyopaque) callconv(.c) napi_status;
+    return callNodeApi("node_api_post_finalizer", Fn, .{ arg0, arg1, arg2, arg3 });
+}
+pub fn napi_create_object_with_properties(arg0: napi_env, arg1: napi_value, arg2: [*c]const napi_value, arg3: [*c]const napi_value, arg4: usize, arg5: [*c]napi_value) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, napi_value, [*c]const napi_value, [*c]const napi_value, usize, [*c]napi_value) callconv(.c) napi_status;
+    return callNodeApi("napi_create_object_with_properties", Fn, .{ arg0, arg1, arg2, arg3, arg4, arg5 });
+}

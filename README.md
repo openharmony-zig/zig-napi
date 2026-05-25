@@ -105,9 +105,9 @@ When `.experimental = true`, the addon requests Node-API experimental version an
 
 Version-gated APIs follow the same shape as NAPI-RS feature gates: for example `ThreadSafeFunction` and `Async` require v4, while `BigInt` requires v6. If an addon selects a lower version, those wrappers fail at compile time with a message pointing back to `.node_api.version`.
 
-Node addon builds use Zig `extern` declarations in `src/sys/node.zig`, matching napi-rs' hand-written `napi-sys` model. OpenHarmony/ArkTS builds still use the OHOS header set under `src/sys/ohos` through `native_api.h`.
+Node addon builds use the hand-written `src/sys/node.zig` sys layer, matching napi-rs' hand-written `napi-sys` model. OpenHarmony/ArkTS builds still use the OHOS header set under `src/sys/ohos` through `native_api.h`.
 
-On Windows, Node addons must link against Node's import library. `nodeAddonBuild` accepts `.node_import_lib`; alternatively set `NODE_LIB_FILE` to the full `node.lib` path or `NODE_LIB_DIR` to the directory containing it. The Node addon CI does this automatically on `windows-latest`.
+On Windows MSVC, `nodeAddonBuild` follows napi-rs and does not require a `node.lib` lookup by default; the Node-API symbols are resolved from the current Node.js process at runtime. If a build needs to force an import library, pass `.node_import_lib`, set `NODE_LIB_FILE`, or set `NODE_LIB_DIR`. Windows GNU builds follow napi-rs' `LIBNODE_PATH`, `LIBPATH`, then `PATH` search for `libnode.dll` before linking `node`.
 
 ## Usage
 

@@ -4,6 +4,47 @@ fn getEnvVarOptional(build: *std.Build, name: []const u8) ?[]const u8 {
     return build.graph.environ_map.get(name);
 }
 
+fn pathExists(build: *std.Build, path: []const u8) bool {
+    std.Io.Dir.cwd().access(build.graph.io, path, .{}) catch return false;
+    return true;
+}
+
+fn findLibnodeDllInPathList(build: *std.Build, paths: []const u8) ?[]const u8 {
+    var iter = std.mem.splitScalar(u8, paths, std.fs.path.delimiter);
+    while (iter.next()) |dir| {
+        if (dir.len == 0) continue;
+        if (pathExists(build, build.pathJoin(&.{ dir, "libnode.dll" }))) {
+            return dir;
+        }
+    }
+    return null;
+}
+
+fn requireWindowsGnuLibnodePath(build: *std.Build) []const u8 {
+    if (getEnvVarOptional(build, "LIBNODE_PATH")) |libnode_path| {
+        if (pathExists(build, libnode_path)) {
+            if (pathExists(build, build.pathJoin(&.{ libnode_path, "libnode.dll" }))) {
+                return libnode_path;
+            }
+            std.debug.panic("libnode.dll not found in {s}", .{libnode_path});
+        }
+    }
+
+    if (getEnvVarOptional(build, "LIBPATH")) |paths| {
+        if (findLibnodeDllInPathList(build, paths)) |libnode_path| {
+            return libnode_path;
+        }
+    }
+
+    if (getEnvVarOptional(build, "PATH")) |paths| {
+        if (findLibnodeDllInPathList(build, paths)) |libnode_path| {
+            return libnode_path;
+        }
+    }
+
+    @panic("libnode.dll not found in any search path");
+}
+
 fn cloneLibraryOptionsInternal(build: *std.Build, option: anytype, target: std.Build.ResolvedTarget) std.Build.LibraryOptions {
     const root_module = build.createModule(.{
         .root_source_file = option.root_module_options.root_source_file,
@@ -142,8 +183,9 @@ pub const NodeAddonBuildOptionsWithModule = struct {
     napi_module: *std.Build.Module,
     root_module_options: std.Build.Module.CreateOptions,
     node_api: NodeApiOptions = .{},
-    /// Windows `.node` addons must link against Node's import library.
-    /// If omitted, `NODE_LIB_FILE` or `NODE_LIB_DIR` can provide it.
+    /// Optional Windows import library override.
+    /// MSVC follows napi-rs and does not require this by default. GNU follows
+    /// napi-rs' `LIBNODE_PATH`/`LIBPATH`/`PATH` libnode.dll search.
     node_import_lib: ?std.Build.LazyPath = null,
     version: ?std.SemanticVersion = null,
     max_rss: usize = 0,
@@ -256,7 +298,9 @@ pub fn nodeAddonBuild(build: *std.Build, option: NodeAddonBuildOptionsWithModule
         } else if (getEnvVarOptional(build, "NODE_LIB_DIR")) |node_lib_dir| {
             compile.root_module.addLibraryPath(.{ .cwd_relative = node_lib_dir });
             compile.root_module.linkSystemLibrary("node", .{ .use_pkg_config = .no });
-        } else {
+        } else if (target.result.abi == .gnu) {
+            const libnode_path = requireWindowsGnuLibnodePath(build);
+            compile.root_module.addLibraryPath(.{ .cwd_relative = libnode_path });
             compile.root_module.linkSystemLibrary("node", .{ .use_pkg_config = .no });
         }
     }

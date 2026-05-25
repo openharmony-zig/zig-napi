@@ -33,22 +33,6 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
 
-      - name: Configure Windows Node import library
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $node = (Get-Command node).Source
-          $nodeDir = Split-Path -Parent $node
-          $candidates = @(
-            (Join-Path $nodeDir 'node.lib'),
-            (Join-Path (Split-Path -Parent $nodeDir) 'node.lib')
-          )
-          $nodeLib = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-          if (-not $nodeLib) {
-            throw "Unable to locate node.lib next to the Node.js installation at $node"
-          }
-          "NODE_LIB_FILE=$nodeLib" >> $env:GITHUB_ENV
-
       - name: Build and test Node addon matrix
         run: |
           cd node-test
