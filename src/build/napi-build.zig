@@ -167,6 +167,58 @@ pub const NodeApiOptions = struct {
     }
 };
 
+fn nodePlatform(target: std.Target) []const u8 {
+    return switch (target.os.tag) {
+        .macos => "darwin",
+        .windows => "win32",
+        .linux => "linux",
+        .freebsd => "freebsd",
+        .ios => "ios",
+        else => @tagName(target.os.tag),
+    };
+}
+
+fn nodeArch(target: std.Target) []const u8 {
+    return switch (target.cpu.arch) {
+        .aarch64 => "arm64",
+        .x86_64 => "x64",
+        .x86 => "ia32",
+        .arm => "arm",
+        else => @tagName(target.cpu.arch),
+    };
+}
+
+fn nodeAbi(target: std.Target) ?[]const u8 {
+    return switch (target.os.tag) {
+        .windows => switch (target.abi) {
+            .msvc => "msvc",
+            .gnu => "gnu",
+            .none => null,
+            else => @tagName(target.abi),
+        },
+        .linux => switch (target.abi) {
+            .gnu => "gnu",
+            .musl => "musl",
+            .none => null,
+            else => @tagName(target.abi),
+        },
+        else => null,
+    };
+}
+
+pub fn nodePlatformArchAbi(build: *std.Build, target: std.Build.ResolvedTarget) []const u8 {
+    const platform = nodePlatform(target.result);
+    const arch = nodeArch(target.result);
+    if (nodeAbi(target.result)) |abi| {
+        return build.fmt("{s}-{s}-{s}", .{ platform, arch, abi });
+    }
+    return build.fmt("{s}-{s}", .{ platform, arch });
+}
+
+pub fn nodeAddonFilename(build: *std.Build, name: []const u8, target: std.Build.ResolvedTarget) []const u8 {
+    return build.fmt("{s}.{s}.node", .{ name, nodePlatformArchAbi(build, target) });
+}
+
 pub const NativeAddonBuildOptionsWithModule = struct {
     name: []const u8,
     root_module_options: std.Build.Module.CreateOptions,
@@ -305,12 +357,8 @@ pub fn nodeAddonBuild(build: *std.Build, option: NodeAddonBuildOptionsWithModule
         }
     }
 
-    const targetTriple = build.fmt("{s}-{s}-{s}", .{
-        @tagName(target.result.cpu.arch),
-        @tagName(target.result.os.tag),
-        @tagName(target.result.abi),
-    });
-    const nodeDistDir = build.fmt("node/{s}", .{targetTriple});
+    const nodeDistDir = "node";
+    const outputFilename = nodeAddonFilename(build, option.name, target);
     const installStep = build.addInstallArtifact(compile, .{
         .dest_dir = .{
             .override = .{
@@ -322,7 +370,7 @@ pub fn nodeAddonBuild(build: *std.Build, option: NodeAddonBuildOptionsWithModule
                 .custom = nodeDistDir,
             },
         } else .disabled,
-        .dest_sub_path = build.fmt("{s}.node", .{option.name}),
+        .dest_sub_path = outputFilename,
     });
     build.getInstallStep().dependOn(&installStep.step);
 

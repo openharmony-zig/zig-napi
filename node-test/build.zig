@@ -9,7 +9,7 @@ fn addNodeAddon(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
 ) !void {
-    _ = try napi_build.nodeAddonBuild(b, .{
+    const addon = try napi_build.nodeAddonBuild(b, .{
         .name = name,
         .napi_module = napi,
         .node_api = .{
@@ -25,6 +25,12 @@ fn addNodeAddon(
             .link_libc = true,
         },
     });
+    const npm_root_install = b.addInstallFileWithDir(
+        addon.getEmittedBin(),
+        .{ .custom = ".." },
+        napi_build.nodeAddonFilename(b, name, target),
+    );
+    b.getInstallStep().dependOn(&npm_root_install.step);
 }
 
 pub fn build(b: *std.Build) !void {

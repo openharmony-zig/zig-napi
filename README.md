@@ -154,7 +154,7 @@ zig build
 node test.js
 ```
 
-It installs the addon as `zig-out/node/<target-triple>/hello.node`.
+It installs the addon as `zig-out/node/hello.<platform-arch-abi>.node`, for example `hello.darwin-arm64.node`, `hello.linux-x64-gnu.node`, or `hello.win32-x64-msvc.node`.
 
 Node.js matrix tests live in `node-test`. It mirrors the NAPI-RS example split with two independent demos:
 
