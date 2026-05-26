@@ -9,6 +9,16 @@ test("should get arraybuffer length", (t) => {
   t.is(bindings.getArraybufferLength(fixture.buffer), fixture.buffer.byteLength);
 });
 
+test("should create empty arraybuffer", (t) => {
+  t.is(bindings.createEmptyArraybufferFromNew().byteLength, 0);
+  t.is(bindings.createEmptyArraybufferFromData().byteLength, 0);
+  t.is(bindings.createEmptyExternalArraybuffer().byteLength, 0);
+});
+
+test("should create external arraybuffer", (t) => {
+  t.deepEqual(Array.from(new Uint8Array(bindings.createExternalArraybuffer())), [5, 6, 7, 8]);
+});
+
 test("should be able to mutate Uint8Array", (t) => {
   const fixture = new Uint8Array([0, 1, 2]);
   bindings.mutateUint8Array(fixture);

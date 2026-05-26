@@ -104,13 +104,30 @@ pub const ArrayBuffer = struct {
 
     pub fn fromWithFinalizer(env: Env, data: []u8, on_finalize: ?*const fn () void) !ArrayBuffer {
         var result: napi.napi_value = undefined;
+        var result_data: ?*anyopaque = null;
 
         // Store the slice info for the finalizer
         const hint = ArrayBufferHint.create(data, on_finalize) catch {
             return NapiError.Error.fromStatus(NapiError.Status.GenericFailure);
         };
 
-        const status = napi.napi_create_external_arraybuffer(
+        if (data.len == 0) {
+            const create_status = createArrayBuffer(env.raw, 0);
+            result = create_status.result;
+            result_data = create_status.data;
+            hint.destroy();
+            if (create_status.raw != napi.napi_ok) {
+                return NapiError.Error.fromStatus(NapiError.Status.New(create_status.raw));
+            }
+            return ArrayBuffer{
+                .env = env.raw,
+                .raw = result,
+                .data = if (result_data == null) &[_]u8{} else @ptrCast(result_data),
+                .len = 0,
+            };
+        }
+
+        var status = napi.napi_create_external_arraybuffer(
             env.raw,
             @ptrCast(data.ptr),
             data.len,
@@ -119,16 +136,36 @@ pub const ArrayBuffer = struct {
             &result,
         );
 
+        var hint_destroyed = false;
+        if (isNoExternalBuffersAllowed(status)) {
+            const create_status = createArrayBuffer(env.raw, data.len);
+            result = create_status.result;
+            result_data = create_status.data;
+            status = create_status.raw;
+            if (status == napi.napi_ok) {
+                if (result_data == null) {
+                    hint.destroy();
+                    return NapiError.Error.fromStatus(NapiError.Status.GenericFailure);
+                }
+                const dest: [*]u8 = @ptrCast(result_data);
+                @memcpy(dest[0..data.len], data);
+            }
+            hint.destroy();
+            hint_destroyed = true;
+        }
+
         if (status != napi.napi_ok) {
             // Clean up hint if buffer creation failed
-            hint.destroy();
+            if (!hint_destroyed) {
+                hint.destroy();
+            }
             return NapiError.Error.fromStatus(NapiError.Status.New(status));
         }
 
         return ArrayBuffer{
             .env = env.raw,
             .raw = result,
-            .data = data.ptr,
+            .data = if (result_data == null) data.ptr else @ptrCast(result_data),
             .len = data.len,
         };
     }
@@ -145,28 +182,26 @@ pub const ArrayBuffer = struct {
     /// const buf = try ArrayBuffer.copy(env, &stack_data);
     /// ```
     pub fn copy(env: Env, data: []const u8) !ArrayBuffer {
-        var result: napi.napi_value = undefined;
-        var result_data: ?*anyopaque = null;
-
-        const status = napi.napi_create_arraybuffer(
-            env.raw,
-            data.len,
-            &result_data,
-            &result,
-        );
+        const create_status = createArrayBuffer(env.raw, data.len);
+        const status = create_status.raw;
 
         if (status != napi.napi_ok) {
             return NapiError.Error.fromStatus(NapiError.Status.New(status));
         }
 
         // Copy the data into the newly created ArrayBuffer
-        const dest: [*]u8 = @ptrCast(result_data);
-        @memcpy(dest[0..data.len], data);
+        if (data.len > 0) {
+            if (create_status.data == null) {
+                return NapiError.Error.fromStatus(NapiError.Status.GenericFailure);
+            }
+            const dest: [*]u8 = @ptrCast(create_status.data);
+            @memcpy(dest[0..data.len], data);
+        }
 
         return ArrayBuffer{
             .env = env.raw,
-            .raw = result,
-            .data = if (data.len == 0 or result_data == null) &[_]u8{} else dest,
+            .raw = create_status.result,
+            .data = if (data.len == 0 or create_status.data == null) &[_]u8{} else @ptrCast(create_status.data),
             .len = data.len,
         };
     }
@@ -180,10 +215,8 @@ pub const ArrayBuffer = struct {
     /// @memset(buf.asSlice(), 0);  // initialize
     /// ```
     pub fn New(env: Env, len: usize) !ArrayBuffer {
-        var result: napi.napi_value = undefined;
-        var data: ?*anyopaque = null;
-
-        const status = napi.napi_create_arraybuffer(env.raw, len, &data, &result);
+        const create_status = createArrayBuffer(env.raw, len);
+        const status = create_status.raw;
 
         if (status != napi.napi_ok) {
             return NapiError.Error.fromStatus(NapiError.Status.New(status));
@@ -191,8 +224,8 @@ pub const ArrayBuffer = struct {
 
         return ArrayBuffer{
             .env = env.raw,
-            .raw = result,
-            .data = if (len == 0 or data == null) &[_]u8{} else @ptrCast(data),
+            .raw = create_status.result,
+            .data = if (len == 0 or create_status.data == null) &[_]u8{} else @ptrCast(create_status.data),
             .len = len,
         };
     }
@@ -212,6 +245,27 @@ pub const ArrayBuffer = struct {
         return self.len;
     }
 };
+
+const ArrayBufferCreateStatus = struct {
+    raw: napi.napi_status,
+    result: napi.napi_value,
+    data: ?*anyopaque,
+};
+
+fn createArrayBuffer(env: napi.napi_env, len: usize) ArrayBufferCreateStatus {
+    var result: napi.napi_value = undefined;
+    var data: ?*anyopaque = null;
+    const status = napi.napi_create_arraybuffer(env, len, &data, &result);
+    return .{
+        .raw = status,
+        .result = result,
+        .data = data,
+    };
+}
+
+fn isNoExternalBuffersAllowed(status: napi.napi_status) bool {
+    return NapiError.Status.New(status) == .NoExternalBuffersAllowed;
+}
 
 /// Helper struct to store ArrayBuffer info for the finalizer
 const ArrayBufferHint = struct {

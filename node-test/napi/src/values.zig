@@ -259,6 +259,16 @@ pub fn getEmptyBuffer(env: napi.Env) !napi.Buffer {
     return try napi.Buffer.copy(env, &[_]u8{});
 }
 
+pub fn getEmptyBufferFromNew(env: napi.Env) !napi.Buffer {
+    return try napi.Buffer.New(env, 0);
+}
+
+pub fn getEmptyExternalBuffer(env: napi.Env) !napi.Buffer {
+    const bytes = try allocator().alloc(u8, 0);
+    errdefer allocator().free(bytes);
+    return try napi.Buffer.from(env, bytes);
+}
+
 pub fn appendBuffer(env: napi.Env, input: napi.Buffer) !napi.Buffer {
     const suffix = " world";
     const input_slice = input.asConstSlice();
@@ -275,6 +285,10 @@ pub fn bufferPassThrough(input: napi.Buffer) c.napi_value {
 
 pub fn createArraybuffer(env: napi.Env, len: u32) !napi.ArrayBuffer {
     return try napi.ArrayBuffer.New(env, len);
+}
+
+pub fn createEmptyArraybuffer(env: napi.Env) !napi.ArrayBuffer {
+    return try napi.ArrayBuffer.New(env, 0);
 }
 
 pub fn acceptArraybuffer(input: napi.ArrayBuffer) usize {
@@ -294,7 +308,10 @@ pub fn getBufferSlice(env: napi.Env, input: napi.Buffer, start: u32, end: u32) !
 }
 
 pub fn createExternalBufferSlice(env: napi.Env) !napi.Buffer {
-    return try napi.Buffer.copy(env, "external-buffer"[0..8]);
+    const bytes = try allocator().alloc(u8, 8);
+    errdefer allocator().free(bytes);
+    @memcpy(bytes, "external");
+    return try napi.Buffer.from(env, bytes);
 }
 
 pub fn createBufferSliceFromCopiedData(env: napi.Env) !napi.Buffer {
@@ -386,8 +403,21 @@ pub fn arrayBufferFromData(env: napi.Env) !napi.ArrayBuffer {
     return try napi.ArrayBuffer.copy(env, &[_]u8{ 1, 2, 3, 4 });
 }
 
+pub fn arrayBufferFromEmptyData(env: napi.Env) !napi.ArrayBuffer {
+    return try napi.ArrayBuffer.copy(env, &[_]u8{});
+}
+
 pub fn arrayBufferFromExternal(env: napi.Env) !napi.ArrayBuffer {
-    return try napi.ArrayBuffer.copy(env, &[_]u8{ 5, 6, 7, 8 });
+    const bytes = try allocator().alloc(u8, 4);
+    errdefer allocator().free(bytes);
+    @memcpy(bytes, &[_]u8{ 5, 6, 7, 8 });
+    return try napi.ArrayBuffer.from(env, bytes);
+}
+
+pub fn arrayBufferFromEmptyExternal(env: napi.Env) !napi.ArrayBuffer {
+    const bytes = try allocator().alloc(u8, 0);
+    errdefer allocator().free(bytes);
+    return try napi.ArrayBuffer.from(env, bytes);
 }
 
 pub fn uint8ArrayFromData(env: napi.Env) !napi.Uint8Array {

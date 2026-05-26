@@ -24,6 +24,10 @@ pub const testHasElement = array.testHasElement;
 pub const testDeleteElement = array.testDeleteElement;
 
 pub const getArraybufferLength = arraybuffer.getArraybufferLength;
+pub const createEmptyArraybufferFromNew = arraybuffer.createEmptyArraybufferFromNew;
+pub const createEmptyArraybufferFromData = arraybuffer.createEmptyArraybufferFromData;
+pub const createEmptyExternalArraybuffer = arraybuffer.createEmptyExternalArraybuffer;
+pub const createExternalArraybuffer = arraybuffer.createExternalArraybuffer;
 pub const mutateUint8Array = arraybuffer.mutateUint8Array;
 pub const mutateUint16Array = arraybuffer.mutateUint16Array;
 pub const mutateInt16Array = arraybuffer.mutateInt16Array;
@@ -36,6 +40,8 @@ pub const copyBuffer = buffer.copyBuffer;
 pub const createBorrowedBufferWithNoopFinalize = buffer.createBorrowedBufferWithNoopFinalize;
 pub const createBorrowedBufferWithFinalize = buffer.createBorrowedBufferWithFinalize;
 pub const createEmptyBuffer = buffer.createEmptyBuffer;
+pub const createEmptyBufferFromNew = buffer.createEmptyBufferFromNew;
+pub const createEmptyExternalBuffer = buffer.createEmptyExternalBuffer;
 pub const mutateBuffer = buffer.mutateBuffer;
 
 pub const eitherNumberString = either.eitherNumberString;

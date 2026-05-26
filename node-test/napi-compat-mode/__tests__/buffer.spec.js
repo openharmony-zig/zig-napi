@@ -28,6 +28,8 @@ test("should create borrowed buffer with finalize", (t) => {
 
 test("should create empty buffer", (t) => {
   t.is(bindings.createEmptyBuffer().toString(), "");
+  t.is(bindings.createEmptyBufferFromNew().length, 0);
+  t.is(bindings.createEmptyExternalBuffer().length, 0);
 });
 
 test("should be able to mutate buffer", (t) => {

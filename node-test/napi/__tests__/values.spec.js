@@ -112,6 +112,8 @@ test("buffer", (t) => {
   const buffer = Buffer.from("hello");
   t.deepEqual(bindings.getBuffer(), Buffer.from("hello world"));
   t.is(bindings.getEmptyBuffer().length, 0);
+  t.is(bindings.getEmptyBufferFromNew().length, 0);
+  t.is(bindings.getEmptyExternalBuffer().length, 0);
   t.deepEqual(bindings.appendBuffer(buffer), Buffer.from("hello world"));
   t.is(bindings.bufferPassThrough(buffer), buffer);
   t.deepEqual(bindings.getBufferSlice(Buffer.from("abcdef"), 1, 4), Buffer.from("bcd"));
@@ -122,6 +124,8 @@ test("buffer", (t) => {
 test("ArrayBuffer", (t) => {
   const buffer = new ArrayBuffer(4);
   t.is(bindings.createArraybuffer(8).byteLength, 8);
+  t.is(bindings.createArraybuffer(0).byteLength, 0);
+  t.is(bindings.createEmptyArraybuffer().byteLength, 0);
   t.is(bindings.acceptArraybuffer(buffer), 4);
   t.is(bindings.arrayBufferPassThrough(buffer), buffer);
 
@@ -130,7 +134,9 @@ test("ArrayBuffer", (t) => {
   t.deepEqual(Array.from(new Uint8Array(mutable)), [2, 3, 4]);
 
   t.deepEqual(Array.from(new Uint8Array(bindings.arrayBufferFromData())), [1, 2, 3, 4]);
+  t.is(bindings.arrayBufferFromEmptyData().byteLength, 0);
   t.deepEqual(Array.from(new Uint8Array(bindings.arrayBufferFromExternal())), [5, 6, 7, 8]);
+  t.is(bindings.arrayBufferFromEmptyExternal().byteLength, 0);
 });
 
 test("TypedArray", (t) => {

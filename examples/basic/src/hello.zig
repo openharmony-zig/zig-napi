@@ -75,10 +75,16 @@ pub const TestFactoryClass = class.TestFactoryClass;
 pub const test_hilog = log.test_hilog;
 
 pub const create_buffer = buffer.create_buffer;
+pub const create_empty_buffer_new = buffer.create_empty_buffer_new;
+pub const create_empty_buffer_copy = buffer.create_empty_buffer_copy;
+pub const create_empty_external_buffer = buffer.create_empty_external_buffer;
 pub const get_buffer = buffer.get_buffer;
 pub const get_buffer_as_string = buffer.get_buffer_as_string;
 
 pub const create_arraybuffer = arraybuffer.create_arraybuffer;
+pub const create_empty_arraybuffer_new = arraybuffer.create_empty_arraybuffer_new;
+pub const create_empty_arraybuffer_copy = arraybuffer.create_empty_arraybuffer_copy;
+pub const create_empty_external_arraybuffer = arraybuffer.create_empty_external_arraybuffer;
 pub const get_arraybuffer = arraybuffer.get_arraybuffer;
 pub const get_arraybuffer_as_string = arraybuffer.get_arraybuffer_as_string;
 

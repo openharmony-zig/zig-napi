@@ -5,6 +5,29 @@ pub fn getArraybufferLength(buffer: napi.ArrayBuffer) usize {
     return buffer.length();
 }
 
+pub fn createEmptyArraybufferFromNew(env: napi.Env) !napi.ArrayBuffer {
+    return try napi.ArrayBuffer.New(env, 0);
+}
+
+pub fn createEmptyArraybufferFromData(env: napi.Env) !napi.ArrayBuffer {
+    return try napi.ArrayBuffer.copy(env, &[_]u8{});
+}
+
+pub fn createEmptyExternalArraybuffer(env: napi.Env) !napi.ArrayBuffer {
+    const allocator = napi.globalAllocator();
+    const bytes = try allocator.alloc(u8, 0);
+    errdefer allocator.free(bytes);
+    return try napi.ArrayBuffer.from(env, bytes);
+}
+
+pub fn createExternalArraybuffer(env: napi.Env) !napi.ArrayBuffer {
+    const allocator = napi.globalAllocator();
+    const bytes = try allocator.alloc(u8, 4);
+    errdefer allocator.free(bytes);
+    @memcpy(bytes, &[_]u8{ 5, 6, 7, 8 });
+    return try napi.ArrayBuffer.from(env, bytes);
+}
+
 pub fn mutateUint8Array(values: napi.Uint8Array) void {
     if (values.length() > 0) values.asSlice()[0] = 42;
 }

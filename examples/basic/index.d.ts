@@ -182,9 +182,15 @@ export declare function call_thread_safe_function(
 ): void;
 export declare function test_hilog(): void;
 export declare function create_buffer(): Buffer;
+export declare function create_empty_buffer_new(): Buffer;
+export declare function create_empty_buffer_copy(): Buffer;
+export declare function create_empty_external_buffer(): Buffer;
 export declare function get_buffer(buf: Buffer): number;
 export declare function get_buffer_as_string(buf: Buffer): string;
 export declare function create_arraybuffer(): ArrayBuffer;
+export declare function create_empty_arraybuffer_new(): ArrayBuffer;
+export declare function create_empty_arraybuffer_copy(): ArrayBuffer;
+export declare function create_empty_external_arraybuffer(): ArrayBuffer;
 export declare function get_arraybuffer(buf: ArrayBuffer): number;
 export declare function get_arraybuffer_as_string(buf: ArrayBuffer): string;
 export declare function create_uint8_typedarray(): Uint8Array;

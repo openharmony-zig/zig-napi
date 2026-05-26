@@ -6,6 +6,13 @@ export function testBinary(native: NativeAddon) {
   const bufferValue = native.create_buffer();
   assertEqual(native.get_buffer(bufferValue), 1024, "buffer length");
   assertEqual(native.get_buffer_as_string(bufferValue).length, 1024, "buffer string length");
+  assertEqual(native.get_buffer(native.create_empty_buffer_new()), 0, "empty buffer new length");
+  assertEqual(native.get_buffer(native.create_empty_buffer_copy()), 0, "empty buffer copy length");
+  assertEqual(
+    native.get_buffer(native.create_empty_external_buffer()),
+    0,
+    "empty external buffer length",
+  );
 
   const arrayBufferValue = native.create_arraybuffer();
   assertEqual(native.get_arraybuffer(arrayBufferValue), 1024, "arraybuffer length");
@@ -13,6 +20,21 @@ export function testBinary(native: NativeAddon) {
     native.get_arraybuffer_as_string(arrayBufferValue).length,
     1024,
     "arraybuffer string length",
+  );
+  assertEqual(
+    native.get_arraybuffer(native.create_empty_arraybuffer_new()),
+    0,
+    "empty arraybuffer new length",
+  );
+  assertEqual(
+    native.get_arraybuffer(native.create_empty_arraybuffer_copy()),
+    0,
+    "empty arraybuffer copy length",
+  );
+  assertEqual(
+    native.get_arraybuffer(native.create_empty_external_arraybuffer()),
+    0,
+    "empty external arraybuffer length",
   );
 
   const typedArrayValue = native.create_uint8_typedarray();
