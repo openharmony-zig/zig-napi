@@ -43,7 +43,7 @@ pub fn requireNapiVersion(comptime required: NapiVersion) void {
         @compileError(std.fmt.comptimePrint(
             \\[ Node-API Version Mismatch ]
             \\Expected `{[required_name]s}` (N-API {[required_number]d}) or greater, got `{[selected_name]s}` (N-API {[selected_number]d}).
-            \\Set `.node_api.version = .{[required_name]s}` in `nodeAddonBuild`.
+            \\Set `.node_api.version = .{[required_name]s}` in `nodeAddonBuild` or `nativeAddonBuild`.
             \\
         , .{
             .required_name = required_name,

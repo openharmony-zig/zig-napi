@@ -43,22 +43,14 @@ pub fn build(b: *std.Build) !void {
     // Build ArkTS/OpenHarmony artifacts.
     const result = try napi_build.nativeAddonBuild(b, .{
         .name = "hello",
+        .napi_module = napi,
         .root_module_options = .{
             .root_source_file = b.path("./src/hello.zig"),
             .target = target,
             .optimize = optimize,
         },
     });
-
-    if (result.arm64) |arm64| {
-        arm64.root_module.addImport("napi", napi);
-    }
-    if (result.arm) |arm| {
-        arm.root_module.addImport("napi", napi);
-    }
-    if (result.x64) |x64| {
-        x64.root_module.addImport("napi", napi);
-    }
+    _ = result;
 }
 ```
 
@@ -92,7 +84,7 @@ pub fn build(b: *std.Build) !void {
 }
 ```
 
-Node addons request Node-API v8 by default. To request a newer runtime API version or experimental Node-API, configure `node_api` in `nodeAddonBuild`:
+OpenHarmony and Node addons request Node-API v8 by default. To request a newer runtime API version or experimental Node-API, configure `node_api` in `nativeAddonBuild` or `nodeAddonBuild`:
 
 ```zig
 .node_api = .{
@@ -103,7 +95,7 @@ Node addons request Node-API v8 by default. To request a newer runtime API versi
 
 When `.experimental = true`, the addon requests Node-API experimental version and enables experimental declarations in `napi-sys`.
 
-Version-gated APIs follow the same shape as NAPI-RS feature gates: for example `ThreadSafeFunction` and `Async` require v4, while `BigInt` requires v6. If an addon selects a lower version, those wrappers fail at compile time with a message pointing back to `.node_api.version`.
+Version-gated APIs follow the same shape as NAPI-RS feature gates: for example `ThreadSafeFunction` and `Async` require v4, while `BigInt` requires v6. If an addon selects a lower version, those wrappers fail at compile time with a message pointing back to `.node_api.version`. For OpenHarmony builds, pass `.napi_module = napi` to `nativeAddonBuild` so the configured N-API version is applied to both the addon root module and the `napi` wrapper module. If type definitions compile the same source, pass the same `.node_api` to `generateTypeDefinition`.
 
 Node addon builds use the hand-written `src/sys/node.zig` sys layer, matching napi-rs' hand-written `napi-sys` model. OpenHarmony/ArkTS builds still use the OHOS header set under `src/sys/ohos` through `native_api.h`.
 

@@ -221,6 +221,8 @@ pub fn nodeAddonFilename(build: *std.Build, name: []const u8, target: std.Build.
 
 pub const NativeAddonBuildOptionsWithModule = struct {
     name: []const u8,
+    napi_module: ?*std.Build.Module = null,
+    node_api: NodeApiOptions = .{},
     root_module_options: std.Build.Module.CreateOptions,
     version: ?std.SemanticVersion = null,
     max_rss: usize = 0,
@@ -229,6 +231,24 @@ pub const NativeAddonBuildOptionsWithModule = struct {
     zig_lib_dir: ?std.Build.LazyPath = null,
     win32_manifest: ?std.Build.LazyPath = null,
 };
+
+fn isDefaultNodeApiOptions(options: NodeApiOptions) bool {
+    const default: NodeApiOptions = .{};
+    return options.effectiveVersion() == default.effectiveVersion() and options.experimental == default.experimental;
+}
+
+fn addConfiguredNapiImport(
+    build: *std.Build,
+    root_module: *std.Build.Module,
+    napi_module: ?*std.Build.Module,
+    build_options_module: *std.Build.Module,
+    comptime node_addon: bool,
+) void {
+    root_module.addImport("build_options", build_options_module);
+    if (napi_module) |module| {
+        root_module.addImport("napi", createConfiguredNapiModule(build, module, build_options_module, node_addon));
+    }
+}
 
 pub const NodeAddonBuildOptionsWithModule = struct {
     name: []const u8,
@@ -313,7 +333,11 @@ fn arkvmHostAddonBuild(build: *std.Build, option: NativeAddonBuildOptionsWithMod
     const compile = build.addLibrary(hostOption);
     compile.linker_allow_shlib_undefined = true;
     compile.root_module.link_libc = true;
-    compile.root_module.addOptions("build_options", createAddonBuildOptions(build, .{}));
+    const addon_build_options = createAddonBuildOptions(build, .{
+        .node_api = option.node_api,
+    });
+    const build_options_module = addon_build_options.createModule();
+    addConfiguredNapiImport(build, compile.root_module, option.napi_module, build_options_module, false);
 
     const installStep = build.addInstallArtifact(compile, .{
         .dest_dir = .{
@@ -339,8 +363,7 @@ pub fn nodeAddonBuild(build: *std.Build, option: NodeAddonBuildOptionsWithModule
 
     const compile = build.addLibrary(nodeOption);
     const build_options_module = addon_build_options.createModule();
-    compile.root_module.addImport("build_options", build_options_module);
-    compile.root_module.addImport("napi", createConfiguredNapiModule(build, option.napi_module, build_options_module, true));
+    addConfiguredNapiImport(build, compile.root_module, option.napi_module, build_options_module, true);
     compile.linker_allow_shlib_undefined = true;
     if (target.result.os.tag == .windows) {
         if (option.node_import_lib) |node_import_lib| {
@@ -381,6 +404,7 @@ pub const TypeDefinitionBuildOptions = struct {
     root_source_file: std.Build.LazyPath,
     output: std.Build.LazyPath,
     napi_module: *std.Build.Module,
+    node_api: NodeApiOptions = .{},
     // Optional text injected after the generated banner comments.
     header: ?[]const u8 = null,
     options: ?*std.Build.Step.Options = null,
@@ -391,6 +415,7 @@ pub fn generateTypeDefinition(build: *std.Build, option: TypeDefinitionBuildOpti
 
     const tsgen_build_options = createAddonBuildOptions(build, .{
         .napi_tsgen = true,
+        .node_api = option.node_api,
     });
 
     const tsgen_napi_sys = build.addModule("zig-napi-tsgen-napi-sys", .{
@@ -426,7 +451,9 @@ pub fn generateTypeDefinition(build: *std.Build, option: TypeDefinitionBuildOpti
             },
         },
     });
-    const addon_build_options = option.options orelse createAddonBuildOptions(build, .{});
+    const addon_build_options = option.options orelse createAddonBuildOptions(build, .{
+        .node_api = option.node_api,
+    });
     addon_root.addImport("build_options", addon_build_options.createModule());
 
     const ndk_root = try resolveNdkPath(build);
@@ -455,13 +482,20 @@ pub fn generateTypeDefinition(build: *std.Build, option: TypeDefinitionBuildOpti
 }
 
 pub fn nativeAddonBuild(build: *std.Build, option: NativeAddonBuildOptionsWithModule) !NativeAddonBuildResult {
+    if (option.napi_module == null and !isDefaultNodeApiOptions(option.node_api)) {
+        std.debug.panic("nativeAddonBuild requires .napi_module when .node_api is configured so the napi wrapper sees the selected N-API version", .{});
+    }
+
     const arkvm_test = isArkvmTestBuild(build);
     if (arkvm_test) {
         const host = arkvmHostAddonBuild(build, option);
         return .{ .arm64 = null, .arm = null, .x64 = host };
     }
 
-    const addon_build_options = createAddonBuildOptions(build, .{});
+    const addon_build_options = createAddonBuildOptions(build, .{
+        .node_api = option.node_api,
+    });
+    const build_options_module = addon_build_options.createModule();
 
     const currentTarget = if (option.root_module_options.target) |target| target.result else build.graph.host.result;
 
@@ -486,7 +520,7 @@ pub fn nativeAddonBuild(build: *std.Build, option: NativeAddonBuildOptionsWithMo
 
             const arm64Option = cloneLibraryOptions(build, option, target);
             arm64 = build.addLibrary(arm64Option);
-            arm64.?.root_module.addOptions("build_options", addon_build_options);
+            addConfiguredNapiImport(build, arm64.?.root_module, option.napi_module, build_options_module, false);
             try linkNapi(build, arm64.?, target.query);
 
             const arm64DistDir: []const u8 = build.dupePath("arm64-v8a");
@@ -503,7 +537,7 @@ pub fn nativeAddonBuild(build: *std.Build, option: NativeAddonBuildOptionsWithMo
             const target = build.resolveTargetQuery(targets[1]);
             const armOption = cloneLibraryOptions(build, option, target);
             arm = build.addLibrary(armOption);
-            arm.?.root_module.addOptions("build_options", addon_build_options);
+            addConfiguredNapiImport(build, arm.?.root_module, option.napi_module, build_options_module, false);
             try linkNapi(build, arm.?, target.query);
 
             const armDistDir: []const u8 = build.dupePath("armeabi-v7a");
@@ -522,7 +556,7 @@ pub fn nativeAddonBuild(build: *std.Build, option: NativeAddonBuildOptionsWithMo
             // TODO: https://github.com/ziglang/zig/issues/25335
             x64Option.use_llvm = true;
             x64 = build.addLibrary(x64Option);
-            x64.?.root_module.addOptions("build_options", addon_build_options);
+            addConfiguredNapiImport(build, x64.?.root_module, option.napi_module, build_options_module, false);
             try linkNapi(build, x64.?, target.query);
 
             const x64DistDir: []const u8 = build.dupePath("x86_64");
