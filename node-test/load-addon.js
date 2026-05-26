@@ -3,8 +3,7 @@ const path = require("path");
 
 function platformArchABIs() {
   const arch = process.arch;
-  const variables =
-    process.config && process.config.variables ? process.config.variables : {};
+  const variables = process.config && process.config.variables ? process.config.variables : {};
 
   switch (process.platform) {
     case "darwin":

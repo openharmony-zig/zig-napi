@@ -21,10 +21,7 @@ test("string", (t) => {
     bindings.concatUtf16("JavaScript 🌳 你好 napi"),
     "JavaScript 🌳 你好 napi + Rust 🦀 string!",
   );
-  t.is(
-    bindings.roundtripStr("what up?!\0after the NULL"),
-    "what up?!\0after the NULL",
-  );
+  t.is(bindings.roundtripStr("what up?!\0after the NULL"), "what up?!\0after the NULL");
 });
 
 test("array", (t) => {
@@ -59,10 +56,22 @@ test("function call", (t) => {
     }),
     42,
   );
-  t.is(bindings.call1((a) => a + 10, 42), 52);
-  t.is(bindings.call2((a, b) => a + b, 42, 10), 52);
-  t.is(bindings.callFunction(() => 42), 42);
-  t.is(bindings.callFunctionWithArg((a, b) => a + b, 42, 10), 52);
+  t.is(
+    bindings.call1((a) => a + 10, 42),
+    52,
+  );
+  t.is(
+    bindings.call2((a, b) => a + b, 42, 10),
+    52,
+  );
+  t.is(
+    bindings.callFunction(() => 42),
+    42,
+  );
+  t.is(
+    bindings.callFunctionWithArg((a, b) => a + b, 42, 10),
+    52,
+  );
 
   const fn = bindings.createFunction();
   t.is(fn(42), 242);
