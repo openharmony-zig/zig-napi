@@ -129,7 +129,7 @@ const use_windows_msvc_dynamic_symbols = builtin.os.tag == .windows and builtin.
 const WindowsMsvcLoader = struct {
     const windows = std.os.windows;
 
-    extern "kernel32" fn GetModuleHandleW(lpModuleName: ?windows.LPCWSTR) callconv(.winapi) ?windows.HMODULE;
+    extern "kernel32" fn GetModuleHandleExW(dwFlags: u32, lpModuleName: ?windows.LPCWSTR, phModule: *windows.HMODULE) callconv(.winapi) windows.BOOL;
     extern "kernel32" fn GetProcAddress(hModule: windows.HMODULE, lpProcName: windows.LPCSTR) callconv(.winapi) ?windows.FARPROC;
 
     var initialized = false;
@@ -137,7 +137,10 @@ const WindowsMsvcLoader = struct {
 
     fn setup() void {
         if (initialized) return;
-        host = GetModuleHandleW(null);
+        var handle: windows.HMODULE = undefined;
+        if (GetModuleHandleExW(0, null, &handle).toBool()) {
+            host = handle;
+        }
         initialized = true;
     }
 
@@ -190,633 +193,170 @@ fn callNodeApi(comptime name: [:0]const u8, comptime Fn: type, args: anytype) no
     return @call(.auto, function, args);
 }
 
+fn loadNodeApi(comptime name: [:0]const u8, comptime wrapper: anytype) void {
+    const Fn = *const @TypeOf(wrapper);
+    _ = WindowsMsvcLoader.lookupCached(Fn, name);
+}
+
 fn loadAllNodeApiSymbols() void {
     if (!use_windows_msvc_dynamic_symbols) return;
 
-    {
-        const Fn = *const fn (node_api_basic_env, [*c][*c]const napi_extended_error_info) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_last_error_info");
-    }
-    {
-        const Fn = *const fn (napi_env, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_undefined");
-    }
-    {
-        const Fn = *const fn (napi_env, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_null");
-    }
-    {
-        const Fn = *const fn (napi_env, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_global");
-    }
-    {
-        const Fn = *const fn (napi_env, bool, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_boolean");
-    }
-    {
-        const Fn = *const fn (napi_env, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_object");
-    }
-    {
-        const Fn = *const fn (napi_env, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_array");
-    }
-    {
-        const Fn = *const fn (napi_env, usize, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_array_with_length");
-    }
-    {
-        const Fn = *const fn (napi_env, f64, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_double");
-    }
-    {
-        const Fn = *const fn (napi_env, i32, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_int32");
-    }
-    {
-        const Fn = *const fn (napi_env, u32, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_uint32");
-    }
-    {
-        const Fn = *const fn (napi_env, i64, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_int64");
-    }
-    {
-        const Fn = *const fn (napi_env, [*c]const u8, usize, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_string_latin1");
-    }
-    {
-        const Fn = *const fn (napi_env, [*c]const u8, usize, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_string_utf8");
-    }
-    {
-        const Fn = *const fn (napi_env, [*c]const u16, usize, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_string_utf16");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_symbol");
-    }
-    {
-        const Fn = *const fn (napi_env, [*c]const u8, usize, napi_callback, ?*anyopaque, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_function");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, napi_value, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_error");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, napi_value, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_type_error");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, napi_value, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_range_error");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]napi_valuetype) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_typeof");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]f64) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_value_double");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]i32) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_value_int32");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]u32) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_value_uint32");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]i64) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_value_int64");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]bool) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_value_bool");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]u8, usize, ?*usize) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_value_string_latin1");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]u8, usize, ?*usize) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_value_string_utf8");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]u16, usize, ?*usize) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_value_string_utf16");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_coerce_to_bool");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_coerce_to_number");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_coerce_to_object");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_coerce_to_string");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_prototype");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_property_names");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, napi_value, napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_set_property");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, napi_value, [*c]bool) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_has_property");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, napi_value, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_property");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, napi_value, [*c]bool) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_delete_property");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, napi_value, [*c]bool) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_has_own_property");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]const u8, napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_set_named_property");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]const u8, [*c]bool) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_has_named_property");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]const u8, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_named_property");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, u32, napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_set_element");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, u32, [*c]bool) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_has_element");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, u32, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_element");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, u32, [*c]bool) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_delete_element");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, usize, [*c]const napi_property_descriptor) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_define_properties");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]bool) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_is_array");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]u32) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_array_length");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, napi_value, [*c]bool) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_strict_equals");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, napi_value, usize, [*c]const napi_value, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_call_function");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, usize, [*c]const napi_value, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_new_instance");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, napi_value, [*c]bool) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_instanceof");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_callback_info, ?*usize, [*c]napi_value, [*c]napi_value, [*c]?*anyopaque) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_cb_info");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_callback_info, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_new_target");
-    }
-    {
-        const Fn = *const fn (napi_env, [*c]const u8, usize, napi_callback, ?*anyopaque, usize, [*c]const napi_property_descriptor, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_define_class");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, ?*anyopaque, node_api_basic_finalize, ?*anyopaque, [*c]napi_ref) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_wrap");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]?*anyopaque) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_unwrap");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]?*anyopaque) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_remove_wrap");
-    }
-    {
-        const Fn = *const fn (napi_env, ?*anyopaque, node_api_basic_finalize, ?*anyopaque, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_external");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]?*anyopaque) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_value_external");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, u32, [*c]napi_ref) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_reference");
-    }
-    {
-        const Fn = *const fn (node_api_basic_env, napi_ref) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_delete_reference");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_ref, [*c]u32) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_reference_ref");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_ref, [*c]u32) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_reference_unref");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_ref, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_reference_value");
-    }
-    {
-        const Fn = *const fn (napi_env, [*c]napi_handle_scope) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_open_handle_scope");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_handle_scope) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_close_handle_scope");
-    }
-    {
-        const Fn = *const fn (napi_env, [*c]napi_escapable_handle_scope) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_open_escapable_handle_scope");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_escapable_handle_scope) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_close_escapable_handle_scope");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_escapable_handle_scope, napi_value, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_escape_handle");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_throw");
-    }
-    {
-        const Fn = *const fn (napi_env, [*c]const u8, [*c]const u8) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_throw_error");
-    }
-    {
-        const Fn = *const fn (napi_env, [*c]const u8, [*c]const u8) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_throw_type_error");
-    }
-    {
-        const Fn = *const fn (napi_env, [*c]const u8, [*c]const u8) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_throw_range_error");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]bool) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_is_error");
-    }
-    {
-        const Fn = *const fn (napi_env, [*c]bool) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_is_exception_pending");
-    }
-    {
-        const Fn = *const fn (napi_env, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_and_clear_last_exception");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]bool) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_is_arraybuffer");
-    }
-    {
-        const Fn = *const fn (napi_env, usize, [*c]?*anyopaque, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_arraybuffer");
-    }
-    {
-        const Fn = *const fn (napi_env, ?*anyopaque, usize, node_api_basic_finalize, ?*anyopaque, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_external_arraybuffer");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]?*anyopaque, [*c]usize) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_arraybuffer_info");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]bool) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_is_typedarray");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_typedarray_type, usize, napi_value, usize, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_typedarray");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]napi_typedarray_type, [*c]usize, [*c]?*anyopaque, [*c]napi_value, [*c]usize) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_typedarray_info");
-    }
-    {
-        const Fn = *const fn (napi_env, usize, napi_value, usize, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_dataview");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]bool) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_is_dataview");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]usize, [*c]?*anyopaque, [*c]napi_value, [*c]usize) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_dataview_info");
-    }
-    {
-        const Fn = *const fn (node_api_basic_env, [*c]u32) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_version");
-    }
-    {
-        const Fn = *const fn (napi_env, [*c]napi_deferred, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_promise");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_deferred, napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_resolve_deferred");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_deferred, napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_reject_deferred");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]bool) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_is_promise");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_run_script");
-    }
-    {
-        const Fn = *const fn (node_api_basic_env, i64, [*c]i64) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_adjust_external_memory");
-    }
-    {
-        const Fn = *const fn ([*c]napi_module) callconv(.c) void;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_module_register");
-    }
-    {
-        const Fn = *const fn ([*c]const u8, usize, [*c]const u8, usize) callconv(.c) noreturn;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_fatal_error");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, napi_value, [*c]napi_async_context) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_async_init");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_async_context) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_async_destroy");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_async_context, napi_value, napi_value, usize, [*c]const napi_value, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_make_callback");
-    }
-    {
-        const Fn = *const fn (napi_env, usize, [*c]?*anyopaque, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_buffer");
-    }
-    {
-        const Fn = *const fn (napi_env, usize, ?*anyopaque, node_api_basic_finalize, ?*anyopaque, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_external_buffer");
-    }
-    {
-        const Fn = *const fn (napi_env, usize, ?*const anyopaque, [*c]?*anyopaque, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_buffer_copy");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]bool) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_is_buffer");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]?*anyopaque, [*c]usize) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_buffer_info");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, napi_value, napi_async_execute_callback, napi_async_complete_callback, ?*anyopaque, [*c]napi_async_work) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_async_work");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_async_work) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_delete_async_work");
-    }
-    {
-        const Fn = *const fn (node_api_basic_env, napi_async_work) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_queue_async_work");
-    }
-    {
-        const Fn = *const fn (node_api_basic_env, napi_async_work) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_cancel_async_work");
-    }
-    {
-        const Fn = *const fn (node_api_basic_env, [*c][*c]const napi_node_version) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_node_version");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_fatal_exception");
-    }
-    {
-        const Fn = *const fn (node_api_basic_env, napi_cleanup_hook, ?*anyopaque) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_add_env_cleanup_hook");
-    }
-    {
-        const Fn = *const fn (node_api_basic_env, napi_cleanup_hook, ?*anyopaque) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_remove_env_cleanup_hook");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, napi_async_context, [*c]napi_callback_scope) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_open_callback_scope");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_callback_scope) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_close_callback_scope");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, napi_value, napi_value, usize, usize, ?*anyopaque, napi_finalize, ?*anyopaque, napi_threadsafe_function_call_js, [*c]napi_threadsafe_function) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_threadsafe_function");
-    }
-    {
-        const Fn = *const fn (napi_threadsafe_function, [*c]?*anyopaque) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_threadsafe_function_context");
-    }
-    {
-        const Fn = *const fn (napi_threadsafe_function, ?*anyopaque, napi_threadsafe_function_call_mode) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_call_threadsafe_function");
-    }
-    {
-        const Fn = *const fn (napi_threadsafe_function) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_acquire_threadsafe_function");
-    }
-    {
-        const Fn = *const fn (napi_threadsafe_function, napi_threadsafe_function_release_mode) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_release_threadsafe_function");
-    }
-    {
-        const Fn = *const fn (node_api_basic_env, napi_threadsafe_function) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_unref_threadsafe_function");
-    }
-    {
-        const Fn = *const fn (node_api_basic_env, napi_threadsafe_function) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_ref_threadsafe_function");
-    }
-    {
-        const Fn = *const fn (napi_env, f64, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_date");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]bool) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_is_date");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]f64) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_date_value");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, ?*anyopaque, node_api_basic_finalize, ?*anyopaque, [*c]napi_ref) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_add_finalizer");
-    }
-    {
-        const Fn = *const fn (napi_env, i64, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_bigint_int64");
-    }
-    {
-        const Fn = *const fn (napi_env, u64, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_bigint_uint64");
-    }
-    {
-        const Fn = *const fn (napi_env, c_int, usize, [*c]const u64, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_bigint_words");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]i64, [*c]bool) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_value_bigint_int64");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]u64, [*c]bool) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_value_bigint_uint64");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]c_int, [*c]usize, [*c]u64) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_value_bigint_words");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, napi_key_collection_mode, napi_key_filter, napi_key_conversion, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_all_property_names");
-    }
-    {
-        const Fn = *const fn (node_api_basic_env, ?*anyopaque, napi_finalize, ?*anyopaque) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_set_instance_data");
-    }
-    {
-        const Fn = *const fn (node_api_basic_env, [*c]?*anyopaque) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_get_instance_data");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_detach_arraybuffer");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]bool) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_is_detached_arraybuffer");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]const napi_type_tag) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_type_tag_object");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]const napi_type_tag, [*c]bool) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_check_object_type_tag");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_object_freeze");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_object_seal");
-    }
-    {
-        const Fn = *const fn (node_api_basic_env, napi_async_cleanup_hook, ?*anyopaque, [*c]napi_async_cleanup_hook_handle) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_add_async_cleanup_hook");
-    }
-    {
-        const Fn = *const fn (napi_async_cleanup_hook_handle) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_remove_async_cleanup_hook");
-    }
-    {
-        const Fn = *const fn (napi_env, [*c]const u8, usize, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "node_api_symbol_for");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, napi_value, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "node_api_create_syntax_error");
-    }
-    {
-        const Fn = *const fn (napi_env, [*c]const u8, [*c]const u8) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "node_api_throw_syntax_error");
-    }
-    {
-        const Fn = *const fn (node_api_basic_env, [*c][*c]const u8) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "node_api_get_module_file_name");
-    }
-    {
-        const Fn = *const fn (napi_env, [*c]u8, usize, node_api_basic_finalize, ?*anyopaque, [*c]napi_value, [*c]bool) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "node_api_create_external_string_latin1");
-    }
-    {
-        const Fn = *const fn (napi_env, [*c]u16, usize, node_api_basic_finalize, ?*anyopaque, [*c]napi_value, [*c]bool) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "node_api_create_external_string_utf16");
-    }
-    {
-        const Fn = *const fn (napi_env, [*c]const u8, usize, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "node_api_create_property_key_latin1");
-    }
-    {
-        const Fn = *const fn (napi_env, [*c]const u8, usize, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "node_api_create_property_key_utf8");
-    }
-    {
-        const Fn = *const fn (napi_env, [*c]const u16, usize, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "node_api_create_property_key_utf16");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, usize, usize, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "node_api_create_buffer_from_arraybuffer");
-    }
-    {
-        const Fn = *const fn (node_api_basic_env, napi_finalize, ?*anyopaque, ?*anyopaque) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "node_api_post_finalizer");
-    }
-    {
-        const Fn = *const fn (napi_env, napi_value, [*c]const napi_value, [*c]const napi_value, usize, [*c]napi_value) callconv(.c) napi_status;
-        _ = WindowsMsvcLoader.lookupCached(Fn, "napi_create_object_with_properties");
-    }
+    loadNodeApi("napi_get_last_error_info", napi_get_last_error_info);
+    loadNodeApi("napi_get_undefined", napi_get_undefined);
+    loadNodeApi("napi_get_null", napi_get_null);
+    loadNodeApi("napi_get_global", napi_get_global);
+    loadNodeApi("napi_get_boolean", napi_get_boolean);
+    loadNodeApi("napi_create_object", napi_create_object);
+    loadNodeApi("napi_create_array", napi_create_array);
+    loadNodeApi("napi_create_array_with_length", napi_create_array_with_length);
+    loadNodeApi("napi_create_double", napi_create_double);
+    loadNodeApi("napi_create_int32", napi_create_int32);
+    loadNodeApi("napi_create_uint32", napi_create_uint32);
+    loadNodeApi("napi_create_int64", napi_create_int64);
+    loadNodeApi("napi_create_string_latin1", napi_create_string_latin1);
+    loadNodeApi("napi_create_string_utf8", napi_create_string_utf8);
+    loadNodeApi("napi_create_string_utf16", napi_create_string_utf16);
+    loadNodeApi("napi_create_symbol", napi_create_symbol);
+    loadNodeApi("napi_create_function", napi_create_function);
+    loadNodeApi("napi_create_error", napi_create_error);
+    loadNodeApi("napi_create_type_error", napi_create_type_error);
+    loadNodeApi("napi_create_range_error", napi_create_range_error);
+    loadNodeApi("napi_typeof", napi_typeof);
+    loadNodeApi("napi_get_value_double", napi_get_value_double);
+    loadNodeApi("napi_get_value_int32", napi_get_value_int32);
+    loadNodeApi("napi_get_value_uint32", napi_get_value_uint32);
+    loadNodeApi("napi_get_value_int64", napi_get_value_int64);
+    loadNodeApi("napi_get_value_bool", napi_get_value_bool);
+    loadNodeApi("napi_get_value_string_latin1", napi_get_value_string_latin1);
+    loadNodeApi("napi_get_value_string_utf8", napi_get_value_string_utf8);
+    loadNodeApi("napi_get_value_string_utf16", napi_get_value_string_utf16);
+    loadNodeApi("napi_coerce_to_bool", napi_coerce_to_bool);
+    loadNodeApi("napi_coerce_to_number", napi_coerce_to_number);
+    loadNodeApi("napi_coerce_to_object", napi_coerce_to_object);
+    loadNodeApi("napi_coerce_to_string", napi_coerce_to_string);
+    loadNodeApi("napi_get_prototype", napi_get_prototype);
+    loadNodeApi("napi_get_property_names", napi_get_property_names);
+    loadNodeApi("napi_set_property", napi_set_property);
+    loadNodeApi("napi_has_property", napi_has_property);
+    loadNodeApi("napi_get_property", napi_get_property);
+    loadNodeApi("napi_delete_property", napi_delete_property);
+    loadNodeApi("napi_has_own_property", napi_has_own_property);
+    loadNodeApi("napi_set_named_property", napi_set_named_property);
+    loadNodeApi("napi_has_named_property", napi_has_named_property);
+    loadNodeApi("napi_get_named_property", napi_get_named_property);
+    loadNodeApi("napi_set_element", napi_set_element);
+    loadNodeApi("napi_has_element", napi_has_element);
+    loadNodeApi("napi_get_element", napi_get_element);
+    loadNodeApi("napi_delete_element", napi_delete_element);
+    loadNodeApi("napi_define_properties", napi_define_properties);
+    loadNodeApi("napi_is_array", napi_is_array);
+    loadNodeApi("napi_get_array_length", napi_get_array_length);
+    loadNodeApi("napi_strict_equals", napi_strict_equals);
+    loadNodeApi("napi_call_function", napi_call_function);
+    loadNodeApi("napi_new_instance", napi_new_instance);
+    loadNodeApi("napi_instanceof", napi_instanceof);
+    loadNodeApi("napi_get_cb_info", napi_get_cb_info);
+    loadNodeApi("napi_get_new_target", napi_get_new_target);
+    loadNodeApi("napi_define_class", napi_define_class);
+    loadNodeApi("napi_wrap", napi_wrap);
+    loadNodeApi("napi_unwrap", napi_unwrap);
+    loadNodeApi("napi_remove_wrap", napi_remove_wrap);
+    loadNodeApi("napi_create_external", napi_create_external);
+    loadNodeApi("napi_get_value_external", napi_get_value_external);
+    loadNodeApi("napi_create_reference", napi_create_reference);
+    loadNodeApi("napi_delete_reference", napi_delete_reference);
+    loadNodeApi("napi_reference_ref", napi_reference_ref);
+    loadNodeApi("napi_reference_unref", napi_reference_unref);
+    loadNodeApi("napi_get_reference_value", napi_get_reference_value);
+    loadNodeApi("napi_open_handle_scope", napi_open_handle_scope);
+    loadNodeApi("napi_close_handle_scope", napi_close_handle_scope);
+    loadNodeApi("napi_open_escapable_handle_scope", napi_open_escapable_handle_scope);
+    loadNodeApi("napi_close_escapable_handle_scope", napi_close_escapable_handle_scope);
+    loadNodeApi("napi_escape_handle", napi_escape_handle);
+    loadNodeApi("napi_throw", napi_throw);
+    loadNodeApi("napi_throw_error", napi_throw_error);
+    loadNodeApi("napi_throw_type_error", napi_throw_type_error);
+    loadNodeApi("napi_throw_range_error", napi_throw_range_error);
+    loadNodeApi("napi_is_error", napi_is_error);
+    loadNodeApi("napi_is_exception_pending", napi_is_exception_pending);
+    loadNodeApi("napi_get_and_clear_last_exception", napi_get_and_clear_last_exception);
+    loadNodeApi("napi_is_arraybuffer", napi_is_arraybuffer);
+    loadNodeApi("napi_create_arraybuffer", napi_create_arraybuffer);
+    loadNodeApi("napi_create_external_arraybuffer", napi_create_external_arraybuffer);
+    loadNodeApi("napi_get_arraybuffer_info", napi_get_arraybuffer_info);
+    loadNodeApi("napi_is_typedarray", napi_is_typedarray);
+    loadNodeApi("napi_create_typedarray", napi_create_typedarray);
+    loadNodeApi("napi_get_typedarray_info", napi_get_typedarray_info);
+    loadNodeApi("napi_create_dataview", napi_create_dataview);
+    loadNodeApi("napi_is_dataview", napi_is_dataview);
+    loadNodeApi("napi_get_dataview_info", napi_get_dataview_info);
+    loadNodeApi("napi_get_version", napi_get_version);
+    loadNodeApi("napi_create_promise", napi_create_promise);
+    loadNodeApi("napi_resolve_deferred", napi_resolve_deferred);
+    loadNodeApi("napi_reject_deferred", napi_reject_deferred);
+    loadNodeApi("napi_is_promise", napi_is_promise);
+    loadNodeApi("napi_run_script", napi_run_script);
+    loadNodeApi("napi_adjust_external_memory", napi_adjust_external_memory);
+    loadNodeApi("napi_module_register", napi_module_register);
+    loadNodeApi("napi_fatal_error", napi_fatal_error);
+    loadNodeApi("napi_async_init", napi_async_init);
+    loadNodeApi("napi_async_destroy", napi_async_destroy);
+    loadNodeApi("napi_make_callback", napi_make_callback);
+    loadNodeApi("napi_create_buffer", napi_create_buffer);
+    loadNodeApi("napi_create_external_buffer", napi_create_external_buffer);
+    loadNodeApi("napi_create_buffer_copy", napi_create_buffer_copy);
+    loadNodeApi("napi_is_buffer", napi_is_buffer);
+    loadNodeApi("napi_get_buffer_info", napi_get_buffer_info);
+    loadNodeApi("napi_create_async_work", napi_create_async_work);
+    loadNodeApi("napi_delete_async_work", napi_delete_async_work);
+    loadNodeApi("napi_queue_async_work", napi_queue_async_work);
+    loadNodeApi("napi_cancel_async_work", napi_cancel_async_work);
+    loadNodeApi("napi_get_node_version", napi_get_node_version);
+    loadNodeApi("napi_fatal_exception", napi_fatal_exception);
+    loadNodeApi("napi_add_env_cleanup_hook", napi_add_env_cleanup_hook);
+    loadNodeApi("napi_remove_env_cleanup_hook", napi_remove_env_cleanup_hook);
+    loadNodeApi("napi_open_callback_scope", napi_open_callback_scope);
+    loadNodeApi("napi_close_callback_scope", napi_close_callback_scope);
+    loadNodeApi("napi_create_threadsafe_function", napi_create_threadsafe_function);
+    loadNodeApi("napi_get_threadsafe_function_context", napi_get_threadsafe_function_context);
+    loadNodeApi("napi_call_threadsafe_function", napi_call_threadsafe_function);
+    loadNodeApi("napi_acquire_threadsafe_function", napi_acquire_threadsafe_function);
+    loadNodeApi("napi_release_threadsafe_function", napi_release_threadsafe_function);
+    loadNodeApi("napi_unref_threadsafe_function", napi_unref_threadsafe_function);
+    loadNodeApi("napi_ref_threadsafe_function", napi_ref_threadsafe_function);
+    loadNodeApi("napi_create_date", napi_create_date);
+    loadNodeApi("napi_is_date", napi_is_date);
+    loadNodeApi("napi_get_date_value", napi_get_date_value);
+    loadNodeApi("napi_add_finalizer", napi_add_finalizer);
+    loadNodeApi("napi_create_bigint_int64", napi_create_bigint_int64);
+    loadNodeApi("napi_create_bigint_uint64", napi_create_bigint_uint64);
+    loadNodeApi("napi_create_bigint_words", napi_create_bigint_words);
+    loadNodeApi("napi_get_value_bigint_int64", napi_get_value_bigint_int64);
+    loadNodeApi("napi_get_value_bigint_uint64", napi_get_value_bigint_uint64);
+    loadNodeApi("napi_get_value_bigint_words", napi_get_value_bigint_words);
+    loadNodeApi("napi_get_all_property_names", napi_get_all_property_names);
+    loadNodeApi("napi_set_instance_data", napi_set_instance_data);
+    loadNodeApi("napi_get_instance_data", napi_get_instance_data);
+    loadNodeApi("napi_detach_arraybuffer", napi_detach_arraybuffer);
+    loadNodeApi("napi_is_detached_arraybuffer", napi_is_detached_arraybuffer);
+    loadNodeApi("napi_type_tag_object", napi_type_tag_object);
+    loadNodeApi("napi_check_object_type_tag", napi_check_object_type_tag);
+    loadNodeApi("napi_object_freeze", napi_object_freeze);
+    loadNodeApi("napi_object_seal", napi_object_seal);
+    loadNodeApi("napi_add_async_cleanup_hook", napi_add_async_cleanup_hook);
+    loadNodeApi("napi_remove_async_cleanup_hook", napi_remove_async_cleanup_hook);
+    loadNodeApi("node_api_symbol_for", node_api_symbol_for);
+    loadNodeApi("node_api_create_syntax_error", node_api_create_syntax_error);
+    loadNodeApi("node_api_throw_syntax_error", node_api_throw_syntax_error);
+    loadNodeApi("node_api_get_module_file_name", node_api_get_module_file_name);
+    loadNodeApi("node_api_create_external_string_latin1", node_api_create_external_string_latin1);
+    loadNodeApi("node_api_create_external_string_utf16", node_api_create_external_string_utf16);
+    loadNodeApi("node_api_create_property_key_latin1", node_api_create_property_key_latin1);
+    loadNodeApi("node_api_create_property_key_utf8", node_api_create_property_key_utf8);
+    loadNodeApi("node_api_create_property_key_utf16", node_api_create_property_key_utf16);
+    loadNodeApi("node_api_create_buffer_from_arraybuffer", node_api_create_buffer_from_arraybuffer);
+    loadNodeApi("node_api_post_finalizer", node_api_post_finalizer);
+    loadNodeApi("napi_create_object_with_properties", napi_create_object_with_properties);
 }
 pub fn napi_get_last_error_info(arg0: node_api_basic_env, arg1: [*c][*c]const napi_extended_error_info) callconv(.c) napi_status {
     const Fn = *const fn (node_api_basic_env, [*c][*c]const napi_extended_error_info) callconv(.c) napi_status;
