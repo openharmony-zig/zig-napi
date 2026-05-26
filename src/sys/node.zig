@@ -151,11 +151,16 @@ const WindowsMsvcLoader = struct {
         return @as(Fn, @ptrCast(@alignCast(proc)));
     }
 
-    fn lookupCached(comptime Fn: type, comptime name: [:0]const u8) ?Fn {
-        const Cache = struct {
+    fn SymbolCache(comptime Fn: type, comptime name: [:0]const u8) type {
+        return struct {
+            const symbol_name = name;
             var initialized = false;
             var symbol: ?Fn = null;
         };
+    }
+
+    fn lookupCached(comptime Fn: type, comptime name: [:0]const u8) ?Fn {
+        const Cache = SymbolCache(Fn, name);
         if (!Cache.initialized) {
             Cache.symbol = lookup(Fn, name);
             Cache.initialized = true;
