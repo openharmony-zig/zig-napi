@@ -3,6 +3,7 @@ const napi = @import("napi-sys").napi_sys;
 const Env = @import("../env.zig").Env;
 const NapiError = @import("error.zig");
 const GlobalAllocator = @import("../util/allocator.zig");
+const options = @import("../options.zig");
 
 pub const Buffer = struct {
     env: napi.napi_env,
@@ -110,7 +111,22 @@ pub const Buffer = struct {
             return NapiError.Error.fromStatus(NapiError.Status.GenericFailure);
         };
 
-        const status = napi.napi_create_external_buffer(
+        if (data.len == 0) {
+            const status = createEmptyBuffer(env.raw);
+            result = status.result;
+            hint.destroy();
+            if (status.raw != napi.napi_ok) {
+                return NapiError.Error.fromStatus(NapiError.Status.New(status.raw));
+            }
+            return Buffer{
+                .env = env.raw,
+                .raw = result,
+                .data = if (status.data == null) &[_]u8{} else @ptrCast(status.data),
+                .len = 0,
+            };
+        }
+
+        var status = napi.napi_create_external_buffer(
             env.raw,
             data.len,
             @ptrCast(data.ptr),
@@ -119,16 +135,34 @@ pub const Buffer = struct {
             &result,
         );
 
+        var result_data: ?*anyopaque = null;
+        var hint_destroyed = false;
+        var used_copy_fallback = false;
+        if (isNoExternalBuffersAllowed(status)) {
+            const copy_status = createBufferCopy(env.raw, data);
+            result = copy_status.result;
+            result_data = copy_status.data;
+            status = copy_status.raw;
+            hint.destroy();
+            hint_destroyed = true;
+            used_copy_fallback = true;
+        }
+
         if (status != napi.napi_ok) {
             // Clean up hint if buffer creation failed
-            hint.destroy();
+            if (!hint_destroyed) {
+                hint.destroy();
+            }
             return NapiError.Error.fromStatus(NapiError.Status.New(status));
+        }
+        if (used_copy_fallback and result_data == null) {
+            return NapiError.Error.fromStatus(NapiError.Status.GenericFailure);
         }
 
         return Buffer{
             .env = env.raw,
             .raw = result,
-            .data = data.ptr,
+            .data = if (result_data == null) data.ptr else @ptrCast(result_data),
             .len = data.len,
         };
     }
@@ -145,25 +179,20 @@ pub const Buffer = struct {
     /// const buf = try Buffer.copy(env, &stack_data);
     /// ```
     pub fn copy(env: Env, data: []const u8) !Buffer {
-        var result: napi.napi_value = undefined;
-        var result_data: ?*anyopaque = null;
-
-        const status = napi.napi_create_buffer_copy(
-            env.raw,
-            data.len,
-            @ptrCast(data.ptr),
-            &result_data,
-            &result,
-        );
+        const copy_status = if (data.len == 0) createEmptyBuffer(env.raw) else createBufferCopy(env.raw, data);
+        const status = copy_status.raw;
 
         if (status != napi.napi_ok) {
             return NapiError.Error.fromStatus(NapiError.Status.New(status));
         }
+        if (data.len > 0 and copy_status.data == null) {
+            return NapiError.Error.fromStatus(NapiError.Status.GenericFailure);
+        }
 
         return Buffer{
             .env = env.raw,
-            .raw = result,
-            .data = @ptrCast(result_data),
+            .raw = copy_status.result,
+            .data = if (data.len == 0 or copy_status.data == null) &[_]u8{} else @ptrCast(copy_status.data),
             .len = data.len,
         };
     }
@@ -180,7 +209,15 @@ pub const Buffer = struct {
         var result: napi.napi_value = undefined;
         var data: ?*anyopaque = null;
 
-        const status = napi.napi_create_buffer(env.raw, len, &data, &result);
+        const status = if (comptime options.isOhosAddon()) status: {
+            if (len == 0) {
+                const empty_status = createEmptyBuffer(env.raw);
+                result = empty_status.result;
+                data = empty_status.data;
+                break :status empty_status.raw;
+            }
+            break :status napi.napi_create_buffer(env.raw, len, &data, &result);
+        } else napi.napi_create_buffer(env.raw, len, &data, &result);
 
         if (status != napi.napi_ok) {
             return NapiError.Error.fromStatus(NapiError.Status.New(status));
@@ -189,7 +226,7 @@ pub const Buffer = struct {
         return Buffer{
             .env = env.raw,
             .raw = result,
-            .data = @ptrCast(data),
+            .data = if (len == 0 or data == null) &[_]u8{} else @ptrCast(data),
             .len = len,
         };
     }
@@ -209,6 +246,52 @@ pub const Buffer = struct {
         return self.len;
     }
 };
+
+const BufferCopyStatus = struct {
+    raw: napi.napi_status,
+    result: napi.napi_value,
+    data: ?*anyopaque,
+};
+
+fn createEmptyBuffer(env: napi.napi_env) BufferCopyStatus {
+    if (comptime options.isOhosAddon()) {
+        var result: napi.napi_value = undefined;
+        var data: ?*anyopaque = null;
+        const status = napi.napi_create_arraybuffer(env, 0, &data, &result);
+        return .{
+            .raw = status,
+            .result = result,
+            .data = data,
+        };
+    }
+
+    return createBufferCopy(env, &[_]u8{});
+}
+
+fn createBufferCopy(env: napi.napi_env, data: []const u8) BufferCopyStatus {
+    var result: napi.napi_value = undefined;
+    var result_data: ?*anyopaque = null;
+    var empty: u8 = 0;
+    const source: ?*const anyopaque = if (data.len == 0) @ptrCast(&empty) else @ptrCast(data.ptr);
+
+    const status = napi.napi_create_buffer_copy(
+        env,
+        data.len,
+        source,
+        &result_data,
+        &result,
+    );
+
+    return .{
+        .raw = status,
+        .result = result,
+        .data = result_data,
+    };
+}
+
+fn isNoExternalBuffersAllowed(status: napi.napi_status) bool {
+    return NapiError.Status.New(status) == .NoExternalBuffersAllowed;
+}
 
 /// Helper struct to store buffer info for the finalizer
 const BufferHint = struct {

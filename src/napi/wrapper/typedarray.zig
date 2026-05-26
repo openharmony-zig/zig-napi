@@ -3,10 +3,12 @@ const napi = @import("napi-sys").napi_sys;
 const Env = @import("../env.zig").Env;
 const ArrayBuffer = @import("./arraybuffer.zig").ArrayBuffer;
 const NapiError = @import("./error.zig");
+const options = @import("../options.zig");
 
 pub fn isSupportedElementType(comptime T: type) bool {
     return switch (T) {
-        i8, u8, i16, u16, i32, u32, f32, f64, i64, u64 => true,
+        i8, u8, i16, u16, i32, u32, f32, f64 => true,
+        i64, u64 => options.selectedNapiVersion().isAtLeast(.v6),
         else => false,
     };
 }
@@ -21,10 +23,42 @@ pub fn defaultTypeFor(comptime T: type) napi.napi_typedarray_type {
         u32 => napi.napi_uint32_array,
         f32 => napi.napi_float32_array,
         f64 => napi.napi_float64_array,
-        i64 => napi.napi_bigint64_array,
-        u64 => napi.napi_biguint64_array,
+        i64 => blk: {
+            comptime options.requireNapiVersion(.v6);
+            break :blk napi.napi_bigint64_array;
+        },
+        u64 => blk: {
+            comptime options.requireNapiVersion(.v6);
+            break :blk napi.napi_biguint64_array;
+        },
         else => @compileError("Unsupported TypedArray element type: " ++ @typeName(T)),
     };
+}
+
+pub fn elementByteSize(raw_type: napi.napi_typedarray_type) usize {
+    return switch (raw_type) {
+        napi.napi_int8_array, napi.napi_uint8_array, napi.napi_uint8_clamped_array => 1,
+        napi.napi_int16_array, napi.napi_uint16_array => 2,
+        napi.napi_int32_array, napi.napi_uint32_array, napi.napi_float32_array => 4,
+        napi.napi_float64_array => 8,
+        else => if (options.selectedNapiVersion().isAtLeast(.v6) and (raw_type == napi.napi_bigint64_array or raw_type == napi.napi_biguint64_array)) 8 else 0,
+    };
+}
+
+pub fn normalizeElementLength(raw_len: usize, raw_type: napi.napi_typedarray_type, arraybuffer_byte_length: usize, byte_offset: usize) usize {
+    const remaining_byte_len = arraybuffer_byte_length -| byte_offset;
+    const element_size = elementByteSize(raw_type);
+    if (element_size == 0) return 0;
+
+    if (raw_len * element_size <= remaining_byte_len) {
+        return raw_len;
+    }
+
+    if (raw_len <= remaining_byte_len and raw_len % element_size == 0) {
+        return raw_len / element_size;
+    }
+
+    return 0;
 }
 
 fn validateElementType(comptime T: type) void {
@@ -68,13 +102,7 @@ pub fn TypedArray(comptime T: type) type {
             );
 
             const arraybuffer = ArrayBuffer.from_raw(env, arraybuffer_raw);
-            const remaining_byte_len = arraybuffer.length() -| byte_offset;
-            const element_len = if (len * @sizeOf(T) <= remaining_byte_len)
-                len
-            else if (len <= remaining_byte_len and len % @sizeOf(T) == 0)
-                len / @sizeOf(T)
-            else
-                0;
+            const element_len = normalizeElementLength(len, typedarray_type, arraybuffer.length(), byte_offset);
 
             return Self{
                 .env = env,
@@ -164,5 +192,20 @@ pub const Int32Array = TypedArray(i32);
 pub const Uint32Array = TypedArray(u32);
 pub const Float32Array = TypedArray(f32);
 pub const Float64Array = TypedArray(f64);
-pub const BigInt64Array = TypedArray(i64);
-pub const BigUint64Array = TypedArray(u64);
+pub const BigInt64Array = if (options.selectedNapiVersion().isAtLeast(.v6)) TypedArray(i64) else UnavailableTypedArray(i64, .v6);
+pub const BigUint64Array = if (options.selectedNapiVersion().isAtLeast(.v6)) TypedArray(u64) else UnavailableTypedArray(u64, .v6);
+
+fn UnavailableTypedArray(comptime T: type, comptime required: options.NapiVersion) type {
+    return struct {
+        pub const is_napi_typedarray = true;
+        pub const element_type = T;
+
+        fn unavailable() void {
+            options.requireNapiVersion(required);
+        }
+
+        pub fn from_raw(_: napi.napi_env, _: napi.napi_value) @This() {
+            comptime unavailable();
+        }
+    };
+}

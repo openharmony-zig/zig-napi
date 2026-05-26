@@ -1,4 +1,5 @@
 const napi = @import("napi-sys").napi_sys;
+const build_options = @import("build_options");
 
 // Copy from napi-rs
 pub const Status = enum(u32) {
@@ -27,14 +28,16 @@ pub const Status = enum(u32) {
     DetachableArraybufferExpected,
     WouldDeadlock,
     NoExternalBuffersAllowed,
+    CannotRunJs,
+    RuntimeSpecific24,
     Unknown = 1024, // unknown status. for example, using napi3 module in napi7 Node.js, and generate an invalid napi3 status
 
     pub fn from_raw(raw: napi.napi_status) Status {
-        return @as(Status, @enumFromInt(@as(u32, raw)));
+        return @as(Status, @enumFromInt(@as(u32, @intCast(raw))));
     }
 
     pub fn New(status: anytype) Status {
-        return @as(Status, @enumFromInt(@as(u32, status)));
+        return @as(Status, @enumFromInt(@as(u32, @intCast(status))));
     }
 
     pub fn ToString(self: Status) []const u8 {
@@ -61,7 +64,9 @@ pub const Status = enum(u32) {
             .ArrayBufferExpected => "ArrayBufferExpected",
             .DetachableArraybufferExpected => "DetachableArraybufferExpected",
             .WouldDeadlock => "WouldDeadlock",
-            .NoExternalBuffersAllowed => "NoExternalBuffersAllowed",
+            .NoExternalBuffersAllowed => if (build_options.node_addon) "NoExternalBuffersAllowed" else "CreateArkRuntimeTooManyEnvs",
+            .CannotRunJs => if (build_options.node_addon) "CannotRunJs" else "CreateArkRuntimeOnlyOneEnvPerThread",
+            .RuntimeSpecific24 => if (build_options.node_addon) "RuntimeSpecific24" else "DestroyArkRuntimeEnvNotExist",
             else => "Unknown",
         };
     }

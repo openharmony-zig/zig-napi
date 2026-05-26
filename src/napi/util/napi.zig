@@ -12,6 +12,7 @@ const ArrayBuffer = @import("../wrapper/arraybuffer.zig").ArrayBuffer;
 const DataView = @import("../wrapper/dataview.zig").DataView;
 const AbortSignal = @import("../abort_signal.zig").AbortSignal;
 const GlobalAllocator = @import("./allocator.zig");
+const options = @import("../options.zig");
 
 fn napiTypeOf(env: napi.napi_env, raw: napi.napi_value) napi.napi_valuetype {
     var value_type: napi.napi_valuetype = undefined;
@@ -132,6 +133,10 @@ fn valueMatchesType(env: napi.napi_env, raw: napi.napi_value, comptime T: type) 
     switch (T) {
         NapiValue.Number => return napiTypeOf(env, raw) == napi.napi_number,
         NapiValue.String => return napiTypeOf(env, raw) == napi.napi_string,
+        NapiValue.BigInt => {
+            comptime options.requireNapiVersion(.v6);
+            return napiTypeOf(env, raw) == napi.napi_bigint;
+        },
         NapiValue.Bool => return napiTypeOf(env, raw) == napi.napi_boolean,
         NapiValue.Object => return isPlainObjectValue(env, raw),
         NapiValue.Promise => return isPromiseValue(env, raw),
@@ -224,35 +229,53 @@ pub const Napi = struct {
         switch (@typeInfo(T)) {
             .bool => {
                 var result: bool = false;
-                _ = napi.napi_get_value_bool(env, raw, &result);
+                const status = napi.napi_get_value_bool(env, raw, &result);
+                if (status != napi.napi_ok) {
+                    NapiError.last_error = NapiError.Error.withStatus(NapiError.Status.New(status));
+                }
                 return result;
             },
             .float => {
                 var result: f64 = 0;
-                _ = napi.napi_get_value_double(env, raw, &result);
+                const status = napi.napi_get_value_double(env, raw, &result);
+                if (status != napi.napi_ok) {
+                    NapiError.last_error = NapiError.Error.withStatus(NapiError.Status.New(status));
+                }
                 return @floatCast(result);
             },
             .int => |int| {
                 if (int.signedness == .signed) {
                     if (int.bits <= 32) {
                         var result: i32 = 0;
-                        _ = napi.napi_get_value_int32(env, raw, &result);
+                        const status = napi.napi_get_value_int32(env, raw, &result);
+                        if (status != napi.napi_ok) {
+                            NapiError.last_error = NapiError.Error.withStatus(NapiError.Status.New(status));
+                        }
                         return @intCast(result);
                     }
 
                     var result: i64 = 0;
-                    _ = napi.napi_get_value_int64(env, raw, &result);
+                    const status = napi.napi_get_value_int64(env, raw, &result);
+                    if (status != napi.napi_ok) {
+                        NapiError.last_error = NapiError.Error.withStatus(NapiError.Status.New(status));
+                    }
                     return @intCast(result);
                 }
 
                 if (int.bits <= 32) {
                     var result: u32 = 0;
-                    _ = napi.napi_get_value_uint32(env, raw, &result);
+                    const status = napi.napi_get_value_uint32(env, raw, &result);
+                    if (status != napi.napi_ok) {
+                        NapiError.last_error = NapiError.Error.withStatus(NapiError.Status.New(status));
+                    }
                     return @intCast(result);
                 }
 
                 var result: i64 = 0;
-                _ = napi.napi_get_value_int64(env, raw, &result);
+                const status = napi.napi_get_value_int64(env, raw, &result);
+                if (status != napi.napi_ok) {
+                    NapiError.last_error = NapiError.Error.withStatus(NapiError.Status.New(status));
+                }
                 return @intCast(result);
             },
             else => @compileError("Unsupported fast from_napi_value type: " ++ @typeName(T)),

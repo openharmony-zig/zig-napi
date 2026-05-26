@@ -10,20 +10,12 @@ pub fn build(b: *std.Build) !void {
 
     const result = try napi_build.nativeAddonBuild(b, .{
         .name = "zig_benchmark",
+        .napi_module = napi,
         .root_module_options = .{
             .root_source_file = b.path("./src/hello.zig"),
             .target = target,
             .optimize = optimize,
         },
     });
-
-    if (result.arm64) |arm64| {
-        arm64.root_module.addImport("napi", napi);
-    }
-    if (result.arm) |arm| {
-        arm.root_module.addImport("napi", napi);
-    }
-    if (result.x64) |x64| {
-        x64.root_module.addImport("napi", napi);
-    }
+    _ = result;
 }

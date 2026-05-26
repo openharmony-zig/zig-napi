@@ -68,6 +68,13 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                     if (cb_status != napi.napi_ok) {
                         return NapiError.checkNapiStatus(inner_env, NapiError.Status.New(cb_status));
                     }
+                    const copied_argc = @min(init_argc, expected_argc);
+                    if (expected_argc > copied_argc) {
+                        const undefined_value = Undefined.New(Env.from_raw(inner_env));
+                        for (copied_argc..expected_argc) |i| {
+                            args_raw[i] = undefined_value.raw;
+                        }
+                    }
 
                     var napi_params: std.meta.ArgsTuple(value_type) = undefined;
                     var initialized_params: usize = 0;
@@ -81,24 +88,20 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
 
                     var abort_signal: ?AbortSignal = null;
                     inline for (params[env_index..], env_index..) |param_index, i| {
-                        if (comptime @typeInfo(param_index.type.?) == .@"union") {
-                            NapiError.clearLastError();
+                        NapiError.clearLastError();
+                        const converted = Napi.from_napi_value_auto(inner_env, args_raw[i - env_index], param_index.type.?);
+                        if (NapiError.last_error) |last_err| {
+                            last_err.throwInto(Env.from_raw(inner_env));
+                            const undefined_value = Undefined.New(Env.from_raw(inner_env));
+                            return undefined_value.raw;
                         }
-                        napi_params[i] = Napi.from_napi_value_auto(inner_env, args_raw[i - env_index], param_index.type.?);
+                        napi_params[i] = converted;
                         initialized_params = i + 1;
                         if (comptime helper.isAbortSignal(param_index.type.?)) {
                             abort_signal = napi_params[i];
                         }
-                        if (comptime @typeInfo(param_index.type.?) == .@"union") {
-                            if (NapiError.last_error) |last_err| {
-                                last_err.throwInto(Env.from_raw(inner_env));
-                                const undefined_value = Undefined.New(Env.from_raw(inner_env));
-                                return undefined_value.raw;
-                            }
-                        }
                     }
 
-                    const copied_argc = @min(init_argc, expected_argc);
                     const event_listener = if (has_async_events and copied_argc > params.len - env_index)
                         args_raw[copied_argc - 1]
                     else
@@ -179,12 +182,15 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
         /// Args should be a tuple.
         pub fn Call(self: Self, args: Args) !Return {
             const isTuple = ArgsInfos == .@"struct" and ArgsInfos.@"struct".is_tuple;
+            const isEmptyStruct = ArgsInfos == .@"struct" and ArgsInfos.@"struct".fields.len == 0;
 
-            const args_len = if (isTuple) ArgsInfos.@"struct".fields.len else 1;
+            const args_len = if (isEmptyStruct) 0 else if (isTuple) ArgsInfos.@"struct".fields.len else 1;
 
             var args_raw: [args_len]napi.napi_value = undefined;
 
-            if (isTuple) {
+            if (isEmptyStruct) {
+                // No arguments.
+            } else if (isTuple) {
                 inline for (ArgsInfos.@"struct".fields, 0..) |arg, i| {
                     args_raw[i] = try Napi.to_napi_value_auto(self.env, @field(args, arg.name), null);
                 }
@@ -196,7 +202,8 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
 
             var result: napi.napi_value = undefined;
 
-            const status = napi.napi_call_function(self.env, this.raw, self.raw, args_len, args_raw[0..].ptr, &result);
+            const args_ptr = if (args_len == 0) null else args_raw[0..].ptr;
+            const status = napi.napi_call_function(self.env, this.raw, self.raw, args_len, args_ptr, &result);
             if (status != napi.napi_ok) {
                 return NapiError.Error.fromStatus(NapiError.Status.New(status));
             }

@@ -68,6 +68,14 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
             const argv = if (Argc == 0) null else args_raw[0..].ptr;
             const status = napi.napi_get_cb_info(env, callback_info, &argc, argv, this_obj, null);
             if (status != napi.napi_ok) return null;
+            if (Argc > argc) {
+                var undefined_raw: napi.napi_value = undefined;
+                const undefined_status = napi.napi_get_undefined(env, &undefined_raw);
+                if (undefined_status != napi.napi_ok) return null;
+                for (argc..Argc) |i| {
+                    args_raw[i] = undefined_raw;
+                }
+            }
             return argc;
         }
 
@@ -92,17 +100,14 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
 
                 var tuple_args: std.meta.ArgsTuple(init_fn_type) = undefined;
                 inline for (init_fn_info.@"fn".params, 0..) |arg, i| {
-                    if (comptime @typeInfo(arg.type.?) == .@"union") {
-                        NapiError.clearLastError();
+                    NapiError.clearLastError();
+                    const converted = Napi.from_napi_value_auto(env, args_raw[i], arg.type.?);
+                    if (NapiError.last_error) |last_err| {
+                        last_err.throwInto(napi_env.Env.from_raw(env));
+                        instance.destroyUninitialized();
+                        return null;
                     }
-                    tuple_args[i] = Napi.from_napi_value_auto(env, args_raw[i], arg.type.?);
-                    if (comptime @typeInfo(arg.type.?) == .@"union") {
-                        if (NapiError.last_error) |last_err| {
-                            last_err.throwInto(napi_env.Env.from_raw(env));
-                            instance.destroyUninitialized();
-                            return null;
-                        }
-                    }
+                    tuple_args[i] = converted;
                 }
 
                 if (@typeInfo(init_fn_info.@"fn".return_type.?) == .error_union) {
@@ -120,17 +125,14 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                 data.* = std.mem.zeroes(T);
                 if (comptime HasInit) {
                     inline for (fields, 0..) |field, i| {
-                        if (comptime @typeInfo(field.type) == .@"union") {
-                            NapiError.clearLastError();
+                        NapiError.clearLastError();
+                        const converted = Napi.from_napi_value_auto(env, args_raw[i], field.type);
+                        if (NapiError.last_error) |last_err| {
+                            last_err.throwInto(napi_env.Env.from_raw(env));
+                            instance.destroyUninitialized();
+                            return null;
                         }
-                        @field(data.*, field.name) = Napi.from_napi_value_auto(env, args_raw[i], field.type);
-                        if (comptime @typeInfo(field.type) == .@"union") {
-                            if (NapiError.last_error) |last_err| {
-                                last_err.throwInto(napi_env.Env.from_raw(env));
-                                instance.destroyUninitialized();
-                                return null;
-                            }
-                        }
+                        @field(data.*, field.name) = converted;
                     }
                 }
             }
@@ -163,16 +165,13 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                     } else {
                         var tuple_args: std.meta.ArgsTuple(factory_fn_type) = undefined;
                         inline for (params, 0..) |param, i| {
-                            if (comptime @typeInfo(param.type.?) == .@"union") {
-                                NapiError.clearLastError();
+                            NapiError.clearLastError();
+                            const converted = Napi.from_napi_value_auto(env, args_raw[i], param.type.?);
+                            if (NapiError.last_error) |last_err| {
+                                last_err.throwInto(napi_env.Env.from_raw(env));
+                                return null;
                             }
-                            tuple_args[i] = Napi.from_napi_value_auto(env, args_raw[i], param.type.?);
-                            if (comptime @typeInfo(param.type.?) == .@"union") {
-                                if (NapiError.last_error) |last_err| {
-                                    last_err.throwInto(napi_env.Env.from_raw(env));
-                                    return null;
-                                }
-                            }
+                            tuple_args[i] = converted;
                         }
                         if (@typeInfo(factory_fn_info.@"fn".return_type.?) == .error_union) {
                             instance_data = @call(.auto, factory_fn, tuple_args) catch return null;
@@ -290,15 +289,11 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
 
                         const instance: *InstanceData = @ptrCast(@alignCast(data.?));
                         if (actual_argc > 0) {
-                            if (comptime @typeInfo(field.type) == .@"union") {
-                                NapiError.clearLastError();
-                            }
+                            NapiError.clearLastError();
                             const new_value = Napi.from_napi_value_auto(setter_env, args_raw[0], field.type);
-                            if (comptime @typeInfo(field.type) == .@"union") {
-                                if (NapiError.last_error) |last_err| {
-                                    last_err.throwInto(napi_env.Env.from_raw(setter_env));
-                                    return null;
-                                }
+                            if (NapiError.last_error) |last_err| {
+                                last_err.throwInto(napi_env.Env.from_raw(setter_env));
+                                return null;
                             }
                             @field(instance.value, field.name) = new_value;
                         }
@@ -429,17 +424,14 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
 
                                     // inject args
                                     inline for (method_info.@"fn".params[method_args_offset..], method_args_offset..) |param, i| {
-                                        if (comptime @typeInfo(param.type.?) == .@"union") {
-                                            NapiError.clearLastError();
+                                        NapiError.clearLastError();
+                                        const converted = Napi.from_napi_value_auto(method_env, args_raw[i - method_args_offset], param.type.?);
+                                        if (NapiError.last_error) |last_err| {
+                                            last_err.throwInto(napi_env.Env.from_raw(method_env));
+                                            return null;
                                         }
-                                        tuple_args[i] = Napi.from_napi_value_auto(method_env, args_raw[i - method_args_offset], param.type.?);
+                                        tuple_args[i] = converted;
                                         initialized_args = i + 1;
-                                        if (comptime @typeInfo(param.type.?) == .@"union") {
-                                            if (NapiError.last_error) |last_err| {
-                                                last_err.throwInto(napi_env.Env.from_raw(method_env));
-                                                return null;
-                                            }
-                                        }
                                     }
                                     const result = @call(.auto, method, tuple_args);
                                     return Napi.to_napi_value_auto(method_env, result, fn_name) catch null;

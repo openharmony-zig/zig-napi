@@ -1,0 +1,64 @@
+name: Node Addon Matrix
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  node-addon-tests:
+    runs-on: ${{ matrix.os }}
+    name: Node.js addon tests ${{ matrix.os }} node@${{ matrix.node }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, windows-latest ]
+        node: [ '12', '14', '16', '18', '20', '22', '24' ]
+        include:
+          - os: macos-latest
+            node: '20'
+          - os: macos-latest
+            node: '22'
+          - os: macos-latest
+            node: '24'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+          cache-key: node-${{ matrix.node }}
+
+      - name: Verify Zig
+        run: zig version
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Build and test Node addon matrix
+        if: runner.os != 'Windows'
+        run: |
+          cd node-test
+          npm install --no-package-lock
+          zig build --summary all
+          find . -maxdepth 2 -name '*.node' -print
+          npm test
+
+      - name: Build and test Node addon matrix
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cd node-test
+          npm install --no-package-lock
+          zig build -Dtarget=x86_64-windows-msvc --summary all
+          Get-ChildItem -Recurse -Filter *.node | ForEach-Object { $_.FullName }
+          npm test

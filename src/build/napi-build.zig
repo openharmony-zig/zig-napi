@@ -4,7 +4,48 @@ fn getEnvVarOptional(build: *std.Build, name: []const u8) ?[]const u8 {
     return build.graph.environ_map.get(name);
 }
 
-pub fn cloneLibraryOptions(build: *std.Build, option: NativeAddonBuildOptionsWithModule, target: std.Build.ResolvedTarget) std.Build.LibraryOptions {
+fn pathExists(build: *std.Build, path: []const u8) bool {
+    std.Io.Dir.cwd().access(build.graph.io, path, .{}) catch return false;
+    return true;
+}
+
+fn findLibnodeDllInPathList(build: *std.Build, paths: []const u8) ?[]const u8 {
+    var iter = std.mem.splitScalar(u8, paths, std.fs.path.delimiter);
+    while (iter.next()) |dir| {
+        if (dir.len == 0) continue;
+        if (pathExists(build, build.pathJoin(&.{ dir, "libnode.dll" }))) {
+            return dir;
+        }
+    }
+    return null;
+}
+
+fn requireWindowsGnuLibnodePath(build: *std.Build) []const u8 {
+    if (getEnvVarOptional(build, "LIBNODE_PATH")) |libnode_path| {
+        if (pathExists(build, libnode_path)) {
+            if (pathExists(build, build.pathJoin(&.{ libnode_path, "libnode.dll" }))) {
+                return libnode_path;
+            }
+            std.debug.panic("libnode.dll not found in {s}", .{libnode_path});
+        }
+    }
+
+    if (getEnvVarOptional(build, "LIBPATH")) |paths| {
+        if (findLibnodeDllInPathList(build, paths)) |libnode_path| {
+            return libnode_path;
+        }
+    }
+
+    if (getEnvVarOptional(build, "PATH")) |paths| {
+        if (findLibnodeDllInPathList(build, paths)) |libnode_path| {
+            return libnode_path;
+        }
+    }
+
+    @panic("libnode.dll not found in any search path");
+}
+
+fn cloneLibraryOptionsInternal(build: *std.Build, option: anytype, target: std.Build.ResolvedTarget) std.Build.LibraryOptions {
     const root_module = build.createModule(.{
         .root_source_file = option.root_module_options.root_source_file,
         .target = target,
@@ -32,7 +73,7 @@ pub fn cloneLibraryOptions(build: *std.Build, option: NativeAddonBuildOptionsWit
     return std.Build.LibraryOptions{
         .name = option.name,
         .root_module = root_module,
-        // Keep the linkage as dynami
+        // Keep the linkage as dynamic.
         .linkage = .dynamic,
         .version = option.version,
         .max_rss = option.max_rss,
@@ -41,6 +82,10 @@ pub fn cloneLibraryOptions(build: *std.Build, option: NativeAddonBuildOptionsWit
         .zig_lib_dir = option.zig_lib_dir,
         .win32_manifest = option.win32_manifest,
     };
+}
+
+pub fn cloneLibraryOptions(build: *std.Build, option: NativeAddonBuildOptionsWithModule, target: std.Build.ResolvedTarget) std.Build.LibraryOptions {
+    return cloneLibraryOptionsInternal(build, option, target);
 }
 
 pub fn resolveNdkPath(build: *std.Build) ![]const u8 {
@@ -97,9 +142,123 @@ pub const NativeAddonBuildResult = struct {
     x64: ?*std.Build.Step.Compile,
 };
 
+pub const NodeAddonBuildResult = *std.Build.Step.Compile;
+
+pub const NapiVersion = enum(i32) {
+    v1 = 1,
+    v2 = 2,
+    v3 = 3,
+    v4 = 4,
+    v5 = 5,
+    v6 = 6,
+    v7 = 7,
+    v8 = 8,
+    v9 = 9,
+    v10 = 10,
+    experimental = std.math.maxInt(i32),
+};
+
+pub const NodeApiOptions = struct {
+    version: NapiVersion = .v8,
+    experimental: bool = false,
+
+    fn effectiveVersion(self: NodeApiOptions) i32 {
+        return if (self.experimental) @intFromEnum(NapiVersion.experimental) else @intFromEnum(self.version);
+    }
+};
+
+fn nodePlatform(target: std.Target) []const u8 {
+    return switch (target.os.tag) {
+        .macos => "darwin",
+        .windows => "win32",
+        .linux => "linux",
+        .freebsd => "freebsd",
+        .ios => "ios",
+        else => @tagName(target.os.tag),
+    };
+}
+
+fn nodeArch(target: std.Target) []const u8 {
+    return switch (target.cpu.arch) {
+        .aarch64 => "arm64",
+        .x86_64 => "x64",
+        .x86 => "ia32",
+        .arm => "arm",
+        else => @tagName(target.cpu.arch),
+    };
+}
+
+fn nodeAbi(target: std.Target) ?[]const u8 {
+    return switch (target.os.tag) {
+        .windows => switch (target.abi) {
+            .msvc => "msvc",
+            .gnu => "gnu",
+            .none => null,
+            else => @tagName(target.abi),
+        },
+        .linux => switch (target.abi) {
+            .gnu => "gnu",
+            .musl => "musl",
+            .none => null,
+            else => @tagName(target.abi),
+        },
+        else => null,
+    };
+}
+
+pub fn nodePlatformArchAbi(build: *std.Build, target: std.Build.ResolvedTarget) []const u8 {
+    const platform = nodePlatform(target.result);
+    const arch = nodeArch(target.result);
+    if (nodeAbi(target.result)) |abi| {
+        return build.fmt("{s}-{s}-{s}", .{ platform, arch, abi });
+    }
+    return build.fmt("{s}-{s}", .{ platform, arch });
+}
+
+pub fn nodeAddonFilename(build: *std.Build, name: []const u8, target: std.Build.ResolvedTarget) []const u8 {
+    return build.fmt("{s}.{s}.node", .{ name, nodePlatformArchAbi(build, target) });
+}
+
 pub const NativeAddonBuildOptionsWithModule = struct {
     name: []const u8,
+    napi_module: ?*std.Build.Module = null,
+    node_api: NodeApiOptions = .{},
     root_module_options: std.Build.Module.CreateOptions,
+    version: ?std.SemanticVersion = null,
+    max_rss: usize = 0,
+    use_llvm: ?bool = null,
+    use_lld: ?bool = null,
+    zig_lib_dir: ?std.Build.LazyPath = null,
+    win32_manifest: ?std.Build.LazyPath = null,
+};
+
+fn isDefaultNodeApiOptions(options: NodeApiOptions) bool {
+    const default: NodeApiOptions = .{};
+    return options.effectiveVersion() == default.effectiveVersion() and options.experimental == default.experimental;
+}
+
+fn addConfiguredNapiImport(
+    build: *std.Build,
+    root_module: *std.Build.Module,
+    napi_module: ?*std.Build.Module,
+    build_options_module: *std.Build.Module,
+    comptime node_addon: bool,
+) void {
+    root_module.addImport("build_options", build_options_module);
+    if (napi_module) |module| {
+        root_module.addImport("napi", createConfiguredNapiModule(build, module, build_options_module, node_addon));
+    }
+}
+
+pub const NodeAddonBuildOptionsWithModule = struct {
+    name: []const u8,
+    napi_module: *std.Build.Module,
+    root_module_options: std.Build.Module.CreateOptions,
+    node_api: NodeApiOptions = .{},
+    /// Optional Windows import library override.
+    /// MSVC follows napi-rs and does not require this by default. GNU follows
+    /// napi-rs' `LIBNODE_PATH`/`LIBPATH`/`PATH` libnode.dll search.
+    node_import_lib: ?std.Build.LazyPath = null,
     version: ?std.SemanticVersion = null,
     max_rss: usize = 0,
     use_llvm: ?bool = null,
@@ -119,10 +278,46 @@ fn isArkvmTestBuild(build: *std.Build) bool {
     return cached_arkvm_test_value;
 }
 
-fn createAddonBuildOptions(build: *std.Build) *std.Build.Step.Options {
+const AddonBuildOptionsConfig = struct {
+    napi_tsgen: bool = false,
+    node_addon: bool = false,
+    node_api: NodeApiOptions = .{},
+};
+
+fn createAddonBuildOptions(build: *std.Build, config: AddonBuildOptionsConfig) *std.Build.Step.Options {
     const options = build.addOptions();
-    options.addOption(bool, "napi_tsgen", false);
+    options.addOption(bool, "napi_tsgen", config.napi_tsgen);
+    options.addOption(bool, "node_addon", config.node_addon);
+    options.addOption(i32, "napi_version", config.node_api.effectiveVersion());
+    options.addOption(bool, "napi_experimental", config.node_api.experimental);
     return options;
+}
+
+fn createConfiguredNapiModule(
+    build: *std.Build,
+    napi_module: *std.Build.Module,
+    build_options_module: *std.Build.Module,
+    comptime node_addon: bool,
+) *std.Build.Module {
+    const package = napi_module.owner;
+    const header_path = package.path("src/sys/ohos");
+
+    const napi_sys = build.createModule(.{
+        .root_source_file = package.path("src/sys/api.zig"),
+    });
+    const napi = build.createModule(.{
+        .root_source_file = package.path("src/napi.zig"),
+    });
+
+    napi_sys.addImport("build_options", build_options_module);
+    napi.addImport("napi-sys", napi_sys);
+    napi.addImport("build_options", build_options_module);
+    if (!node_addon) {
+        napi.addIncludePath(header_path);
+        napi_sys.addIncludePath(header_path);
+    }
+
+    return napi;
 }
 
 fn arkvmHostAddonBuild(build: *std.Build, option: NativeAddonBuildOptionsWithModule) *std.Build.Step.Compile {
@@ -138,7 +333,11 @@ fn arkvmHostAddonBuild(build: *std.Build, option: NativeAddonBuildOptionsWithMod
     const compile = build.addLibrary(hostOption);
     compile.linker_allow_shlib_undefined = true;
     compile.root_module.link_libc = true;
-    compile.root_module.addOptions("build_options", createAddonBuildOptions(build));
+    const addon_build_options = createAddonBuildOptions(build, .{
+        .node_api = option.node_api,
+    });
+    const build_options_module = addon_build_options.createModule();
+    addConfiguredNapiImport(build, compile.root_module, option.napi_module, build_options_module, false);
 
     const installStep = build.addInstallArtifact(compile, .{
         .dest_dir = .{
@@ -152,10 +351,60 @@ fn arkvmHostAddonBuild(build: *std.Build, option: NativeAddonBuildOptionsWithMod
     return compile;
 }
 
+pub fn nodeAddonBuild(build: *std.Build, option: NodeAddonBuildOptionsWithModule) !NodeAddonBuildResult {
+    const addon_build_options = createAddonBuildOptions(build, .{
+        .node_addon = true,
+        .node_api = option.node_api,
+    });
+    const target = option.root_module_options.target orelse build.graph.host;
+
+    var nodeOption = cloneLibraryOptionsInternal(build, option, target);
+    nodeOption.linkage = .dynamic;
+
+    const compile = build.addLibrary(nodeOption);
+    const build_options_module = addon_build_options.createModule();
+    addConfiguredNapiImport(build, compile.root_module, option.napi_module, build_options_module, true);
+    compile.linker_allow_shlib_undefined = true;
+    if (target.result.os.tag == .windows) {
+        if (option.node_import_lib) |node_import_lib| {
+            compile.root_module.addObjectFile(node_import_lib);
+        } else if (getEnvVarOptional(build, "NODE_LIB_FILE")) |node_lib_file| {
+            compile.root_module.addObjectFile(.{ .cwd_relative = node_lib_file });
+        } else if (getEnvVarOptional(build, "NODE_LIB_DIR")) |node_lib_dir| {
+            compile.root_module.addLibraryPath(.{ .cwd_relative = node_lib_dir });
+            compile.root_module.linkSystemLibrary("node", .{ .use_pkg_config = .no });
+        } else if (target.result.abi == .gnu) {
+            const libnode_path = requireWindowsGnuLibnodePath(build);
+            compile.root_module.addLibraryPath(.{ .cwd_relative = libnode_path });
+            compile.root_module.linkSystemLibrary("node", .{ .use_pkg_config = .no });
+        }
+    }
+
+    const nodeDistDir = "node";
+    const outputFilename = nodeAddonFilename(build, option.name, target);
+    const installStep = build.addInstallArtifact(compile, .{
+        .dest_dir = .{
+            .override = .{
+                .custom = nodeDistDir,
+            },
+        },
+        .implib_dir = if (target.result.os.tag == .windows) .{
+            .override = .{
+                .custom = nodeDistDir,
+            },
+        } else .disabled,
+        .dest_sub_path = outputFilename,
+    });
+    build.getInstallStep().dependOn(&installStep.step);
+
+    return compile;
+}
+
 pub const TypeDefinitionBuildOptions = struct {
     root_source_file: std.Build.LazyPath,
     output: std.Build.LazyPath,
     napi_module: *std.Build.Module,
+    node_api: NodeApiOptions = .{},
     // Optional text injected after the generated banner comments.
     header: ?[]const u8 = null,
     options: ?*std.Build.Step.Options = null,
@@ -164,8 +413,10 @@ pub const TypeDefinitionBuildOptions = struct {
 pub fn generateTypeDefinition(build: *std.Build, option: TypeDefinitionBuildOptions) !*std.Build.Step.Run {
     _ = isArkvmTestBuild(build);
 
-    const tsgen_build_options = build.addOptions();
-    tsgen_build_options.addOption(bool, "napi_tsgen", true);
+    const tsgen_build_options = createAddonBuildOptions(build, .{
+        .napi_tsgen = true,
+        .node_api = option.node_api,
+    });
 
     const tsgen_napi_sys = build.addModule("zig-napi-tsgen-napi-sys", .{
         .root_source_file = option.napi_module.owner.path("src/sys/api.zig"),
@@ -173,10 +424,12 @@ pub fn generateTypeDefinition(build: *std.Build, option: TypeDefinitionBuildOpti
     const tsgen_napi = build.addModule("zig-napi-tsgen-napi", .{
         .root_source_file = option.napi_module.owner.path("src/napi.zig"),
     });
+    const tsgen_build_options_module = tsgen_build_options.createModule();
+    tsgen_napi_sys.addImport("build_options", tsgen_build_options_module);
     tsgen_napi.addImport("napi-sys", tsgen_napi_sys);
-    tsgen_napi.addOptions("build_options", tsgen_build_options);
-    tsgen_napi.addIncludePath(option.napi_module.owner.path("src/sys/header"));
-    tsgen_napi_sys.addIncludePath(option.napi_module.owner.path("src/sys/header"));
+    tsgen_napi.addImport("build_options", tsgen_build_options_module);
+    tsgen_napi.addIncludePath(option.napi_module.owner.path("src/sys/ohos"));
+    tsgen_napi_sys.addIncludePath(option.napi_module.owner.path("src/sys/ohos"));
 
     const generator_root = build.createModule(.{
         .root_source_file = option.napi_module.owner.path("src/build/napi-tsgen.zig"),
@@ -198,7 +451,10 @@ pub fn generateTypeDefinition(build: *std.Build, option: TypeDefinitionBuildOpti
             },
         },
     });
-    addon_root.addOptions("build_options", option.options orelse createAddonBuildOptions(build));
+    const addon_build_options = option.options orelse createAddonBuildOptions(build, .{
+        .node_api = option.node_api,
+    });
+    addon_root.addImport("build_options", addon_build_options.createModule());
 
     const ndk_root = try resolveNdkPath(build);
     if (ndk_root.len > 0) {
@@ -226,13 +482,20 @@ pub fn generateTypeDefinition(build: *std.Build, option: TypeDefinitionBuildOpti
 }
 
 pub fn nativeAddonBuild(build: *std.Build, option: NativeAddonBuildOptionsWithModule) !NativeAddonBuildResult {
+    if (option.napi_module == null and !isDefaultNodeApiOptions(option.node_api)) {
+        std.debug.panic("nativeAddonBuild requires .napi_module when .node_api is configured so the napi wrapper sees the selected N-API version", .{});
+    }
+
     const arkvm_test = isArkvmTestBuild(build);
     if (arkvm_test) {
         const host = arkvmHostAddonBuild(build, option);
         return .{ .arm64 = null, .arm = null, .x64 = host };
     }
 
-    const addon_build_options = createAddonBuildOptions(build);
+    const addon_build_options = createAddonBuildOptions(build, .{
+        .node_api = option.node_api,
+    });
+    const build_options_module = addon_build_options.createModule();
 
     const currentTarget = if (option.root_module_options.target) |target| target.result else build.graph.host.result;
 
@@ -257,7 +520,7 @@ pub fn nativeAddonBuild(build: *std.Build, option: NativeAddonBuildOptionsWithMo
 
             const arm64Option = cloneLibraryOptions(build, option, target);
             arm64 = build.addLibrary(arm64Option);
-            arm64.?.root_module.addOptions("build_options", addon_build_options);
+            addConfiguredNapiImport(build, arm64.?.root_module, option.napi_module, build_options_module, false);
             try linkNapi(build, arm64.?, target.query);
 
             const arm64DistDir: []const u8 = build.dupePath("arm64-v8a");
@@ -274,7 +537,7 @@ pub fn nativeAddonBuild(build: *std.Build, option: NativeAddonBuildOptionsWithMo
             const target = build.resolveTargetQuery(targets[1]);
             const armOption = cloneLibraryOptions(build, option, target);
             arm = build.addLibrary(armOption);
-            arm.?.root_module.addOptions("build_options", addon_build_options);
+            addConfiguredNapiImport(build, arm.?.root_module, option.napi_module, build_options_module, false);
             try linkNapi(build, arm.?, target.query);
 
             const armDistDir: []const u8 = build.dupePath("armeabi-v7a");
@@ -293,7 +556,7 @@ pub fn nativeAddonBuild(build: *std.Build, option: NativeAddonBuildOptionsWithMo
             // TODO: https://github.com/ziglang/zig/issues/25335
             x64Option.use_llvm = true;
             x64 = build.addLibrary(x64Option);
-            x64.?.root_module.addOptions("build_options", addon_build_options);
+            addConfiguredNapiImport(build, x64.?.root_module, option.napi_module, build_options_module, false);
             try linkNapi(build, x64.?, target.query);
 
             const x64DistDir: []const u8 = build.dupePath("x86_64");

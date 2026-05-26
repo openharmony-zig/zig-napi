@@ -21,7 +21,7 @@ mkdir -p "${OUT_DIR}"
   -O3 \
   -fPIC \
   -shared \
-  -I"${REPO_ROOT}/src/sys/header" \
+  -I"${REPO_ROOT}/src/sys/ohos" \
   "${EXTRA_CFLAGS[@]}" \
   "${SCRIPT_DIR}/napi_benchmark.c" \
   -o "${OUT_DIR}/libnapi_benchmark.so" \

@@ -16,8 +16,12 @@ const typedarray = @import("./napi/wrapper/typedarray.zig");
 const dataview = @import("./napi/wrapper/dataview.zig");
 const reference = @import("./napi/wrapper/reference.zig");
 const global_allocator = @import("./napi/util/allocator.zig");
+const options = @import("./napi/options.zig");
 
 pub const napi_sys = @import("napi-sys");
+pub const NapiVersion = options.NapiVersion;
+pub const selectedNapiVersion = options.selectedNapiVersion;
+pub const experimentalEnabled = options.experimentalEnabled;
 pub const Env = env.Env;
 pub const Object = value.Object;
 pub const Number = value.Number;

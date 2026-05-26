@@ -7,14 +7,24 @@ export function exerciseBinaryWrappers(native: NativeAddon) {
     const bufferValue = native.create_buffer_copy(64);
     assertEqual(native.buffer_length(bufferValue), 64, "buffer copy length");
     assertEqual(native.buffer_first_byte(bufferValue), 0, "buffer first byte");
+    assertEqual(native.buffer_length(native.create_buffer_copy(0)), 0, "empty buffer copy length");
 
     const newBufferValue = native.create_buffer_new(32);
     assertEqual(native.buffer_length(newBufferValue), 32, "buffer new length");
     assertEqual(native.buffer_first_byte(newBufferValue), 0x5a, "buffer new first byte");
+    assertEqual(native.buffer_length(native.create_buffer_new(0)), 0, "empty buffer new length");
+
+    const emptyExternalBufferValue = native.create_external_buffer(0);
+    assertEqual(native.buffer_length(emptyExternalBufferValue), 0, "empty external buffer length");
 
     const arrayBufferValue = native.create_arraybuffer_copy(64);
     assertEqual(native.arraybuffer_length(arrayBufferValue), 64, "arraybuffer copy length");
     assertEqual(native.arraybuffer_first_byte(arrayBufferValue), 3, "arraybuffer first byte");
+    assertEqual(
+      native.arraybuffer_length(native.create_arraybuffer_copy(0)),
+      0,
+      "empty arraybuffer copy length",
+    );
 
     const newArrayBufferValue = native.create_arraybuffer_new(32);
     assertEqual(native.arraybuffer_length(newArrayBufferValue), 32, "arraybuffer new length");
@@ -22,6 +32,18 @@ export function exerciseBinaryWrappers(native: NativeAddon) {
       native.arraybuffer_first_byte(newArrayBufferValue),
       0x6b,
       "arraybuffer new first byte",
+    );
+    assertEqual(
+      native.arraybuffer_length(native.create_arraybuffer_new(0)),
+      0,
+      "empty arraybuffer new length",
+    );
+
+    const emptyExternalArrayBufferValue = native.create_external_arraybuffer(0);
+    assertEqual(
+      native.arraybuffer_length(emptyExternalArrayBufferValue),
+      0,
+      "empty external arraybuffer length",
     );
 
     const typedArrayValue = native.create_uint8_typedarray_copy();

@@ -1,0 +1,14 @@
+.{
+    .name = .node_test,
+    .version = "0.0.1",
+    .minimum_zig_version = "0.16.0",
+    .fingerprint = 0x1fdbf39a616e422c,
+    .dependencies = .{ .@"zig-napi" = .{ .path = ".." } },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "package.json",
+        "napi-compat-mode",
+        "napi",
+    },
+}

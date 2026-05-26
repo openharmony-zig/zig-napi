@@ -1,6 +1,7 @@
 const napi = @import("napi-sys").napi_sys;
 const Env = @import("../env.zig").Env;
 const helper = @import("../util/helper.zig");
+const options = @import("../options.zig");
 
 pub const BigInt = struct {
     env: napi.napi_env,
@@ -8,10 +9,12 @@ pub const BigInt = struct {
     type: napi.napi_valuetype,
 
     pub fn from_raw(env: napi.napi_env, raw: napi.napi_value) BigInt {
+        comptime options.requireNapiVersion(.v6);
         return BigInt{ .env = env, .raw = raw, .type = napi.napi_bigint };
     }
 
     pub fn from_napi_value(env: napi.napi_env, raw: napi.napi_value, comptime T: type) T {
+        comptime options.requireNapiVersion(.v6);
         const value_type = T;
         switch (value_type) {
             i64 => {
@@ -33,6 +36,7 @@ pub const BigInt = struct {
     }
 
     pub fn New(env: Env, value: anytype) BigInt {
+        comptime options.requireNapiVersion(.v6);
         const value_type = @TypeOf(value);
         const infos = @typeInfo(value_type);
 
