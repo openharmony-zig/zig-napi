@@ -205,16 +205,7 @@ pub fn AsyncContext(comptime Event: type) type {
 }
 
 pub fn mapAnyError(err: anyerror) NapiError.Error {
-    if (NapiError.last_error) |last_error| return last_error;
-
-    return switch (err) {
-        error.Canceled, error.Cancelled => NapiError.Error.withReason(@as([]const u8, "AbortError")),
-        error.Closing => NapiError.Error.withStatus(@as([]const u8, "Closing")),
-        else => |actual_err| blk: {
-            const name = @errorName(actual_err);
-            break :blk NapiError.Error.withStatus(name[0..name.len]);
-        },
-    };
+    return NapiError.mapAnyError(err);
 }
 
 fn createOptionalCallbackRef(env: napi.napi_env, raw: ?napi.napi_value) !?napi.napi_ref {

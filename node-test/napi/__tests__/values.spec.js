@@ -103,9 +103,19 @@ test("global, undefined, null and symbol", (t) => {
 });
 
 test("Result", (t) => {
-  t.throws(bindings.throwError);
+  t.throws(bindings.throwError, { message: /native error/ });
+  t.throws(bindings.throwZigError, { message: /ZigNativeFailure/ });
   t.throws(bindings.throwTypeError, { instanceOf: TypeError });
   t.throws(bindings.throwRangeError, { instanceOf: RangeError });
+  t.is(bindings.resultOk(), 42);
+  t.throws(bindings.resultErr, { message: /result error/ });
+  t.is(bindings.resultVoidOk(), undefined);
+  t.is(bindings.resultAfterTry(true), 100);
+  t.throws(() => bindings.resultAfterTry(false), {
+    instanceOf: TypeError,
+    message: /result type error/,
+  });
+  t.throws(bindings.throwZigErrorValue, { message: /ZigValueFailure/ });
 });
 
 test("buffer", (t) => {

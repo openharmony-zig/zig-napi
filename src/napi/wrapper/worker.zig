@@ -36,10 +36,14 @@ pub fn WorkerContext(comptime T: type) type {
     }
 
     const ExecuteReturn = ExecuteInfo.@"fn".return_type.?;
-    const ExecutePayload = switch (@typeInfo(ExecuteReturn)) {
+    const ExecuteReturnPayload = switch (@typeInfo(ExecuteReturn)) {
         .error_union => |eu| eu.payload,
         else => ExecuteReturn,
     };
+    const ExecutePayload = if (comptime NapiError.isResult(ExecuteReturnPayload))
+        NapiError.resultPayload(ExecuteReturnPayload)
+    else
+        ExecuteReturnPayload;
 
     comptime validateExecuteSignature(DataType, ExecuteFn);
 
@@ -126,9 +130,9 @@ pub fn WorkerContext(comptime T: type) type {
         fn execute(inner_env: napi.napi_env, data: ?*anyopaque) callconv(.c) void {
             const self: *Self = @ptrCast(@alignCast(data));
             NapiError.clearLastError();
-            self.run(inner_env) catch {
+            self.run(inner_env) catch |err| {
                 self.status = .Rejected;
-                self.err = NapiError.last_error orelse NapiError.Error.withStatus("GenericFailure");
+                self.err = NapiError.mapAnyError(err);
                 return;
             };
             self.status = .Resolved;
@@ -179,32 +183,41 @@ pub fn WorkerContext(comptime T: type) type {
 
         fn run(self: *Self, inner_env: napi.napi_env) !void {
             const execute_fn = self.data.Execute;
+            const Runner = struct {
+                fn storeResult(this: *Self, result: anytype) !void {
+                    if (comptime NapiError.isResult(@TypeOf(result))) {
+                        switch (result) {
+                            .ok => |payload| {
+                                if (ExecutePayload != void) {
+                                    this.result = payload;
+                                }
+                            },
+                            .err => |err| {
+                                NapiError.last_error = err;
+                                return error.GenericFailure;
+                            },
+                        }
+                        return;
+                    }
+
+                    if (ExecutePayload != void) {
+                        this.result = result;
+                    }
+                }
+            };
+
             if (@typeInfo(ExecuteReturn) == .error_union) {
-                if (ExecutePayload == void) {
-                    if (ExecuteInfo.@"fn".params.len == 1) {
-                        try execute_fn(self.data.data);
-                    } else {
-                        try execute_fn(napi_env.Env.from_raw(inner_env), self.data.data);
-                    }
-                } else {
-                    self.result = if (ExecuteInfo.@"fn".params.len == 1)
-                        try execute_fn(self.data.data)
-                    else
-                        try execute_fn(napi_env.Env.from_raw(inner_env), self.data.data);
-                }
+                const result = if (ExecuteInfo.@"fn".params.len == 1)
+                    try execute_fn(self.data.data)
+                else
+                    try execute_fn(napi_env.Env.from_raw(inner_env), self.data.data);
+                try Runner.storeResult(self, result);
             } else {
-                if (ExecutePayload == void) {
-                    if (ExecuteInfo.@"fn".params.len == 1) {
-                        _ = execute_fn(self.data.data);
-                    } else {
-                        _ = execute_fn(napi_env.Env.from_raw(inner_env), self.data.data);
-                    }
-                } else {
-                    self.result = if (ExecuteInfo.@"fn".params.len == 1)
-                        execute_fn(self.data.data)
-                    else
-                        execute_fn(napi_env.Env.from_raw(inner_env), self.data.data);
-                }
+                const result = if (ExecuteInfo.@"fn".params.len == 1)
+                    execute_fn(self.data.data)
+                else
+                    execute_fn(napi_env.Env.from_raw(inner_env), self.data.data);
+                try Runner.storeResult(self, result);
             }
         }
     };

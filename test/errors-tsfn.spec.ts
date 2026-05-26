@@ -42,5 +42,12 @@ async function waitForThreadSafeFunction(native: NativeAddon) {
 
 export async function testErrorsAndThreadSafeFunction(native: NativeAddon) {
   assertThrows(() => native.throw_error(), "test", "throw_error repeat");
+  assertThrows(() => native.throw_zig_error(), "ZigNativeFailure", "throw_zig_error");
+  assertEqual(native.result_ok(), 42, "result_ok");
+  assertThrows(() => native.result_error(), "result error", "result_error");
+  assertEqual(native.result_void_ok(), undefined, "result_void_ok");
+  assertEqual(native.result_after_try(true), 100, "result_after_try ok");
+  assertThrows(() => native.result_after_try(false), "result type error", "result_after_try error");
+  assertThrows(() => native.throw_zig_error_value(), "ZigValueFailure", "throw_zig_error_value");
   await waitForThreadSafeFunction(native);
 }

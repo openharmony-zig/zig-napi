@@ -35,6 +35,7 @@ pub const Array = value.Array;
 
 pub const Error = err.Error;
 pub const Status = err.Status;
+pub const Result = err.Result;
 pub const JsError = err.JsError;
 pub const JsTypeError = err.JsTypeError;
 pub const JsRangeError = err.JsRangeError;
@@ -90,11 +91,11 @@ pub fn resetOperationAllocator() void {
 pub fn AsyncContext(comptime Event: type) type {
     return async.AsyncContext(Event);
 }
-pub fn Async(comptime Result: type, comptime runtime: async.RuntimeModel) type {
-    return async.Async(Result, runtime);
+pub fn Async(comptime AsyncResult: type, comptime runtime: async.RuntimeModel) type {
+    return async.Async(AsyncResult, runtime);
 }
-pub fn AsyncWithEvents(comptime Result: type, comptime Event: type, comptime runtime: async.RuntimeModel) type {
-    return async.AsyncWithEvents(Result, Event, runtime);
+pub fn AsyncWithEvents(comptime AsyncResult: type, comptime Event: type, comptime runtime: async.RuntimeModel) type {
+    return async.AsyncWithEvents(AsyncResult, Event, runtime);
 }
 
 pub const NODE_API_MODULE = module.NODE_API_MODULE;

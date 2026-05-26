@@ -628,6 +628,16 @@ pub const Napi = struct {
         const value_type = @TypeOf(value);
         const infos = @typeInfo(value_type);
 
+        if (comptime NapiError.isResult(value_type)) {
+            return switch (value) {
+                .ok => |payload| try Napi.to_napi_value_auto(env, payload, name),
+                .err => |err| {
+                    NapiError.last_error = err;
+                    return error.GenericFailure;
+                },
+            };
+        }
+
         switch (value_type) {
             NapiValue.BigInt, NapiValue.Bool, NapiValue.Number, NapiValue.String, NapiValue.Object, NapiValue.Promise, NapiValue.Array, NapiValue.Undefined, NapiValue.Null, Buffer, ArrayBuffer, DataView => {
                 return value.raw;

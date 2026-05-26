@@ -251,6 +251,31 @@ pub fn throwRangeError() !void {
     return napi.Error.rangeError("range error from native");
 }
 
+pub fn resultOk() napi.Result(i32) {
+    return napi.Result(i32).Ok(42);
+}
+
+pub fn resultErr() napi.Result(i32) {
+    return napi.Result(i32).Err(napi.Error.withReason("result error"));
+}
+
+pub fn resultVoidOk() napi.Result(void) {
+    return napi.Result(void).Ok({});
+}
+
+pub fn resultAfterTry(input: bool) !napi.Result(i32) {
+    if (input) return napi.Result(i32).Ok(100);
+    return napi.Result(i32).Err(napi.Error.withTypeError("result type error"));
+}
+
+pub fn throwZigError() !void {
+    return error.ZigNativeFailure;
+}
+
+pub fn throwZigErrorValue() !i32 {
+    return error.ZigValueFailure;
+}
+
 pub fn getBuffer(env: napi.Env) !napi.Buffer {
     return try napi.Buffer.copy(env, "hello world"[0..]);
 }

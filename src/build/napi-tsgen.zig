@@ -89,6 +89,26 @@ fn isAbortSignalType(comptime T: type) bool {
     return @hasDecl(T, "is_napi_abort_signal");
 }
 
+fn isResultType(comptime T: type) bool {
+    switch (@typeInfo(T)) {
+        .@"union" => {},
+        else => return false,
+    }
+    return @hasDecl(T, "is_napi_result") and T.is_napi_result;
+}
+
+fn resultPayloadType(comptime T: type) type {
+    return T.payload_type;
+}
+
+fn functionReturnPayloadType(comptime T: type) type {
+    const payload = switch (@typeInfo(T)) {
+        .error_union => |eu| eu.payload,
+        else => T,
+    };
+    return if (comptime isResultType(payload)) resultPayloadType(payload) else payload;
+}
+
 fn asyncResultType(comptime T: type) type {
     return T.async_result_type;
 }
@@ -974,6 +994,8 @@ fn isIdentifierChar(ch: u8) bool {
 }
 
 fn emitType(state: *State, comptime T: type) ![]const u8 {
+    if (comptime isResultType(T)) return emitType(state, resultPayloadType(T));
+
     switch (T) {
         void => return "void",
         bool => return "boolean",
@@ -1212,20 +1234,14 @@ fn emitMethodSignature(state: *State, writer: *StringBuilder, comptime fn_type: 
     try emitMethodParams(state, writer, fn_type, skip_first, param_names);
 
     const ret = info.return_type.?;
-    const ret_payload = switch (@typeInfo(ret)) {
-        .error_union => |eu| eu.payload,
-        else => ret,
-    };
+    const ret_payload = functionReturnPayloadType(ret);
     try appendFmt(writer, ": {s}", .{try emitType(state, ret_payload)});
 }
 
 fn emitMethodParams(state: *State, writer: *StringBuilder, comptime fn_type: type, comptime skip_first: bool, param_names: ?[]const []const u8) !void {
     const info = @typeInfo(fn_type).@"fn";
     const ret = info.return_type.?;
-    const ret_payload = switch (@typeInfo(ret)) {
-        .error_union => |eu| eu.payload,
-        else => ret,
-    };
+    const ret_payload = functionReturnPayloadType(ret);
     var first = true;
     const total = if (skip_first) info.params.len - 1 else info.params.len;
     const source_offset: usize = if (param_names) |names|
@@ -1288,10 +1304,7 @@ fn emitClassDecl(state: *State, comptime ExportName: []const u8, comptime T: typ
             const fn_info = @typeInfo(decl_type).@"fn";
             const is_instance = fn_info.params.len > 0 and (fn_info.params[0].type.? == *Wrapped or fn_info.params[0].type.? == Wrapped);
             const ret = fn_info.return_type.?;
-            const ret_payload = switch (@typeInfo(ret)) {
-                .error_union => |eu| eu.payload,
-                else => ret,
-            };
+            const ret_payload = functionReturnPayloadType(ret);
             const is_factory = ret_payload == Wrapped or ret_payload == *Wrapped;
             if (!is_instance and is_factory) {
                 const method_param_names = try state.source.getClassMethodParamNames(ExportName, decl.name);
@@ -1344,10 +1357,7 @@ fn emitExportFunction(state: *State, comptime name: []const u8, comptime fn_valu
     }
 
     const ret = info.return_type.?;
-    const ret_payload = switch (@typeInfo(ret)) {
-        .error_union => |eu| eu.payload,
-        else => ret,
-    };
+    const ret_payload = functionReturnPayloadType(ret);
     if (comptime isAsyncDescriptorType(ret_payload) and asyncHasEvents(ret_payload)) {
         if (!first) try append(&state.exports, ", ");
         try appendFmt(&state.exports, "onEvent?: {s}", .{try emitAsyncEventCallbackType(state, ret_payload)});

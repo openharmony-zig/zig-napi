@@ -39,10 +39,12 @@ pub const ErrorStatus = error{
     DetachableArraybufferExpected,
     WouldDeadlock,
     NoExternalBuffersAllowed,
+    CannotRunJs,
+    RuntimeSpecific24,
     Unknown,
 };
 
-fn toError(status: Status) anyerror {
+pub fn toError(status: Status) anyerror {
     return switch (status) {
         .InvalidArg => error.InvalidArg,
         .ObjectExpected => error.ObjectExpected,
@@ -66,6 +68,8 @@ fn toError(status: Status) anyerror {
         .DetachableArraybufferExpected => error.DetachableArraybufferExpected,
         .WouldDeadlock => error.WouldDeadlock,
         .NoExternalBuffersAllowed => error.NoExternalBuffersAllowed,
+        .CannotRunJs => error.CannotRunJs,
+        .RuntimeSpecific24 => error.RuntimeSpecific24,
         else => error.Unknown,
     };
 }
@@ -199,6 +203,21 @@ pub const Error = union(enum) {
         return Error{ .JsError = JsError.fromStatus(status) };
     }
 
+    pub fn withCodeAndMessage(code: []const u8, message: []const u8) Error {
+        return Error{
+            .JsError = JsError{
+                .status = null,
+                .message = message,
+                .mode = JsErrorType{},
+                .custom_status = code,
+            },
+        };
+    }
+
+    pub fn fromAnyError(err: anyerror) Error {
+        return mapAnyError(err);
+    }
+
     pub fn withTypeError(reason: []const u8) Error {
         return Error{ .JsTypeError = JsTypeError.fromMessage(reason) };
     }
@@ -245,3 +264,58 @@ pub const Error = union(enum) {
         }
     }
 };
+
+pub fn mapAnyError(err: anyerror) Error {
+    if (last_error) |last_err| {
+        clearLastError();
+        return last_err;
+    }
+
+    return switch (err) {
+        error.Canceled, error.Cancelled => Error.withReason("AbortError"),
+        error.Closing => Error.withStatus(@as([]const u8, "Closing")),
+        else => |actual_err| blk: {
+            const name = @errorName(actual_err);
+            break :blk Error.withCodeAndMessage(name[0..name.len], name[0..name.len]);
+        },
+    };
+}
+
+pub fn throwAnyErrorInto(err: anyerror, env: Env) void {
+    mapAnyError(err).throwInto(env);
+}
+
+pub fn Result(comptime T: type) type {
+    return union(enum) {
+        pub const is_napi_result = true;
+        pub const payload_type = T;
+
+        ok: T,
+        err: Error,
+
+        const Self = @This();
+
+        pub fn Ok(value: T) Self {
+            return .{ .ok = value };
+        }
+
+        pub fn Err(err: Error) Self {
+            return .{ .err = err };
+        }
+    };
+}
+
+pub fn isResult(comptime T: type) bool {
+    switch (@typeInfo(T)) {
+        .@"union" => {},
+        else => return false,
+    }
+    return @hasDecl(T, "is_napi_result") and T.is_napi_result;
+}
+
+pub fn resultPayload(comptime T: type) type {
+    if (!isResult(T)) {
+        @compileError("Type is not napi.Result: " ++ @typeName(T));
+    }
+    return T.payload_type;
+}

@@ -79,6 +79,46 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
             return argc;
         }
 
+        fn returnPayloadType(comptime ReturnType: type) type {
+            const payload = switch (@typeInfo(ReturnType)) {
+                .error_union => |eu| eu.payload,
+                else => ReturnType,
+            };
+            return if (comptime NapiError.isResult(payload)) NapiError.resultPayload(payload) else payload;
+        }
+
+        fn throwAnyAndNull(env: napi.napi_env, err: anyerror) napi.napi_value {
+            NapiError.mapAnyError(err).throwInto(napi_env.Env.from_raw(env));
+            return null;
+        }
+
+        fn toNapiReturn(env: napi.napi_env, value: anytype, comptime name: []const u8) napi.napi_value {
+            return Napi.to_napi_value_auto(env, value, name) catch |err| {
+                return throwAnyAndNull(env, err);
+            };
+        }
+
+        fn factoryValueFromPayload(env: napi.napi_env, payload: anytype) ?T {
+            const Payload = @TypeOf(payload);
+            if (Payload == T) return payload;
+            if (Payload == *T) return payload.*;
+            _ = env;
+            @compileError("Factory method must return " ++ @typeName(T) ++ " or *" ++ @typeName(T) ++ ", got: " ++ @typeName(Payload));
+        }
+
+        fn factoryValueFromResult(env: napi.napi_env, result: anytype) ?T {
+            if (comptime NapiError.isResult(@TypeOf(result))) {
+                return switch (result) {
+                    .ok => |payload| factoryValueFromPayload(env, payload),
+                    .err => |err| {
+                        err.throwInto(napi_env.Env.from_raw(env));
+                        return null;
+                    },
+                };
+            }
+            return factoryValueFromPayload(env, result);
+        }
+
         fn constructor_callback(env: napi.napi_env, callback_info: napi.napi_callback_info) callconv(.c) napi.napi_value {
             const constructor_arg_count = comptime blk: {
                 if (HasInit and @hasDecl(T, "init")) {
@@ -110,17 +150,18 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                     tuple_args[i] = converted;
                 }
 
-                if (@typeInfo(init_fn_info.@"fn".return_type.?) == .error_union) {
-                    data.* = @call(.auto, init_fn, tuple_args) catch {
-                        if (NapiError.last_error) |last_err| {
-                            last_err.throwInto(napi_env.Env.from_raw(env));
-                        }
+                const init_result = if (@typeInfo(init_fn_info.@"fn".return_type.?) == .error_union)
+                    @call(.auto, init_fn, tuple_args) catch |err| {
+                        NapiError.mapAnyError(err).throwInto(napi_env.Env.from_raw(env));
                         instance.destroyUninitialized();
                         return null;
-                    };
-                } else {
-                    data.* = @call(.auto, init_fn, tuple_args);
-                }
+                    }
+                else
+                    @call(.auto, init_fn, tuple_args);
+                data.* = factoryValueFromResult(env, init_result) orelse {
+                    instance.destroyUninitialized();
+                    return null;
+                };
             } else {
                 data.* = std.mem.zeroes(T);
                 if (comptime HasInit) {
@@ -161,7 +202,13 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                     var instance_data: T = undefined;
 
                     if (params.len == 0) {
-                        instance_data = factory_fn() catch return null;
+                        const factory_result = if (@typeInfo(factory_fn_info.@"fn".return_type.?) == .error_union)
+                            factory_fn() catch |err| {
+                                return throwAnyAndNull(env, err);
+                            }
+                        else
+                            factory_fn();
+                        instance_data = factoryValueFromResult(env, factory_result) orelse return null;
                     } else {
                         var tuple_args: std.meta.ArgsTuple(factory_fn_type) = undefined;
                         inline for (params, 0..) |param, i| {
@@ -174,9 +221,13 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                             tuple_args[i] = converted;
                         }
                         if (@typeInfo(factory_fn_info.@"fn".return_type.?) == .error_union) {
-                            instance_data = @call(.auto, factory_fn, tuple_args) catch return null;
+                            const factory_result = @call(.auto, factory_fn, tuple_args) catch |err| {
+                                return throwAnyAndNull(env, err);
+                            };
+                            instance_data = factoryValueFromResult(env, factory_result) orelse return null;
                         } else {
-                            instance_data = @call(.auto, factory_fn, tuple_args);
+                            const factory_result = @call(.auto, factory_fn, tuple_args);
+                            instance_data = factoryValueFromResult(env, factory_result) orelse return null;
                         }
                     }
 
@@ -368,11 +419,9 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                         const method_args_offset = if (is_instance_method) 1 else 0;
 
                         const return_type = method_info.@"fn".return_type.?;
+                        const return_payload = returnPayloadType(return_type);
                         const is_factory_method = blk: {
-                            if ((return_type == T or return_type == *T)) break :blk true;
-                            if (@typeInfo(return_type) == .error_union) {
-                                if (@typeInfo(return_type).error_union.payload == T or @typeInfo(return_type).error_union.payload == *T) break :blk true;
-                            }
+                            if (return_payload == T or return_payload == *T) break :blk true;
                             break :blk false;
                         };
 
@@ -433,8 +482,14 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                                         tuple_args[i] = converted;
                                         initialized_args = i + 1;
                                     }
+                                    if (@typeInfo(return_type) == .error_union) {
+                                        const result = @call(.auto, method, tuple_args) catch |err| {
+                                            return throwAnyAndNull(method_env, err);
+                                        };
+                                        return toNapiReturn(method_env, result, fn_name);
+                                    }
                                     const result = @call(.auto, method, tuple_args);
-                                    return Napi.to_napi_value_auto(method_env, result, fn_name) catch null;
+                                    return toNapiReturn(method_env, result, fn_name);
                                 }
                             };
 
