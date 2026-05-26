@@ -112,10 +112,8 @@ pub const Buffer = struct {
         };
 
         if (data.len == 0) {
-            var result_data: ?*anyopaque = null;
-            const status = createBufferCopy(env.raw, data);
+            const status = createEmptyBuffer(env.raw);
             result = status.result;
-            result_data = status.data;
             hint.destroy();
             if (status.raw != napi.napi_ok) {
                 return NapiError.Error.fromStatus(NapiError.Status.New(status.raw));
@@ -123,7 +121,7 @@ pub const Buffer = struct {
             return Buffer{
                 .env = env.raw,
                 .raw = result,
-                .data = if (result_data == null) &[_]u8{} else @ptrCast(result_data),
+                .data = if (status.data == null) &[_]u8{} else @ptrCast(status.data),
                 .len = 0,
             };
         }
@@ -181,7 +179,7 @@ pub const Buffer = struct {
     /// const buf = try Buffer.copy(env, &stack_data);
     /// ```
     pub fn copy(env: Env, data: []const u8) !Buffer {
-        const copy_status = createBufferCopy(env.raw, data);
+        const copy_status = if (data.len == 0) createEmptyBuffer(env.raw) else createBufferCopy(env.raw, data);
         const status = copy_status.raw;
 
         if (status != napi.napi_ok) {
@@ -213,10 +211,10 @@ pub const Buffer = struct {
 
         const status = if (comptime options.isOhosAddon()) status: {
             if (len == 0) {
-                const copy_status = createBufferCopy(env.raw, &[_]u8{});
-                result = copy_status.result;
-                data = copy_status.data;
-                break :status copy_status.raw;
+                const empty_status = createEmptyBuffer(env.raw);
+                result = empty_status.result;
+                data = empty_status.data;
+                break :status empty_status.raw;
             }
             break :status napi.napi_create_buffer(env.raw, len, &data, &result);
         } else napi.napi_create_buffer(env.raw, len, &data, &result);
@@ -254,6 +252,21 @@ const BufferCopyStatus = struct {
     result: napi.napi_value,
     data: ?*anyopaque,
 };
+
+fn createEmptyBuffer(env: napi.napi_env) BufferCopyStatus {
+    if (comptime options.isOhosAddon()) {
+        var result: napi.napi_value = undefined;
+        var data: ?*anyopaque = null;
+        const status = napi.napi_create_arraybuffer(env, 0, &data, &result);
+        return .{
+            .raw = status,
+            .result = result,
+            .data = data,
+        };
+    }
+
+    return createBufferCopy(env, &[_]u8{});
+}
 
 fn createBufferCopy(env: napi.napi_env, data: []const u8) BufferCopyStatus {
     var result: napi.napi_value = undefined;
