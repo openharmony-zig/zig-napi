@@ -16,8 +16,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ ubuntu-latest, macos-13, windows-latest ]
-        node: [ '12', '14', '16', '18', '20', '22' ]
+        os: [ ubuntu-latest, windows-latest ]
+        node: [ '12', '14', '16', '18', '20', '22', '24' ]
+        include:
+          - os: macos-latest
+            node: '20'
+          - os: macos-latest
+            node: '22'
+          - os: macos-latest
+            node: '24'
 
     steps:
       - name: Checkout
