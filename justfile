@@ -42,7 +42,11 @@ test-node-matrix:
 
     cd node-test
     npm install --no-package-lock
-    zig build
+    target_args=""
+    case "$(uname -s)" in
+      MINGW*|MSYS*|CYGWIN*) target_args="-Dtarget=x86_64-windows-msvc" ;;
+    esac
+    zig build $target_args
     npm test
 
 format:

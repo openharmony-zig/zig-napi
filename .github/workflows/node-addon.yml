@@ -24,9 +24,10 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Zig
-        uses: openharmony-zig/setup-zig-ohos@1cb64d0bd4048cf94f4d58b6fe67714bf4c58232
+        uses: mlugg/setup-zig@v2
         with:
-          tag: '0.16.0'
+          version: 0.16.0
+          cache-key: node-${{ matrix.node }}
 
       - name: Verify Zig
         run: zig version
@@ -37,8 +38,20 @@ jobs:
           node-version: ${{ matrix.node }}
 
       - name: Build and test Node addon matrix
+        if: runner.os != 'Windows'
         run: |
           cd node-test
           npm install --no-package-lock
           zig build --summary all
+          find . -maxdepth 2 -name '*.node' -print
+          npm test
+
+      - name: Build and test Node addon matrix
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cd node-test
+          npm install --no-package-lock
+          zig build -Dtarget=x86_64-windows-msvc --summary all
+          Get-ChildItem -Recurse -Filter *.node | ForEach-Object { $_.FullName }
           npm test
