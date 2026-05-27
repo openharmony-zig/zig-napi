@@ -132,6 +132,12 @@ export declare function raw_string_len(value: string): number;
 export declare function copied_string_len(value: string): number;
 export declare const text: string;
 export declare function throw_error(): void;
+export declare function result_ok(): number;
+export declare function result_error(): number;
+export declare function result_void_ok(): void;
+export declare function result_after_try(input: boolean): number;
+export declare function throw_zig_error(): void;
+export declare function throw_zig_error_value(): number;
 export declare function fib(n: number): void;
 export declare function fib_async(n: number): Promise<number>;
 export declare function fib_async_progress(

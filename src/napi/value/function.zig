@@ -50,12 +50,68 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                     }
                 }
 
+                fn returnPayloadType(comptime T: type) type {
+                    const payload = switch (@typeInfo(T)) {
+                        .error_union => |eu| eu.payload,
+                        else => T,
+                    };
+                    return if (comptime NapiError.isResult(payload)) NapiError.resultPayload(payload) else payload;
+                }
+
+                fn undefinedValue(inner_env: napi.napi_env) napi.napi_value {
+                    return Undefined.New(Env.from_raw(inner_env)).raw;
+                }
+
+                fn throwAndUndefined(inner_env: napi.napi_env, err: NapiError.Error) napi.napi_value {
+                    err.throwInto(Env.from_raw(inner_env));
+                    return undefinedValue(inner_env);
+                }
+
+                fn throwAnyAndUndefined(inner_env: napi.napi_env, err: anyerror) napi.napi_value {
+                    return throwAndUndefined(inner_env, NapiError.mapAnyError(err));
+                }
+
+                fn completePayload(
+                    inner_env: napi.napi_env,
+                    payload: anytype,
+                    event_listener: napi.napi_value,
+                    abort_signal: ?AbortSignal,
+                    cleanup_params: *bool,
+                ) napi.napi_value {
+                    if (comptime helper.isAsyncDescriptor(@TypeOf(payload))) {
+                        cleanup_params.* = false;
+                        var task = payload;
+                        const promise = task.scheduleWithListenerAndSignal(Env.from_raw(inner_env), event_listener, abort_signal) catch |err| {
+                            return throwAnyAndUndefined(inner_env, err);
+                        };
+                        return promise.raw;
+                    }
+
+                    return Napi.to_napi_value_auto(inner_env, payload, null) catch |err| {
+                        return throwAnyAndUndefined(inner_env, err);
+                    };
+                }
+
+                fn completeReturn(
+                    inner_env: napi.napi_env,
+                    ret: anytype,
+                    event_listener: napi.napi_value,
+                    abort_signal: ?AbortSignal,
+                    cleanup_params: *bool,
+                ) napi.napi_value {
+                    if (comptime NapiError.isResult(@TypeOf(ret))) {
+                        return switch (ret) {
+                            .ok => |payload| completePayload(inner_env, payload, event_listener, abort_signal, cleanup_params),
+                            .err => |err| throwAndUndefined(inner_env, err),
+                        };
+                    }
+
+                    return completePayload(inner_env, ret, event_listener, abort_signal, cleanup_params);
+                }
+
                 fn inner_fn(inner_env: napi.napi_env, info: napi.napi_callback_info) callconv(.c) napi.napi_value {
                     const return_info = infos.@"fn".return_type.?;
-                    const return_payload = switch (@typeInfo(return_info)) {
-                        .error_union => |eu| eu.payload,
-                        else => return_info,
-                    };
+                    const return_payload = returnPayloadType(return_info);
                     const async_returns_descriptor = comptime helper.isAsyncDescriptor(return_payload);
                     const has_async_events = comptime async_returns_descriptor and return_payload.async_has_events;
                     const expected_argc = params.len - env_index + if (has_async_events) 1 else 0;
@@ -108,55 +164,13 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                         null;
 
                     if (@typeInfo(return_info) == .error_union) {
-                        const ret = @call(.auto, value, napi_params) catch {
-                            if (NapiError.last_error) |last_err| {
-                                last_err.throwInto(Env.from_raw(inner_env));
-                            }
-                            const undefined_value = Undefined.New(Env.from_raw(inner_env));
-                            return undefined_value.raw;
+                        const ret = @call(.auto, value, napi_params) catch |err| {
+                            return throwAnyAndUndefined(inner_env, err);
                         };
-                        if (comptime async_returns_descriptor) {
-                            cleanup_params = false;
-                            var task = ret;
-                            const promise = task.scheduleWithListenerAndSignal(Env.from_raw(inner_env), event_listener, abort_signal) catch {
-                                if (NapiError.last_error) |last_err| {
-                                    last_err.throwInto(Env.from_raw(inner_env));
-                                }
-                                const undefined_value = Undefined.New(Env.from_raw(inner_env));
-                                return undefined_value.raw;
-                            };
-                            return promise.raw;
-                        }
-                        const n_value = Napi.to_napi_value_auto(inner_env, ret, null) catch {
-                            if (NapiError.last_error) |last_err| {
-                                last_err.throwInto(Env.from_raw(inner_env));
-                            }
-                            const undefined_value = Undefined.New(Env.from_raw(inner_env));
-                            return undefined_value.raw;
-                        };
-                        return n_value;
+                        return completeReturn(inner_env, ret, event_listener, abort_signal, &cleanup_params);
                     } else {
                         const ret = @call(.auto, value, napi_params);
-                        if (comptime async_returns_descriptor) {
-                            cleanup_params = false;
-                            var task = ret;
-                            const promise = task.scheduleWithListenerAndSignal(Env.from_raw(inner_env), event_listener, abort_signal) catch {
-                                if (NapiError.last_error) |last_err| {
-                                    last_err.throwInto(Env.from_raw(inner_env));
-                                }
-                                const undefined_value = Undefined.New(Env.from_raw(inner_env));
-                                return undefined_value.raw;
-                            };
-                            return promise.raw;
-                        }
-                        const n_value = Napi.to_napi_value_auto(inner_env, ret, null) catch {
-                            if (NapiError.last_error) |last_err| {
-                                last_err.throwInto(Env.from_raw(inner_env));
-                            }
-                            const undefined_value = Undefined.New(Env.from_raw(inner_env));
-                            return undefined_value.raw;
-                        };
-                        return n_value;
+                        return completeReturn(inner_env, ret, event_listener, abort_signal, &cleanup_params);
                     }
                 }
             };

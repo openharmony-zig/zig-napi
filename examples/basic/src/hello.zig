@@ -32,6 +32,12 @@ pub const copied_string_len = string.copied_string_len;
 pub const text = string.text;
 
 pub const throw_error = err.throw_error;
+pub const result_ok = err.result_ok;
+pub const result_error = err.result_error;
+pub const result_void_ok = err.result_void_ok;
+pub const result_after_try = err.result_after_try;
+pub const throw_zig_error = err.throw_zig_error;
+pub const throw_zig_error_value = err.throw_zig_error_value;
 
 pub const fib = worker.fib;
 pub const fib_async = async_examples.fib_async;
