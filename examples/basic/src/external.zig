@@ -7,6 +7,22 @@ pub const ExternalPoint = struct {
     y: i32,
 };
 
+const ExternalEither = union(enum) {
+    number: napi.External(u32),
+    point: napi.External(ExternalPoint),
+};
+
+var detached_external_deinits = std.atomic.Value(usize).init(0);
+
+const DetachedExternalPayload = struct {
+    value: u32,
+
+    pub fn deinit(self: *DetachedExternalPayload) void {
+        _ = self;
+        _ = detached_external_deinits.fetchAdd(1, .monotonic);
+    }
+};
+
 pub fn create_external(value: u32) !napi.External(u32) {
     return try napi.External(u32).New(value);
 }
@@ -93,4 +109,33 @@ pub fn get_external_point(external: napi.External(ExternalPoint)) ExternalPoint 
 
 pub fn mutate_external_point(external: napi.External(ExternalPoint), x: i32, y: i32) void {
     external.valueMut().* = .{ .x = x, .y = y };
+}
+
+pub fn external_either_kind(value: ExternalEither) u32 {
+    return switch (value) {
+        .number => 1,
+        .point => 2,
+    };
+}
+
+pub fn external_either_value(value: ExternalEither) i32 {
+    return switch (value) {
+        .number => |external| @intCast(external.value().*),
+        .point => |external| external.value().x + external.value().y,
+    };
+}
+
+pub fn reset_detached_external_deinit_count() void {
+    detached_external_deinits.store(0, .monotonic);
+}
+
+pub fn detached_external_deinit_count() usize {
+    return detached_external_deinits.load(.monotonic);
+}
+
+pub fn deinit_detached_external() !usize {
+    reset_detached_external_deinit_count();
+    var external = try napi.External(DetachedExternalPayload).New(.{ .value = 1 });
+    external.deinit();
+    return detached_external_deinit_count();
 }

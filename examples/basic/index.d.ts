@@ -275,3 +275,12 @@ export declare function mutate_external_point(
   x: number,
   y: number,
 ): void;
+export declare function external_either_kind(
+  value: ExternalObject<number> | ExternalObject<ExternalPoint>,
+): number;
+export declare function external_either_value(
+  value: ExternalObject<number> | ExternalObject<ExternalPoint>,
+): number;
+export declare function reset_detached_external_deinit_count(): void;
+export declare function detached_external_deinit_count(): number;
+export declare function deinit_detached_external(): number;

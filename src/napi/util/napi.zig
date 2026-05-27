@@ -173,7 +173,7 @@ fn valueMatchesType(env: napi.napi_env, raw: napi.napi_value, comptime T: type) 
             if (comptime helper.isTypedArray(T)) break :blk isTypedArrayValue(env, raw);
             if (comptime helper.isDataView(T)) break :blk isDataViewValue(env, raw);
             if (comptime helper.isReference(T)) break :blk true;
-            if (comptime helper.isExternal(T)) break :blk napiTypeOf(env, raw) == napi.napi_external;
+            if (comptime helper.isExternal(T)) break :blk T.matches_napi_value(env, raw);
             if (comptime helper.isTuple(T)) break :blk isArrayValue(env, raw);
             if (comptime helper.isArrayList(T)) break :blk isArrayValue(env, raw) or isTypedArrayValue(env, raw);
             break :blk isPlainObjectValue(env, raw);

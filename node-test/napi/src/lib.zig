@@ -115,6 +115,11 @@ pub const mutateExternal = values.mutateExternal;
 pub const createExternalPoint = values.createExternalPoint;
 pub const getExternalPoint = values.getExternalPoint;
 pub const mutateExternalPoint = values.mutateExternalPoint;
+pub const externalEitherKind = values.externalEitherKind;
+pub const externalEitherValue = values.externalEitherValue;
+pub const resetDetachedExternalDeinitCount = values.resetDetachedExternalDeinitCount;
+pub const detachedExternalDeinitCount = values.detachedExternalDeinitCount;
+pub const deinitDetachedExternal = values.deinitDetachedExternal;
 pub const callThreadsafeFunction = threadsafe_function.callThreadsafeFunction;
 
 pub const validateArray = strict.validateArray;

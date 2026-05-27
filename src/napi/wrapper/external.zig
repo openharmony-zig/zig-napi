@@ -30,7 +30,7 @@ pub fn External(comptime T: type) type {
 
         env: napi.napi_env,
         raw: napi.napi_value,
-        header: *TaggedHeader,
+        header: ?*TaggedHeader,
 
         const Self = @This();
 
@@ -60,43 +60,7 @@ pub fn External(comptime T: type) type {
         }
 
         pub fn from_napi_value(env: napi.napi_env, raw: napi.napi_value) Self {
-            var value_type: napi.napi_valuetype = undefined;
-            const type_status = napi.napi_typeof(env, raw, &value_type);
-            if (type_status != napi.napi_ok) {
-                NapiError.last_error = NapiError.Error.withStatus(NapiError.Status.New(type_status));
-                return invalid(env, raw);
-            }
-            if (value_type != napi.napi_external) {
-                NapiError.last_error = NapiError.Error.withCodeAndMessage("InvalidArg", "Expected external value");
-                return invalid(env, raw);
-            }
-
-            var data: ?*anyopaque = null;
-            const status = napi.napi_get_value_external(env, raw, &data);
-            if (status != napi.napi_ok) {
-                NapiError.last_error = NapiError.Error.withStatus(NapiError.Status.New(status));
-                return invalid(env, raw);
-            }
-            if (data == null) {
-                NapiError.last_error = NapiError.Error.withStatus(NapiError.Status.InvalidArg);
-                return invalid(env, raw);
-            }
-
-            const data_ptr = data.?;
-            if (@intFromPtr(data_ptr) % @alignOf(TaggedHeader) != 0) {
-                NapiError.last_error = NapiError.Error.withCodeAndMessage("InvalidArg", "External value was not created by zig-napi");
-                return invalid(env, raw);
-            }
-
-            const header: *TaggedHeader = @ptrCast(@alignCast(data_ptr));
-            if (header.magic != external_magic) {
-                NapiError.last_error = NapiError.Error.withCodeAndMessage("InvalidArg", "External value was not created by zig-napi");
-                return invalid(env, raw);
-            }
-            if (!std.mem.eql(u8, header.typeName(), @typeName(T))) {
-                NapiError.last_error = NapiError.Error.withCodeAndMessage("InvalidArg", "External value type does not match expected type");
-                return invalid(env, raw);
-            }
+            const header = headerFromNapiValue(env, raw, true) orelse return invalid(env, raw);
 
             return Self{
                 .env = env,
@@ -105,25 +69,32 @@ pub fn External(comptime T: type) type {
             };
         }
 
+        pub fn matches_napi_value(env: napi.napi_env, raw: napi.napi_value) bool {
+            return headerFromNapiValue(env, raw, false) != null;
+        }
+
         pub fn to_napi_value(self: Self, env: napi.napi_env) !napi.napi_value {
             if (self.raw != null) {
                 return self.raw;
             }
 
-            const size_hint_i64 = std.math.cast(i64, self.header.size_hint) orelse {
-                self.destroyDetached();
+            const header = self.header orelse {
+                return NapiError.Error.fromStatus(NapiError.Status.InvalidArg);
+            };
+            const size_hint_i64 = std.math.cast(i64, header.size_hint) orelse {
+                _ = destroyDetachedHeader(header);
                 return NapiError.Error.fromStatus(NapiError.Status.InvalidArg);
             };
 
             var result: napi.napi_value = undefined;
-            retainHeader(self.header);
-            const status = napi.napi_create_external(env, self.header, externalFinalizer, null, &result);
+            retainHeader(header);
+            const status = napi.napi_create_external(env, header, externalFinalizer, null, &result);
             if (status != napi.napi_ok) {
-                releaseHeader(null, self.header);
+                releaseHeader(null, header);
                 return NapiError.Error.fromStatus(NapiError.Status.New(status));
             }
 
-            if (self.header.size_hint > 0 and !self.header.memory_adjusted) {
+            if (header.size_hint > 0 and !header.memory_adjusted) {
                 var adjusted_size: i64 = 0;
                 const adjust_status = napi.napi_adjust_external_memory(
                     env,
@@ -131,12 +102,81 @@ pub fn External(comptime T: type) type {
                     &adjusted_size,
                 );
                 if (adjust_status == napi.napi_ok) {
-                    self.header.memory_adjusted = true;
-                    self.header.adjusted_size = adjusted_size;
+                    header.memory_adjusted = true;
+                    header.adjusted_size = adjusted_size;
                 }
             }
 
             return result;
+        }
+
+        pub fn Deinit(self: *Self) void {
+            self.deinit();
+        }
+
+        pub fn deinit(self: *Self) void {
+            const header = self.header orelse return;
+            if (destroyDetachedHeader(header)) {
+                self.header = null;
+                self.raw = null;
+                self.env = null;
+            }
+        }
+
+        fn headerFromNapiValue(env: napi.napi_env, raw: napi.napi_value, comptime report_error: bool) ?*TaggedHeader {
+            var value_type: napi.napi_valuetype = undefined;
+            const type_status = napi.napi_typeof(env, raw, &value_type);
+            if (type_status != napi.napi_ok) {
+                if (report_error) {
+                    NapiError.last_error = NapiError.Error.withStatus(NapiError.Status.New(type_status));
+                }
+                return null;
+            }
+            if (value_type != napi.napi_external) {
+                if (report_error) {
+                    NapiError.last_error = NapiError.Error.withCodeAndMessage("InvalidArg", "Expected external value");
+                }
+                return null;
+            }
+
+            var data: ?*anyopaque = null;
+            const status = napi.napi_get_value_external(env, raw, &data);
+            if (status != napi.napi_ok) {
+                if (report_error) {
+                    NapiError.last_error = NapiError.Error.withStatus(NapiError.Status.New(status));
+                }
+                return null;
+            }
+            if (data == null) {
+                if (report_error) {
+                    NapiError.last_error = NapiError.Error.withStatus(NapiError.Status.InvalidArg);
+                }
+                return null;
+            }
+
+            const data_ptr = data.?;
+            if (@intFromPtr(data_ptr) % @alignOf(TaggedHeader) != 0) {
+                if (report_error) {
+                    NapiError.last_error = NapiError.Error.withCodeAndMessage("InvalidArg", "External value was not created by zig-napi");
+                }
+                return null;
+            }
+
+            const header: *TaggedHeader = @ptrCast(@alignCast(data_ptr));
+            if (header.magic != external_magic) {
+                if (report_error) {
+                    NapiError.last_error = NapiError.Error.withCodeAndMessage("InvalidArg", "External value was not created by zig-napi");
+                }
+                return null;
+            }
+            if (!std.mem.eql(u8, header.typeName(), @typeName(T))) {
+                if (report_error) {
+                    NapiError.last_error = NapiError.Error.withCodeAndMessage("InvalidArg", "External value type does not match expected type");
+                }
+                return null;
+            }
+
+            return header;
         }
 
         pub fn value(self: Self) *const T {
@@ -148,26 +188,26 @@ pub fn External(comptime T: type) type {
         }
 
         pub fn asConstPtr(self: Self) *const T {
-            return @ptrCast(@alignCast(self.header.value_ptr.?));
+            return @ptrCast(@alignCast(self.header.?.value_ptr.?));
         }
 
         pub fn asPtr(self: Self) *T {
-            return @ptrCast(@alignCast(self.header.value_ptr.?));
+            return @ptrCast(@alignCast(self.header.?.value_ptr.?));
         }
 
         pub fn sizeHint(self: Self) usize {
-            return self.header.size_hint;
+            return self.header.?.size_hint;
         }
 
         pub fn adjustedSize(self: Self) i64 {
-            return self.header.adjusted_size;
+            return self.header.?.adjusted_size;
         }
 
         fn invalid(env: napi.napi_env, raw: napi.napi_value) Self {
             return Self{
                 .env = env,
                 .raw = raw,
-                .header = undefined,
+                .header = null,
             };
         }
 
@@ -210,11 +250,17 @@ pub fn External(comptime T: type) type {
         }
 
         fn destroyDetached(self: Self) void {
-            if (self.header.ref_count.load(.acquire) == 0) {
-                self.header.destroy(self.header);
+            if (self.header) |header| {
+                _ = destroyDetachedHeader(header);
             }
         }
     };
+}
+
+fn destroyDetachedHeader(header: *TaggedHeader) bool {
+    if (header.ref_count.load(.acquire) != 0) return false;
+    header.destroy(header);
+    return true;
 }
 
 fn retainHeader(header: *TaggedHeader) void {

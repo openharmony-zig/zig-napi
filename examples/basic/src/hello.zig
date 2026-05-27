@@ -143,6 +143,11 @@ pub const mutate_external = external.mutate_external;
 pub const create_external_point = external.create_external_point;
 pub const get_external_point = external.get_external_point;
 pub const mutate_external_point = external.mutate_external_point;
+pub const external_either_kind = external.external_either_kind;
+pub const external_either_value = external.external_either_value;
+pub const reset_detached_external_deinit_count = external.reset_detached_external_deinit_count;
+pub const detached_external_deinit_count = external.detached_external_deinit_count;
+pub const deinit_detached_external = external.deinit_detached_external;
 
 comptime {
     napi.NODE_API_MODULE("hello", @This());

@@ -30,6 +30,14 @@ export function testExternal(native: NativeAddon) {
   native.mutate_external_point(point, 5, 6);
   const mutatedPoint = native.get_external_point(point);
   assertArrayEqual([mutatedPoint.x, mutatedPoint.y], [5, 6], "mutated external point");
+  assertEqual(native.external_either_kind(external), 1, "external union number kind");
+  assertEqual(native.external_either_value(external), 42, "external union number value");
+  assertEqual(native.external_either_kind(point), 2, "external union point kind");
+  assertEqual(native.external_either_value(point), 11, "external union point value");
+
+  native.reset_detached_external_deinit_count();
+  assertEqual(native.deinit_detached_external(), 1, "detached external deinit return");
+  assertEqual(native.detached_external_deinit_count(), 1, "detached external deinit count");
 
   assertThrows(
     () => native.get_external_point(external),

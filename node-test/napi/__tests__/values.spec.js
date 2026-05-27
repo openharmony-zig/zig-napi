@@ -237,6 +237,14 @@ test("External", (t) => {
 
   bindings.mutateExternalPoint(point, 5, 6);
   t.deepEqual(bindings.getExternalPoint(point), { x: 5, y: 6 });
+  t.is(bindings.externalEitherKind(external), 1);
+  t.is(bindings.externalEitherValue(external), 42);
+  t.is(bindings.externalEitherKind(point), 2);
+  t.is(bindings.externalEitherValue(point), 11);
+
+  bindings.resetDetachedExternalDeinitCount();
+  t.is(bindings.deinitDetachedExternal(), 1);
+  t.is(bindings.detachedExternalDeinitCount(), 1);
 
   t.throws(() => bindings.getExternalPoint(external), {
     message: /External value type does not match expected type/,
