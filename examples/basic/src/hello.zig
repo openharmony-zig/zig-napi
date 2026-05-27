@@ -135,6 +135,8 @@ pub const favorite_string_color = enum_value.favorite_string_color;
 
 pub const create_external = external.create_external;
 pub const create_external_with_size_hint = external.create_external_with_size_hint;
+pub const create_external_pair = external.create_external_pair;
+pub const create_misaligned_external = external.create_misaligned_external;
 pub const get_external = external.get_external;
 pub const get_external_size_hint = external.get_external_size_hint;
 pub const mutate_external = external.mutate_external;

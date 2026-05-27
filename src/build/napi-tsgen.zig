@@ -1155,8 +1155,9 @@ fn emitExternalObjectDecl(state: *State) !void {
     if (state.emitted.contains(name)) return;
     try state.emitted.put(name, {});
 
+    try append(&state.declarations, "declare const __napiExternalBrand: unique symbol\n");
     try append(&state.declarations, "export interface ExternalObject<T> {\n");
-    try append(&state.declarations, "  readonly __napiExternal?: T\n");
+    try append(&state.declarations, "  readonly [__napiExternalBrand]: T\n");
     try append(&state.declarations, "}\n\n");
 }
 

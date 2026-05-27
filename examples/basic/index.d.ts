@@ -124,8 +124,9 @@ export declare const enum StringColor {
   Blue = "Blue",
 }
 
+declare const __napiExternalBrand: unique symbol;
 export interface ExternalObject<T> {
-  readonly __napiExternal?: T;
+  readonly [__napiExternalBrand]: T;
 }
 
 export interface ExternalPoint {
@@ -262,6 +263,8 @@ export declare function string_enum_identity(color: StringColor): StringColor;
 export declare function favorite_string_color(): StringColor;
 export declare function create_external(value: number): ExternalObject<number>;
 export declare function create_external_with_size_hint(value: number): ExternalObject<number>;
+export declare function create_external_pair(value: number): Array<ExternalObject<number>>;
+export declare function create_misaligned_external(): unknown | undefined | null;
 export declare function get_external(external: ExternalObject<number>): number;
 export declare function get_external_size_hint(external: ExternalObject<number>): number;
 export declare function mutate_external(external: ExternalObject<number>, value: number): void;

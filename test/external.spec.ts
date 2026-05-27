@@ -13,6 +13,13 @@ export function testExternal(native: NativeAddon) {
   assertEqual(native.get_external(sizedExternal), 7, "external with size hint value");
   assertEqual(native.get_external_size_hint(sizedExternal), 128, "external size hint");
 
+  const pair = native.create_external_pair(11);
+  assertEqual(pair.length, 2, "external pair length");
+  assertEqual(native.get_external(pair[0]), 11, "external pair first value");
+  assertEqual(native.get_external(pair[1]), 11, "external pair second value");
+  native.mutate_external(pair[0], 12);
+  assertEqual(native.get_external(pair[1]), 12, "external pair shared payload");
+
   const point = native.create_external_point(3, 4);
   assertArrayEqual(
     [native.get_external_point(point).x, native.get_external_point(point).y],
@@ -30,4 +37,9 @@ export function testExternal(native: NativeAddon) {
     "external type mismatch",
   );
   assertThrows(() => native.get_external({}), "Expected external value", "non-external value");
+  assertThrows(
+    () => native.get_external(native.create_misaligned_external()),
+    "External value was not created by zig-napi",
+    "misaligned external value",
+  );
 }

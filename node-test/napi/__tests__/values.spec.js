@@ -225,6 +225,13 @@ test("External", (t) => {
   t.is(bindings.getExternal(sizedExternal), 7);
   t.is(bindings.getExternalSizeHint(sizedExternal), 128);
 
+  const pair = bindings.createExternalPair(11);
+  t.is(pair.length, 2);
+  t.is(bindings.getExternal(pair[0]), 11);
+  t.is(bindings.getExternal(pair[1]), 11);
+  bindings.mutateExternal(pair[0], 12);
+  t.is(bindings.getExternal(pair[1]), 12);
+
   const point = bindings.createExternalPoint(3, 4);
   t.deepEqual(bindings.getExternalPoint(point), { x: 3, y: 4 });
 
@@ -236,5 +243,8 @@ test("External", (t) => {
   });
   t.throws(() => bindings.getExternal({}), {
     message: /Expected external value/,
+  });
+  t.throws(() => bindings.getExternal(bindings.createMisalignedExternal()), {
+    message: /External value was not created by zig-napi/,
   });
 });

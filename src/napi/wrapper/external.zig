@@ -13,6 +13,7 @@ const TaggedHeader = struct {
     allocator: std.mem.Allocator,
     value_ptr: ?*anyopaque,
     size_hint: usize,
+    ref_count: std.atomic.Value(usize),
     memory_adjusted: bool,
     adjusted_size: i64,
     destroy: *const fn (*TaggedHeader) void,
@@ -81,8 +82,18 @@ pub fn External(comptime T: type) type {
                 return invalid(env, raw);
             }
 
-            const header: *TaggedHeader = @ptrCast(@alignCast(data.?));
-            if (header.magic != external_magic or !std.mem.eql(u8, header.typeName(), @typeName(T))) {
+            const data_ptr = data.?;
+            if (@intFromPtr(data_ptr) % @alignOf(TaggedHeader) != 0) {
+                NapiError.last_error = NapiError.Error.withCodeAndMessage("InvalidArg", "External value was not created by zig-napi");
+                return invalid(env, raw);
+            }
+
+            const header: *TaggedHeader = @ptrCast(@alignCast(data_ptr));
+            if (header.magic != external_magic) {
+                NapiError.last_error = NapiError.Error.withCodeAndMessage("InvalidArg", "External value was not created by zig-napi");
+                return invalid(env, raw);
+            }
+            if (!std.mem.eql(u8, header.typeName(), @typeName(T))) {
                 NapiError.last_error = NapiError.Error.withCodeAndMessage("InvalidArg", "External value type does not match expected type");
                 return invalid(env, raw);
             }
@@ -105,24 +116,24 @@ pub fn External(comptime T: type) type {
             };
 
             var result: napi.napi_value = undefined;
+            retainHeader(self.header);
             const status = napi.napi_create_external(env, self.header, externalFinalizer, null, &result);
             if (status != napi.napi_ok) {
-                self.destroyDetached();
+                releaseHeader(null, self.header);
                 return NapiError.Error.fromStatus(NapiError.Status.New(status));
             }
 
-            if (self.header.size_hint > 0) {
+            if (self.header.size_hint > 0 and !self.header.memory_adjusted) {
                 var adjusted_size: i64 = 0;
                 const adjust_status = napi.napi_adjust_external_memory(
                     env,
                     size_hint_i64,
                     &adjusted_size,
                 );
-                if (adjust_status != napi.napi_ok) {
-                    return NapiError.Error.fromStatus(NapiError.Status.New(adjust_status));
+                if (adjust_status == napi.napi_ok) {
+                    self.header.memory_adjusted = true;
+                    self.header.adjusted_size = adjusted_size;
                 }
-                self.header.memory_adjusted = true;
-                self.header.adjusted_size = adjusted_size;
             }
 
             return result;
@@ -178,6 +189,7 @@ pub fn External(comptime T: type) type {
                 .allocator = allocator,
                 .value_ptr = stored,
                 .size_hint = size_hint,
+                .ref_count = std.atomic.Value(usize).init(0),
                 .memory_adjusted = false,
                 .adjusted_size = 0,
                 .destroy = destroyHeader,
@@ -198,9 +210,27 @@ pub fn External(comptime T: type) type {
         }
 
         fn destroyDetached(self: Self) void {
-            self.header.destroy(self.header);
+            if (self.header.ref_count.load(.acquire) == 0) {
+                self.header.destroy(self.header);
+            }
         }
     };
+}
+
+fn retainHeader(header: *TaggedHeader) void {
+    _ = header.ref_count.fetchAdd(1, .monotonic);
+}
+
+fn releaseHeader(env: napi.napi_env, header: *TaggedHeader) void {
+    const previous = header.ref_count.fetchSub(1, .acq_rel);
+    if (previous != 1) return;
+
+    if (env != null and header.memory_adjusted and header.size_hint > 0) {
+        var adjusted_size: i64 = 0;
+        _ = napi.napi_adjust_external_memory(env, -@as(i64, @intCast(header.size_hint)), &adjusted_size);
+    }
+
+    header.destroy(header);
 }
 
 fn externalFinalizer(
@@ -212,11 +242,6 @@ fn externalFinalizer(
         const header: *TaggedHeader = @ptrCast(@alignCast(raw));
         if (header.magic != external_magic) return;
 
-        if (env != null and header.memory_adjusted and header.size_hint > 0) {
-            var adjusted_size: i64 = 0;
-            _ = napi.napi_adjust_external_memory(env, -@as(i64, @intCast(header.size_hint)), &adjusted_size);
-        }
-
-        header.destroy(header);
+        releaseHeader(env, header);
     }
 }
