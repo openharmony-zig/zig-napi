@@ -20,6 +20,11 @@ pub const Point = struct {
     y: i32,
 };
 
+pub const ExternalPoint = struct {
+    x: i32,
+    y: i32,
+};
+
 const NumberOrString = union(enum) {
     number: i32,
     string: []const u8,
@@ -525,4 +530,36 @@ pub fn returnEither(value: bool) NumberOrString {
 
 pub fn eitherFromOption(value: ?[]const u8) NumberOrString {
     return if (value) |payload| .{ .string = payload } else .{ .number = 0 };
+}
+
+pub fn createExternal(value: u32) !napi.External(u32) {
+    return try napi.External(u32).New(value);
+}
+
+pub fn createExternalWithSizeHint(value: u32) !napi.External(u32) {
+    return try napi.External(u32).NewWithSizeHint(value, 128);
+}
+
+pub fn getExternal(external: napi.External(u32)) u32 {
+    return external.value().*;
+}
+
+pub fn getExternalSizeHint(external: napi.External(u32)) usize {
+    return external.sizeHint();
+}
+
+pub fn mutateExternal(external: napi.External(u32), value: u32) void {
+    external.valueMut().* = value;
+}
+
+pub fn createExternalPoint(x: i32, y: i32) !napi.External(ExternalPoint) {
+    return try napi.External(ExternalPoint).New(.{ .x = x, .y = y });
+}
+
+pub fn getExternalPoint(external: napi.External(ExternalPoint)) ExternalPoint {
+    return external.value().*;
+}
+
+pub fn mutateExternalPoint(external: napi.External(ExternalPoint), x: i32, y: i32) void {
+    external.valueMut().* = .{ .x = x, .y = y };
 }

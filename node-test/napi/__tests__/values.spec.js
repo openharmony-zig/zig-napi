@@ -213,3 +213,28 @@ test("either", (t) => {
   t.is(bindings.eitherFromOption("zig"), "zig");
   t.is(bindings.eitherFromOption(null), 0);
 });
+
+test("External", (t) => {
+  const external = bindings.createExternal(10);
+  t.is(bindings.getExternal(external), 10);
+
+  bindings.mutateExternal(external, 42);
+  t.is(bindings.getExternal(external), 42);
+
+  const sizedExternal = bindings.createExternalWithSizeHint(7);
+  t.is(bindings.getExternal(sizedExternal), 7);
+  t.is(bindings.getExternalSizeHint(sizedExternal), 128);
+
+  const point = bindings.createExternalPoint(3, 4);
+  t.deepEqual(bindings.getExternalPoint(point), { x: 3, y: 4 });
+
+  bindings.mutateExternalPoint(point, 5, 6);
+  t.deepEqual(bindings.getExternalPoint(point), { x: 5, y: 6 });
+
+  t.throws(() => bindings.getExternalPoint(external), {
+    message: /External value type does not match expected type/,
+  });
+  t.throws(() => bindings.getExternal({}), {
+    message: /Expected external value/,
+  });
+});

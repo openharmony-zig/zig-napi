@@ -15,6 +15,7 @@ const arraybuffer = @import("./napi/wrapper/arraybuffer.zig");
 const typedarray = @import("./napi/wrapper/typedarray.zig");
 const dataview = @import("./napi/wrapper/dataview.zig");
 const reference = @import("./napi/wrapper/reference.zig");
+const external = @import("./napi/wrapper/external.zig");
 const global_allocator = @import("./napi/util/allocator.zig");
 const options = @import("./napi/options.zig");
 
@@ -68,6 +69,7 @@ pub const BigUint64Array = typedarray.BigUint64Array;
 pub const DataView = dataview.DataView;
 pub const Reference = reference.Reference;
 pub const Ref = reference.Reference;
+pub const External = external.External;
 pub fn FunctionRef(comptime Args: type, comptime Return: type) type {
     return reference.Reference(function.Function(Args, Return));
 }

@@ -105,6 +105,14 @@ pub const bigintFromI128 = values.bigintFromI128;
 pub const eitherStringOrNumber = values.eitherStringOrNumber;
 pub const returnEither = values.returnEither;
 pub const eitherFromOption = values.eitherFromOption;
+pub const createExternal = values.createExternal;
+pub const createExternalWithSizeHint = values.createExternalWithSizeHint;
+pub const getExternal = values.getExternal;
+pub const getExternalSizeHint = values.getExternalSizeHint;
+pub const mutateExternal = values.mutateExternal;
+pub const createExternalPoint = values.createExternalPoint;
+pub const getExternalPoint = values.getExternalPoint;
+pub const mutateExternalPoint = values.mutateExternalPoint;
 pub const callThreadsafeFunction = threadsafe_function.callThreadsafeFunction;
 
 pub const validateArray = strict.validateArray;

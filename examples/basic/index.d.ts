@@ -124,6 +124,15 @@ export declare const enum StringColor {
   Blue = "Blue",
 }
 
+export interface ExternalObject<T> {
+  readonly __napiExternal?: T;
+}
+
+export interface ExternalPoint {
+  x: number;
+  y: number;
+}
+
 export declare function test_i32(left: number, right: number): number;
 export declare function test_f32(left: number, right: number): number;
 export declare function test_u32(left: number, right: number): number;
@@ -251,3 +260,15 @@ export declare function favorite_color(): Color;
 export declare function is_primary(color: Color): boolean;
 export declare function string_enum_identity(color: StringColor): StringColor;
 export declare function favorite_string_color(): StringColor;
+export declare function create_external(value: number): ExternalObject<number>;
+export declare function create_external_with_size_hint(value: number): ExternalObject<number>;
+export declare function get_external(external: ExternalObject<number>): number;
+export declare function get_external_size_hint(external: ExternalObject<number>): number;
+export declare function mutate_external(external: ExternalObject<number>, value: number): void;
+export declare function create_external_point(x: number, y: number): ExternalObject<ExternalPoint>;
+export declare function get_external_point(external: ExternalObject<ExternalPoint>): ExternalPoint;
+export declare function mutate_external_point(
+  external: ExternalObject<ExternalPoint>,
+  x: number,
+  y: number,
+): void;

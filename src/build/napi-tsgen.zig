@@ -180,6 +180,14 @@ fn isReferenceType(comptime T: type) bool {
     return @hasDecl(T, "is_napi_reference");
 }
 
+fn isExternalType(comptime T: type) bool {
+    switch (@typeInfo(T)) {
+        .@"struct", .@"enum", .@"union", .@"opaque" => {},
+        else => return false,
+    }
+    return @hasDecl(T, "is_napi_external");
+}
+
 fn isDataViewType(comptime T: type) bool {
     switch (@typeInfo(T)) {
         .@"struct", .@"enum", .@"union", .@"opaque" => {},
@@ -228,6 +236,7 @@ fn isObjectLikeStruct(comptime T: type) bool {
     if (isTypedArrayType(T)) return false;
     if (isDataViewType(T)) return false;
     if (isReferenceType(T)) return false;
+    if (isExternalType(T)) return false;
     if (isClassType(T)) return false;
     return true;
 }
@@ -1075,6 +1084,12 @@ fn emitType(state: *State, comptime T: type) ![]const u8 {
                 return emitType(state, T.referenced_type);
             }
 
+            if (comptime isExternalType(T)) {
+                try emitExternalObjectDecl(state);
+                const inner = try emitType(state, T.external_type);
+                return try std.fmt.allocPrint(state.allocator, "ExternalObject<{s}>", .{inner});
+            }
+
             if (comptime isClassType(T)) {
                 return shortTypeName(T);
             }
@@ -1132,6 +1147,16 @@ fn emitInterfaceDecl(state: *State, comptime T: type) !void {
             try appendFmt(&state.declarations, "  {s}: {s}\n", .{ field.name, ts_type });
         }
     }
+    try append(&state.declarations, "}\n\n");
+}
+
+fn emitExternalObjectDecl(state: *State) !void {
+    const name = "ExternalObject";
+    if (state.emitted.contains(name)) return;
+    try state.emitted.put(name, {});
+
+    try append(&state.declarations, "export interface ExternalObject<T> {\n");
+    try append(&state.declarations, "  readonly __napiExternal?: T\n");
     try append(&state.declarations, "}\n\n");
 }
 
@@ -1667,6 +1692,17 @@ fn emitSourceTypeExpr(state: *State, file_path: []const u8, type_expr: []const u
     if (std.mem.eql(u8, trimmed, "napi.Buffer")) return "Buffer";
     if (std.mem.eql(u8, trimmed, "napi.ArrayBuffer")) return "ArrayBuffer";
     if (std.mem.eql(u8, trimmed, "napi.DataView")) return "DataView";
+
+    if (parseSingleArgTypeCall(trimmed)) |type_call| {
+        if (std.mem.eql(u8, type_call.callee, "napi.External") or
+            std.mem.endsWith(u8, type_call.callee, ".External") or
+            std.mem.eql(u8, type_call.callee, "External"))
+        {
+            try emitExternalObjectDecl(state);
+            const child_ts = try emitSourceTypeExpr(state, file_path, type_call.arg, depth + 1);
+            return try std.fmt.allocPrint(state.allocator, "ExternalObject<{s}>", .{child_ts});
+        }
+    }
 
     if (matchSourceSliceChild(trimmed)) |child| {
         const child_ts = try emitSourceTypeExpr(state, file_path, child, depth + 1);
