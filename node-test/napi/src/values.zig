@@ -20,9 +20,30 @@ pub const Point = struct {
     y: i32,
 };
 
+pub const ExternalPoint = struct {
+    x: i32,
+    y: i32,
+};
+
 const NumberOrString = union(enum) {
     number: i32,
     string: []const u8,
+};
+
+const ExternalEither = union(enum) {
+    number: napi.External(u32),
+    point: napi.External(ExternalPoint),
+};
+
+var detached_external_deinits = std.atomic.Value(usize).init(0);
+
+const DetachedExternalPayload = struct {
+    value: u32,
+
+    pub fn deinit(self: *DetachedExternalPayload) void {
+        _ = self;
+        _ = detached_external_deinits.fetchAdd(1, .monotonic);
+    }
 };
 
 fn allocator() std.mem.Allocator {
@@ -525,4 +546,121 @@ pub fn returnEither(value: bool) NumberOrString {
 
 pub fn eitherFromOption(value: ?[]const u8) NumberOrString {
     return if (value) |payload| .{ .string = payload } else .{ .number = 0 };
+}
+
+pub fn createExternal(value: u32) !napi.External(u32) {
+    return try napi.External(u32).New(value);
+}
+
+pub fn createExternalWithSizeHint(value: u32) !napi.External(u32) {
+    return try napi.External(u32).NewWithSizeHint(value, 128);
+}
+
+pub fn createExternalPair(value: u32) ![2]napi.External(u32) {
+    const external = try napi.External(u32).New(value);
+    return .{ external, external };
+}
+
+const ForeignExternalHint = struct {
+    allocator: std.mem.Allocator,
+    ptr: [*]u64,
+    len: usize,
+
+    fn destroy(self: *ForeignExternalHint) void {
+        const allocator_value = self.allocator;
+        allocator_value.free(self.ptr[0..self.len]);
+        allocator_value.destroy(self);
+    }
+};
+
+fn foreignExternalFinalizer(
+    _: c.napi_env,
+    _: ?*anyopaque,
+    hint: ?*anyopaque,
+) callconv(.c) void {
+    if (hint) |raw_hint| {
+        const external_hint: *ForeignExternalHint = @ptrCast(@alignCast(raw_hint));
+        external_hint.destroy();
+    }
+}
+
+pub fn createMisalignedExternal(env: napi.Env) !c.napi_value {
+    const allocator_value = allocator();
+    const storage = try allocator_value.alloc(u64, 2);
+    errdefer allocator_value.free(storage);
+
+    const hint = try allocator_value.create(ForeignExternalHint);
+    errdefer allocator_value.destroy(hint);
+    hint.* = .{
+        .allocator = allocator_value,
+        .ptr = storage.ptr,
+        .len = storage.len,
+    };
+
+    const byte_ptr: [*]u8 = @ptrCast(storage.ptr);
+    var raw: c.napi_value = undefined;
+    const status = c.napi_create_external(
+        env.raw,
+        @ptrCast(byte_ptr + 1),
+        foreignExternalFinalizer,
+        hint,
+        &raw,
+    );
+    if (status != c.napi_ok) {
+        return napi.Error.fromStatus(napi.Status.New(status));
+    }
+    return raw;
+}
+
+pub fn getExternal(external: napi.External(u32)) u32 {
+    return external.value().*;
+}
+
+pub fn getExternalSizeHint(external: napi.External(u32)) usize {
+    return external.sizeHint();
+}
+
+pub fn mutateExternal(external: napi.External(u32), value: u32) void {
+    external.valueMut().* = value;
+}
+
+pub fn createExternalPoint(x: i32, y: i32) !napi.External(ExternalPoint) {
+    return try napi.External(ExternalPoint).New(.{ .x = x, .y = y });
+}
+
+pub fn getExternalPoint(external: napi.External(ExternalPoint)) ExternalPoint {
+    return external.value().*;
+}
+
+pub fn mutateExternalPoint(external: napi.External(ExternalPoint), x: i32, y: i32) void {
+    external.valueMut().* = .{ .x = x, .y = y };
+}
+
+pub fn externalEitherKind(value: ExternalEither) u32 {
+    return switch (value) {
+        .number => 1,
+        .point => 2,
+    };
+}
+
+pub fn externalEitherValue(value: ExternalEither) i32 {
+    return switch (value) {
+        .number => |external| @intCast(external.value().*),
+        .point => |external| external.value().x + external.value().y,
+    };
+}
+
+pub fn resetDetachedExternalDeinitCount() void {
+    detached_external_deinits.store(0, .monotonic);
+}
+
+pub fn detachedExternalDeinitCount() usize {
+    return detached_external_deinits.load(.monotonic);
+}
+
+pub fn deinitDetachedExternal() !usize {
+    resetDetachedExternalDeinitCount();
+    var external = try napi.External(DetachedExternalPayload).New(.{ .value = 1 });
+    external.deinit();
+    return detachedExternalDeinitCount();
 }

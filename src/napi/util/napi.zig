@@ -173,6 +173,7 @@ fn valueMatchesType(env: napi.napi_env, raw: napi.napi_value, comptime T: type) 
             if (comptime helper.isTypedArray(T)) break :blk isTypedArrayValue(env, raw);
             if (comptime helper.isDataView(T)) break :blk isDataViewValue(env, raw);
             if (comptime helper.isReference(T)) break :blk true;
+            if (comptime helper.isExternal(T)) break :blk T.matches_napi_value(env, raw);
             if (comptime helper.isTuple(T)) break :blk isArrayValue(env, raw);
             if (comptime helper.isArrayList(T)) break :blk isArrayValue(env, raw) or isTypedArrayValue(env, raw);
             break :blk isPlainObjectValue(env, raw);
@@ -429,6 +430,7 @@ pub const Napi = struct {
                     helper.isTypedArray(T) or
                     helper.isDataView(T) or
                     helper.isReference(T) or
+                    helper.isExternal(T) or
                     helper.isAbortSignal(T) or
                     T == NapiValue.BigInt or
                     T == NapiValue.Bool or
@@ -564,6 +566,9 @@ pub const Napi = struct {
                                     return T.from_raw(env, raw);
                                 }
                                 if (comptime helper.isReference(T)) {
+                                    return T.from_napi_value(env, raw);
+                                }
+                                if (comptime helper.isExternal(T)) {
                                     return T.from_napi_value(env, raw);
                                 }
 
@@ -713,6 +718,9 @@ pub const Napi = struct {
                             return value.raw;
                         }
                         if (comptime helper.isReference(value_type)) {
+                            return try value.to_napi_value(env);
+                        }
+                        if (comptime helper.isExternal(value_type)) {
                             return try value.to_napi_value(env);
                         }
                         if (comptime helper.isTuple(value_type)) {

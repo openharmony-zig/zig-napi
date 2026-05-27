@@ -213,3 +213,46 @@ test("either", (t) => {
   t.is(bindings.eitherFromOption("zig"), "zig");
   t.is(bindings.eitherFromOption(null), 0);
 });
+
+test("External", (t) => {
+  const external = bindings.createExternal(10);
+  t.is(bindings.getExternal(external), 10);
+
+  bindings.mutateExternal(external, 42);
+  t.is(bindings.getExternal(external), 42);
+
+  const sizedExternal = bindings.createExternalWithSizeHint(7);
+  t.is(bindings.getExternal(sizedExternal), 7);
+  t.is(bindings.getExternalSizeHint(sizedExternal), 128);
+
+  const pair = bindings.createExternalPair(11);
+  t.is(pair.length, 2);
+  t.is(bindings.getExternal(pair[0]), 11);
+  t.is(bindings.getExternal(pair[1]), 11);
+  bindings.mutateExternal(pair[0], 12);
+  t.is(bindings.getExternal(pair[1]), 12);
+
+  const point = bindings.createExternalPoint(3, 4);
+  t.deepEqual(bindings.getExternalPoint(point), { x: 3, y: 4 });
+
+  bindings.mutateExternalPoint(point, 5, 6);
+  t.deepEqual(bindings.getExternalPoint(point), { x: 5, y: 6 });
+  t.is(bindings.externalEitherKind(external), 1);
+  t.is(bindings.externalEitherValue(external), 42);
+  t.is(bindings.externalEitherKind(point), 2);
+  t.is(bindings.externalEitherValue(point), 11);
+
+  bindings.resetDetachedExternalDeinitCount();
+  t.is(bindings.deinitDetachedExternal(), 1);
+  t.is(bindings.detachedExternalDeinitCount(), 1);
+
+  t.throws(() => bindings.getExternalPoint(external), {
+    message: /External value type does not match expected type/,
+  });
+  t.throws(() => bindings.getExternal({}), {
+    message: /Expected external value/,
+  });
+  t.throws(() => bindings.getExternal(bindings.createMisalignedExternal()), {
+    message: /External value was not created by zig-napi/,
+  });
+});

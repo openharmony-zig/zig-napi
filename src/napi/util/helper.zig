@@ -112,6 +112,10 @@ pub fn isReference(comptime T: type) bool {
     return @hasDecl(T, "is_napi_reference");
 }
 
+pub fn isExternal(comptime T: type) bool {
+    return @hasDecl(T, "is_napi_external");
+}
+
 pub fn isArrayList(comptime T: type) bool {
     const info = @typeInfo(T);
     if (info != .@"struct") {

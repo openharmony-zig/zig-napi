@@ -21,6 +21,7 @@ const dataview = @import("dataview.zig");
 const reference = @import("reference.zig");
 const union_value = @import("union.zig");
 const enum_value = @import("enum.zig");
+const external = @import("external.zig");
 
 pub const test_i32 = number.test_i32;
 pub const test_f32 = number.test_f32;
@@ -131,6 +132,22 @@ pub const favorite_color = enum_value.favorite_color;
 pub const is_primary = enum_value.is_primary;
 pub const string_enum_identity = enum_value.string_enum_identity;
 pub const favorite_string_color = enum_value.favorite_string_color;
+
+pub const create_external = external.create_external;
+pub const create_external_with_size_hint = external.create_external_with_size_hint;
+pub const create_external_pair = external.create_external_pair;
+pub const create_misaligned_external = external.create_misaligned_external;
+pub const get_external = external.get_external;
+pub const get_external_size_hint = external.get_external_size_hint;
+pub const mutate_external = external.mutate_external;
+pub const create_external_point = external.create_external_point;
+pub const get_external_point = external.get_external_point;
+pub const mutate_external_point = external.mutate_external_point;
+pub const external_either_kind = external.external_either_kind;
+pub const external_either_value = external.external_either_value;
+pub const reset_detached_external_deinit_count = external.reset_detached_external_deinit_count;
+pub const detached_external_deinit_count = external.detached_external_deinit_count;
+pub const deinit_detached_external = external.deinit_detached_external;
 
 comptime {
     napi.NODE_API_MODULE("hello", @This());
