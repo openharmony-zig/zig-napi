@@ -25,6 +25,21 @@ pub const ExternalPoint = struct {
     y: i32,
 };
 
+pub const NativeWrapPayload = struct {
+    value: u32,
+
+    const Self = @This();
+
+    pub fn deinit(self: *Self) void {
+        _ = self;
+        _ = native_wrap_deinits.fetchAdd(1, .monotonic);
+    }
+};
+
+pub const OtherNativeWrapPayload = struct {
+    value: u32,
+};
+
 const NumberOrString = union(enum) {
     number: i32,
     string: []const u8,
@@ -36,6 +51,7 @@ const ExternalEither = union(enum) {
 };
 
 var detached_external_deinits = std.atomic.Value(usize).init(0);
+var native_wrap_deinits = std.atomic.Value(usize).init(0);
 
 const DetachedExternalPayload = struct {
     value: u32,
@@ -182,6 +198,53 @@ pub fn sumMapping(object: napi.Object) i32 {
 
 pub fn indexmapPassthrough(object: napi.Object) c.napi_value {
     return object.raw;
+}
+
+pub fn createNativeWrap(env: napi.Env, value: u32) !napi.Object {
+    var object = try napi.Object.Create(env);
+    try object.Set("kind", "native-wrap");
+    try object.wrapWithSizeHint(NativeWrapPayload{ .value = value }, 64);
+    return object;
+}
+
+pub fn getNativeWrapValue(object: napi.Object) !u32 {
+    const payload = try object.unwrap(NativeWrapPayload);
+    return payload.value;
+}
+
+pub fn mutateNativeWrapValue(object: napi.Object, value: u32) !void {
+    const payload = try object.unwrap(NativeWrapPayload);
+    payload.value = value;
+}
+
+pub fn dropNativeWrap(object: napi.Object) !void {
+    try object.dropWrapped(NativeWrapPayload);
+}
+
+pub fn dropNativeWrapWrongType(object: napi.Object) !void {
+    try object.dropWrapped(OtherNativeWrapPayload);
+}
+
+pub fn getNativeWrapWrongType(object: napi.Object) !u32 {
+    const payload = try object.unwrap(OtherNativeWrapPayload);
+    return payload.value;
+}
+
+pub fn getNativeWrapFromEnv(env: napi.Env, object: napi.Object) !u32 {
+    const payload = try env.unwrap(object, NativeWrapPayload);
+    return payload.value;
+}
+
+pub fn nativeWrapMatches(object: napi.Object) bool {
+    return object.matchesWrapped(NativeWrapPayload);
+}
+
+pub fn resetNativeWrapDeinitCount() void {
+    native_wrap_deinits.store(0, .monotonic);
+}
+
+pub fn nativeWrapDeinitCount() usize {
+    return native_wrap_deinits.load(.monotonic);
 }
 
 pub fn enumToI32(value: CustomNumEnum) i32 {

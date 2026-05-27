@@ -83,6 +83,35 @@ test("object", (t) => {
   t.deepEqual(bindings.listObjKeys({ z: 1, a: 2 }).sort(), ["a", "z"]);
 });
 
+test("native wrap", (t) => {
+  bindings.resetNativeWrapDeinitCount();
+  const wrapped = bindings.createNativeWrap(7);
+  t.is(wrapped.kind, "native-wrap");
+  t.true(bindings.nativeWrapMatches(wrapped));
+  t.is(bindings.getNativeWrapValue(wrapped), 7);
+  t.is(bindings.getNativeWrapFromEnv(wrapped), 7);
+
+  bindings.mutateNativeWrapValue(wrapped, 42);
+  t.is(bindings.getNativeWrapValue(wrapped), 42);
+
+  t.throws(() => bindings.getNativeWrapWrongType(wrapped), {
+    message: /Native wrapped object type does not match expected type/,
+  });
+  t.throws(() => bindings.dropNativeWrapWrongType(wrapped), {
+    message: /Native wrapped object type does not match expected type/,
+  });
+  t.is(bindings.getNativeWrapValue(wrapped), 42);
+  t.is(bindings.nativeWrapDeinitCount(), 0);
+
+  t.throws(() => bindings.getNativeWrapValue({}), {
+    message: /Object is not wrapped by zig-napi/,
+  });
+
+  bindings.dropNativeWrap(wrapped);
+  t.is(bindings.nativeWrapDeinitCount(), 1);
+  t.false(bindings.nativeWrapMatches(wrapped));
+});
+
 test("global, undefined, null and symbol", (t) => {
   t.is(bindings.getGlobal(), globalThis);
   t.is(bindings.getUndefined(), undefined);

@@ -12,6 +12,7 @@ const helper = @import("../util/helper.zig");
 const Napi = @import("../util/napi.zig").Napi;
 const NapiError = @import("../wrapper/error.zig");
 const Reference = @import("../wrapper/reference.zig").Reference;
+const native_wrap = @import("../wrapper/native_wrap.zig");
 
 pub const Object = struct {
     env: napi.napi_env,
@@ -133,5 +134,45 @@ pub const Object = struct {
 
     pub fn CreateRef(self: Object) !Reference(Object) {
         return Reference(Object).New(Env.from_raw(self.env), self);
+    }
+
+    pub fn Wrap(self: Object, payload: anytype) !void {
+        try self.wrap(payload);
+    }
+
+    pub fn WrapWithSizeHint(self: Object, payload: anytype, size_hint: usize) !void {
+        try self.wrapWithSizeHint(payload, size_hint);
+    }
+
+    pub fn wrap(self: Object, payload: anytype) !void {
+        try self.wrapWithSizeHint(payload, 0);
+    }
+
+    pub fn wrapWithSizeHint(self: Object, payload: anytype, size_hint: usize) !void {
+        try native_wrap.wrap(self.env, self.raw, payload, size_hint);
+    }
+
+    pub fn Unwrap(self: Object, comptime T: type) !*T {
+        return try self.unwrap(T);
+    }
+
+    pub fn unwrap(self: Object, comptime T: type) !*T {
+        return try native_wrap.unwrap(self.env, self.raw, T);
+    }
+
+    pub fn unwrapConst(self: Object, comptime T: type) !*const T {
+        return try native_wrap.unwrapConst(self.env, self.raw, T);
+    }
+
+    pub fn DropWrapped(self: Object, comptime T: type) !void {
+        try self.dropWrapped(T);
+    }
+
+    pub fn dropWrapped(self: Object, comptime T: type) !void {
+        try native_wrap.dropWrapped(self.env, self.raw, T);
+    }
+
+    pub fn matchesWrapped(self: Object, comptime T: type) bool {
+        return native_wrap.matches(self.env, self.raw, T);
     }
 };
