@@ -8,11 +8,13 @@ const Value = @import("../value.zig").Value;
 const Undefined = @import("./undefined.zig").Undefined;
 const Null = @import("./null.zig").Null;
 const String = @import("./string.zig").String;
+const Array = @import("./array.zig").Array;
 const helper = @import("../util/helper.zig");
 const Napi = @import("../util/napi.zig").Napi;
 const NapiError = @import("../wrapper/error.zig");
 const Reference = @import("../wrapper/reference.zig").Reference;
 const native_wrap = @import("../wrapper/native_wrap.zig");
+const options = @import("../options.zig");
 
 pub const Object = struct {
     env: napi.napi_env,
@@ -101,6 +103,19 @@ pub const Object = struct {
         }
     }
 
+    pub fn SetValue(self: Object, key: anytype, value: anytype) !void {
+        const key_raw = try Napi.to_napi_value_auto(self.env, key, null);
+        const n_value = try Napi.to_napi_value_auto(self.env, value, null);
+        const status = napi.napi_set_property(self.env, self.raw, key_raw, n_value);
+        if (status != napi.napi_ok) {
+            return NapiError.Error.fromStatus(NapiError.Status.New(status));
+        }
+    }
+
+    pub fn setValue(self: Object, key: anytype, value: anytype) !void {
+        try self.SetValue(key, value);
+    }
+
     pub fn Get(self: Object, key: []const u8, comptime T: type) T {
         const key_raw = self.keyToNapiValue(key) catch @panic("Failed to create object property key");
         var raw: napi.napi_value = undefined;
@@ -130,6 +145,58 @@ pub const Object = struct {
             },
         }
         return result;
+    }
+
+    pub fn propertyNames(self: Object) !Array {
+        var raw: napi.napi_value = undefined;
+        const status = napi.napi_get_property_names(self.env, self.raw, &raw);
+        if (status != napi.napi_ok) {
+            return NapiError.Error.fromStatus(NapiError.Status.New(status));
+        }
+        return Array.from_raw(self.env, raw);
+    }
+
+    pub fn isDate(self: Object) bool {
+        comptime options.requireNapiVersion(.v5);
+
+        var result: bool = false;
+        const status = napi.napi_is_date(self.env, self.raw, &result);
+        if (status != napi.napi_ok) {
+            NapiError.last_error = NapiError.Error.withStatus(NapiError.Status.New(status));
+            return false;
+        }
+        return result;
+    }
+
+    pub fn dateValue(self: Object) !f64 {
+        comptime options.requireNapiVersion(.v5);
+
+        var result: f64 = 0;
+        const status = napi.napi_get_date_value(self.env, self.raw, &result);
+        if (status != napi.napi_ok) {
+            return NapiError.Error.fromStatus(NapiError.Status.New(status));
+        }
+        return result;
+    }
+
+    pub fn freeze(self: Object) !Object {
+        comptime options.requireNapiVersion(.v8);
+
+        const status = napi.napi_object_freeze(self.env, self.raw);
+        if (status != napi.napi_ok) {
+            return NapiError.Error.fromStatus(NapiError.Status.New(status));
+        }
+        return self;
+    }
+
+    pub fn seal(self: Object) !Object {
+        comptime options.requireNapiVersion(.v8);
+
+        const status = napi.napi_object_seal(self.env, self.raw);
+        if (status != napi.napi_ok) {
+            return NapiError.Error.fromStatus(NapiError.Status.New(status));
+        }
+        return self;
     }
 
     pub fn CreateRef(self: Object) !Reference(Object) {
