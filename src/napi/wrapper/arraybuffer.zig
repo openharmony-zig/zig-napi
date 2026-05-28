@@ -3,6 +3,7 @@ const napi = @import("napi-sys").napi_sys;
 const Env = @import("../env.zig").Env;
 const NapiError = @import("error.zig");
 const GlobalAllocator = @import("../util/allocator.zig");
+const options = @import("../options.zig");
 
 pub const ArrayBuffer = struct {
     env: napi.napi_env,
@@ -243,6 +244,28 @@ pub const ArrayBuffer = struct {
     /// Get the length of the ArrayBuffer
     pub fn length(self: ArrayBuffer) usize {
         return self.len;
+    }
+
+    /// Detach the ArrayBuffer.
+    pub fn detach(self: ArrayBuffer) !void {
+        comptime options.requireNapiVersion(.v7);
+
+        const status = napi.napi_detach_arraybuffer(self.env, self.raw);
+        if (status != napi.napi_ok) {
+            return NapiError.Error.fromStatus(NapiError.Status.New(status));
+        }
+    }
+
+    /// Check whether the ArrayBuffer has been detached.
+    pub fn isDetached(self: ArrayBuffer) !bool {
+        comptime options.requireNapiVersion(.v7);
+
+        var result = false;
+        const status = napi.napi_is_detached_arraybuffer(self.env, self.raw, &result);
+        if (status != napi.napi_ok) {
+            return NapiError.Error.fromStatus(NapiError.Status.New(status));
+        }
+        return result;
     }
 };
 
