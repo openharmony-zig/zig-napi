@@ -25,6 +25,7 @@ pub const NapiVersion = options.NapiVersion;
 pub const selectedNapiVersion = options.selectedNapiVersion;
 pub const experimentalEnabled = options.experimentalEnabled;
 pub const Env = env.Env;
+pub const NapiValue = value.NapiValue;
 pub const Object = value.Object;
 pub const Number = value.Number;
 pub const String = value.String;
