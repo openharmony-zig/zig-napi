@@ -133,6 +133,7 @@ fn valueMatchesType(env: napi.napi_env, raw: napi.napi_value, comptime T: type) 
     switch (T) {
         NapiValue.Number => return napiTypeOf(env, raw) == napi.napi_number,
         NapiValue.String => return napiTypeOf(env, raw) == napi.napi_string,
+        NapiValue.NapiValue => return true,
         NapiValue.BigInt => {
             comptime options.requireNapiVersion(.v6);
             return napiTypeOf(env, raw) == napi.napi_bigint;
@@ -432,6 +433,7 @@ pub const Napi = struct {
                     helper.isReference(T) or
                     helper.isExternal(T) or
                     helper.isAbortSignal(T) or
+                    T == NapiValue.NapiValue or
                     T == NapiValue.BigInt or
                     T == NapiValue.Bool or
                     T == NapiValue.Number or
@@ -479,7 +481,7 @@ pub const Napi = struct {
     pub fn from_napi_value(env: napi.napi_env, raw: napi.napi_value, comptime T: type) T {
         const infos = @typeInfo(T);
         switch (T) {
-            NapiValue.BigInt, NapiValue.Number, NapiValue.String, NapiValue.Object, NapiValue.Promise, NapiValue.Array, NapiValue.Undefined, NapiValue.Null, Buffer, ArrayBuffer, DataView => {
+            NapiValue.NapiValue, NapiValue.BigInt, NapiValue.Number, NapiValue.String, NapiValue.Object, NapiValue.Promise, NapiValue.Array, NapiValue.Undefined, NapiValue.Null, Buffer, ArrayBuffer, DataView => {
                 return T.from_raw(env, raw);
             },
             else => {
@@ -644,7 +646,7 @@ pub const Napi = struct {
         }
 
         switch (value_type) {
-            NapiValue.BigInt, NapiValue.Bool, NapiValue.Number, NapiValue.String, NapiValue.Object, NapiValue.Promise, NapiValue.Array, NapiValue.Undefined, NapiValue.Null, Buffer, ArrayBuffer, DataView => {
+            NapiValue.NapiValue, NapiValue.BigInt, NapiValue.Bool, NapiValue.Number, NapiValue.String, NapiValue.Object, NapiValue.Promise, NapiValue.Array, NapiValue.Undefined, NapiValue.Null, Buffer, ArrayBuffer, DataView => {
                 return value.raw;
             },
             // If value is already a napi_value, return it directly
