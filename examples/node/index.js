@@ -7,14 +7,18 @@ const binaryName = "hello";
 function loadAddon() {
   const platformArchABI = detectPlatformArchABI();
   const optionalPackage = optionalPackageName(packageName, platformArchABI);
-  const candidates = [
-    () => require(optionalPackage),
-    () => require(path.join(__dirname, `${binaryName}.${platformArchABI}.node`)),
+  const nativeCandidates = [
     () => require(path.join(__dirname, "zig-out", "node", `${binaryName}.${platformArchABI}.node`)),
-    () => require(optionalPackageName(packageName, "wasm32-wasi")),
-    () => require(path.join(__dirname, `${binaryName}.wasi.cjs`)),
-    () => require(path.join(__dirname, "zig-out", "node", `${binaryName}.wasi.cjs`)),
+    () => require(path.join(__dirname, `${binaryName}.${platformArchABI}.node`)),
+    () => require(optionalPackage),
   ];
+  const wasiCandidates = [
+    () => require(path.join(__dirname, "zig-out", "node", `${binaryName}.wasi.cjs`)),
+    () => require(path.join(__dirname, `${binaryName}.wasi.cjs`)),
+    () => require(optionalPackageName(packageName, "wasm32-wasi")),
+  ];
+  const candidates =
+    process.env.ZIG_NAPI_FORCE_WASI === "1" ? wasiCandidates : nativeCandidates.concat(wasiCandidates);
 
   const errors = [];
   for (const candidate of candidates) {
