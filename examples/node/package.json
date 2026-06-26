@@ -4,10 +4,17 @@
   "private": true,
   "description": "Node.js addon example built with zig-napi.",
   "main": "index.js",
+  "browser": "browser.js",
   "files": [
     "index.js",
     "index.d.ts",
-    "*.node"
+    "browser.js",
+    "*.node",
+    "*.wasm",
+    "*.wasi.cjs",
+    "*.wasi-browser.js",
+    "wasi-worker.mjs",
+    "wasi-worker-browser.mjs"
   ],
   "scripts": {
     "build": "zig-napi build -- --summary all",
@@ -19,6 +26,11 @@
     "build:test": "npm run build",
     "test:run": "node test.js",
     "clean": "rm -rf .zig-cache zig-out *.node npm/*/*.node"
+  },
+  "dependencies": {
+    "@emnapi/core": "^1.11.0",
+    "@emnapi/runtime": "^1.11.0",
+    "@napi-rs/wasm-runtime": "^1.1.6"
   },
   "devDependencies": {
     "zig-napi": "workspace:*"
@@ -34,7 +46,8 @@
       "aarch64-unknown-linux-gnu",
       "aarch64-unknown-linux-musl",
       "x86_64-pc-windows-msvc",
-      "aarch64-pc-windows-msvc"
+      "aarch64-pc-windows-msvc",
+      "wasm32-wasip1-threads"
     ]
   },
   "license": "MIT"

@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "A Node.js native addon built with zig-napi.",
   "main": "index.js",
+  "browser": "browser.js",
   "types": "index.d.ts",
   "keywords": [
     "zig-napi",
@@ -14,7 +15,14 @@
   ],
   "files": [
     "index.js",
-    "index.d.ts"
+    "index.d.ts",
+    "browser.js",
+    "*.node",
+    "*.wasm",
+    "*.wasi.cjs",
+    "*.wasi-browser.js",
+    "wasi-worker.mjs",
+    "wasi-worker-browser.mjs"
   ],
   "scripts": {
     "artifacts": "zig-napi artifacts",
@@ -24,6 +32,11 @@
     "test": "npm run build:test && npm run test:run",
     "build:test": "npm run build",
     "test:run": "ava"
+  },
+  "dependencies": {
+    "@emnapi/core": "^1.11.0",
+    "@emnapi/runtime": "^1.11.0",
+    "@napi-rs/wasm-runtime": "^1.1.6"
   },
   "devDependencies": {
     "ava": "^8.0.0",

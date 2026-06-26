@@ -42,6 +42,7 @@ Node addon builds use platform-specific filenames:
 hello.darwin-arm64.node
 hello.linux-x64-gnu.node
 hello.win32-x64-msvc.node
+hello.wasm32-wasi.wasm
 ```
 
 The helper exposes these utilities:
@@ -49,11 +50,20 @@ The helper exposes these utilities:
 | Helper | Description |
 | --- | --- |
 | `nodePlatformArchAbi(build, target)` | Returns the platform-arch-abi suffix. |
-| `nodeAddonFilename(build, name, target)` | Returns the final `.node` filename. |
+| `nodeAddonExtension(target)` | Returns `node` for native targets and `wasm` for WASI. |
+| `nodeAddonFilename(build, name, target)` | Returns the final `.node` or `.wasm` filename. |
 
 ## Target Selection
 
 If `root_module_options.target` is omitted, the Node addon target defaults to the host target. Provide a target explicitly for cross builds.
+
+For WASI threads builds, use the napi-rs target name through the CLI:
+
+```bash
+zig-napi build --target wasm32-wasip1-threads
+```
+
+The CLI maps that target to Zig's `wasm32-wasi` spelling with atomics/shared-memory CPU features. The helper normalizes the output to napi-rs' `wasm32-wasi` platform package name and installs `<binary>.wasm32-wasi.wasm`.
 
 ## Windows Linking
 

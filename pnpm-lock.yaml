@@ -19,6 +19,16 @@ importers:
         version: 1.71.0
 
   examples/node:
+    dependencies:
+      '@emnapi/core':
+        specifier: ^1.11.0
+        version: 1.11.1
+      '@emnapi/runtime':
+        specifier: ^1.11.0
+        version: 1.11.1
+      '@napi-rs/wasm-runtime':
+        specifier: ^1.1.6
+        version: 1.1.6(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)
     devDependencies:
       zig-napi:
         specifier: workspace:*
@@ -26,6 +36,15 @@ importers:
 
   node-test:
     devDependencies:
+      '@emnapi/core':
+        specifier: ^1.11.0
+        version: 1.11.1
+      '@emnapi/runtime':
+        specifier: ^1.11.0
+        version: 1.11.1
+      '@napi-rs/wasm-runtime':
+        specifier: ^1.1.6
+        version: 1.1.6(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)
       ava:
         specifier: 3.15.0
         version: 3.15.0
@@ -4279,17 +4298,14 @@ snapshots:
     dependencies:
       '@emnapi/wasi-threads': 1.2.2
       tslib: 2.8.1
-    optional: true
 
   '@emnapi/runtime@1.11.1':
     dependencies:
       tslib: 2.8.1
-    optional: true
 
   '@emnapi/wasi-threads@1.2.2':
     dependencies:
       tslib: 2.8.1
-    optional: true
 
   '@esbuild-kit/core-utils@3.3.2':
     dependencies:
@@ -5093,7 +5109,6 @@ snapshots:
       '@emnapi/core': 1.11.1
       '@emnapi/runtime': 1.11.1
       '@tybys/wasm-util': 0.10.3
-    optional: true
 
   '@napi-rs/wasm-tools-android-arm-eabi@1.0.1':
     optional: true
@@ -5559,7 +5574,6 @@ snapshots:
   '@tybys/wasm-util@0.10.3':
     dependencies:
       tslib: 2.8.1
-    optional: true
 
   '@types/hast@3.0.4':
     dependencies:
@@ -7324,8 +7338,7 @@ snapshots:
 
   trim-off-newlines@1.0.3: {}
 
-  tslib@2.8.1:
-    optional: true
+  tslib@2.8.1: {}
 
   tsx@4.22.4:
     dependencies:

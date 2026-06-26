@@ -28,22 +28,27 @@ pub fn createExternalArraybuffer(env: napi.Env) !napi.ArrayBuffer {
     return try napi.ArrayBuffer.from(env, bytes);
 }
 
-pub fn mutateUint8Array(values: napi.Uint8Array) void {
+pub fn mutateUint8Array(values: napi.Uint8Array) !void {
     if (values.length() > 0) values.asSlice()[0] = 42;
+    try values.flush();
 }
 
-pub fn mutateUint16Array(values: napi.Uint16Array) void {
+pub fn mutateUint16Array(values: napi.Uint16Array) !void {
     if (values.length() > 0) values.asSlice()[0] = 65535;
+    try values.flush();
 }
 
-pub fn mutateInt16Array(values: napi.Int16Array) void {
+pub fn mutateInt16Array(values: napi.Int16Array) !void {
     if (values.length() > 0) values.asSlice()[0] = 32767;
+    try values.flush();
 }
 
-pub fn mutateFloat32Array(values: napi.Float32Array) void {
+pub fn mutateFloat32Array(values: napi.Float32Array) !void {
     if (values.length() > 0) values.asSlice()[0] = 3.33;
+    try values.flush();
 }
 
-pub fn mutateFloat64Array(values: napi.Float64Array) void {
+pub fn mutateFloat64Array(values: napi.Float64Array) !void {
     if (values.length() > 0) values.asSlice()[0] = std.math.pi;
+    try values.flush();
 }

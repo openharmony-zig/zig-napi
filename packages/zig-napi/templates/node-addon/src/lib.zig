@@ -8,10 +8,6 @@ pub fn hello() []const u8 {
     return "hello from __PACKAGE_NAME__";
 }
 
-pub fn requestedNapiVersion() i32 {
-    return @intFromEnum(napi.selectedNapiVersion());
-}
-
 comptime {
     napi.NODE_API_MODULE("__ADDON_NAME__", @This());
 }
