@@ -11,6 +11,9 @@ function loadAddon() {
     () => require(optionalPackage),
     () => require(path.join(__dirname, `${binaryName}.${platformArchABI}.node`)),
     () => require(path.join(__dirname, "zig-out", "node", `${binaryName}.${platformArchABI}.node`)),
+    () => require(optionalPackageName(packageName, "wasm32-wasi")),
+    () => require(path.join(__dirname, `${binaryName}.wasi.cjs`)),
+    () => require(path.join(__dirname, "zig-out", "node", `${binaryName}.wasi.cjs`)),
   ];
 
   const errors = [];
@@ -23,7 +26,7 @@ function loadAddon() {
   }
 
   throw new Error(
-    `Unable to load ${binaryName}.${platformArchABI}.node\n` +
+    `Unable to load ${binaryName}.${platformArchABI}.node or ${binaryName}.wasm32-wasi.wasm\n` +
       errors.map((error) => `- ${error.message}`).join("\n"),
   );
 }
