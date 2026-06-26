@@ -48,8 +48,9 @@ pub fn createEmptyExternalBuffer(env: napi.Env) !napi.Buffer {
     return try napi.Buffer.from(env, bytes);
 }
 
-pub fn mutateBuffer(buffer: napi.Buffer) void {
+pub fn mutateBuffer(buffer: napi.Buffer) !void {
     if (buffer.length() > 1) {
         buffer.asSlice()[1] = 42;
     }
+    try buffer.flush();
 }

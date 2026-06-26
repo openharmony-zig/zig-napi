@@ -218,9 +218,11 @@ fn linkWasiEmnapi(compile: *std.Build.Step.Compile, napi_module: *std.Build.Modu
     compile.root_module.export_symbol_names = &.{
         "malloc",
         "free",
+        "napi_register_wasm_v1",
+        "node_api_module_get_api_version_v1",
+        "emnapi_thread_crashed",
         "emnapi_async_worker_create",
         "emnapi_async_worker_init",
-        "emnapi_thread_crashed",
     };
 }
 

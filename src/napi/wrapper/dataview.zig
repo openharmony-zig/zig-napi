@@ -75,12 +75,16 @@ pub const DataView = struct {
 
     pub fn copy(env: Env, data: []const u8) !DataView {
         const arraybuffer = try ArrayBuffer.copy(env, data);
-        return DataView.fromArrayBuffer(env, arraybuffer, 0, data.len);
+        const result = try DataView.fromArrayBuffer(env, arraybuffer, 0, data.len);
+        try result.flush();
+        return result;
     }
 
     pub fn from(env: Env, data: []u8) !DataView {
         const arraybuffer = try ArrayBuffer.from(env, data);
-        return DataView.fromArrayBuffer(env, arraybuffer, 0, data.len);
+        const result = try DataView.fromArrayBuffer(env, arraybuffer, 0, data.len);
+        try result.flush();
+        return result;
     }
 
     pub fn asSlice(self: DataView) []u8 {
@@ -93,6 +97,16 @@ pub const DataView = struct {
 
     pub fn byteLength(self: DataView) usize {
         return self.byte_length;
+    }
+
+    /// Sync wasm-side mutations back to the JavaScript DataView when running on emnapi.
+    pub fn flush(self: DataView) !void {
+        if (self.byte_length == 0) return;
+        var raw = self.raw;
+        const status = napi.emnapi_sync_memory(self.env, false, &raw, 0, self.byte_length);
+        if (status != napi.napi_ok) {
+            return NapiError.Error.fromStatus(NapiError.Status.New(status));
+        }
     }
 
     fn endianOf(little_endian: bool) Endian {

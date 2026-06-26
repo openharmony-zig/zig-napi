@@ -11,6 +11,16 @@
   "devDependencies": {
     "ava": "3.15.0"
   },
+  "napi": {
+    "binaryNames": [
+      "compat_mode",
+      "example"
+    ],
+    "packageName": "zig-napi-node-test",
+    "targets": [
+      "wasm32-wasip1-threads"
+    ]
+  },
   "ava": {
     "files": [
       "napi-compat-mode/__tests__/**/*.spec.js",

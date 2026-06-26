@@ -182,10 +182,24 @@ function readZigNapiConfig(cwd, flags) {
   const config = configPath ? readJson(configPath) : packageJson.napi || {};
   return {
     binaryName: config.binaryName,
+    binaryNames: Array.isArray(config.binaryNames) ? config.binaryNames : [],
     packageName: config.packageName || packageJson.name,
     targets: Array.isArray(config.targets) ? config.targets : [],
     wasm: config.wasm || {},
   };
+}
+
+function readBinaryNames(config) {
+  const binaryNames = [];
+  if (typeof config.binaryName === "string" && config.binaryName) {
+    binaryNames.push(config.binaryName);
+  }
+  for (const binaryName of config.binaryNames) {
+    if (typeof binaryName === "string" && binaryName) {
+      binaryNames.push(binaryName);
+    }
+  }
+  return [...new Set(binaryNames)];
 }
 
 function isWasiTargetName(target) {
@@ -477,24 +491,27 @@ async function generateWasiBindings(cwd, flags) {
     isWasiTargetName(flags.target) || config.targets.some((target) => isWasiTargetName(target));
 
   if (!shouldGenerate) return;
-  if (!config.binaryName) fail("missing napi.binaryName; required to generate wasm bindings");
+  const binaryNames = readBinaryNames(config);
+  if (binaryNames.length === 0) fail("missing napi.binaryName; required to generate wasm bindings");
   if (!config.packageName) fail("missing package name; required to generate wasm bindings");
 
   const outputDir = path.resolve(cwd, flags["build-output-dir"] || ".");
   fs.mkdirSync(outputDir, { recursive: true });
 
-  const wasmFileName = `${config.binaryName}.wasm32-wasi`;
   const initialMemory = config.wasm.initialMemory || 4000;
   const maximumMemory = config.wasm.maximumMemory || 65536;
 
-  fs.writeFileSync(
-    path.join(outputDir, `${config.binaryName}.wasi.cjs`),
-    createWasiBinding(wasmFileName, config.packageName, initialMemory, maximumMemory),
-  );
-  fs.writeFileSync(
-    path.join(outputDir, `${config.binaryName}.wasi-browser.js`),
-    createWasiBrowserBinding(wasmFileName, initialMemory, maximumMemory),
-  );
+  for (const binaryName of binaryNames) {
+    const wasmFileName = `${binaryName}.wasm32-wasi`;
+    fs.writeFileSync(
+      path.join(outputDir, `${binaryName}.wasi.cjs`),
+      createWasiBinding(wasmFileName, config.packageName, initialMemory, maximumMemory),
+    );
+    fs.writeFileSync(
+      path.join(outputDir, `${binaryName}.wasi-browser.js`),
+      createWasiBrowserBinding(wasmFileName, initialMemory, maximumMemory),
+    );
+  }
   fs.writeFileSync(path.join(outputDir, "wasi-worker.mjs"), WASI_WORKER_TEMPLATE);
   fs.writeFileSync(path.join(outputDir, "wasi-worker-browser.mjs"), WASI_BROWSER_WORKER_TEMPLATE);
 }

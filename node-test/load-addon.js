@@ -22,15 +22,25 @@ function platformArchABIs() {
   }
 }
 
+function forceWasi() {
+  return process.env.NAPI_RS_FORCE_WASI === "true" || process.env.NAPI_RS_FORCE_WASI === "error";
+}
+
 module.exports = function loadAddon(name) {
-  const candidates = platformArchABIs().map((platformArchABI) =>
+  const nativeCandidates = platformArchABIs().flatMap((platformArchABI) => [
+    path.join(__dirname, "zig-out", "node", `${name}.${platformArchABI}.node`),
     path.join(__dirname, `${name}.${platformArchABI}.node`),
-  );
+  ]);
+  const wasiCandidates = [
+    path.join(__dirname, `${name}.wasi.cjs`),
+    path.join(__dirname, "zig-out", "node", `${name}.wasi.cjs`),
+  ];
+  const candidates = forceWasi() ? wasiCandidates : nativeCandidates.concat(wasiCandidates);
   const loadErrors = [];
 
   for (const candidate of candidates) {
     if (!fs.existsSync(candidate)) {
-      loadErrors.push(new Error(`Missing native binding ${candidate}`));
+      loadErrors.push(new Error(`Missing binding ${candidate}`));
       continue;
     }
 
@@ -43,7 +53,7 @@ module.exports = function loadAddon(name) {
 
   throw new Error(
     [
-      `Unable to load ${name}.node from: ${candidates.join(", ")}`,
+      `Unable to load ${name}.node or ${name}.wasm32-wasi.wasm`,
       ...loadErrors.map((error) => `- ${error && error.message ? error.message : error}`),
     ].join("\n"),
   );
