@@ -247,13 +247,15 @@ pub const ArrayBuffer = struct {
     }
 
     /// Detach the ArrayBuffer.
-    pub fn detach(self: ArrayBuffer) !void {
+    pub fn detach(self: *ArrayBuffer) !void {
         comptime options.requireNapiVersion(.v7);
 
         const status = napi.napi_detach_arraybuffer(self.env, self.raw);
         if (status != napi.napi_ok) {
             return NapiError.Error.fromStatus(NapiError.Status.New(status));
         }
+        self.data = &[_]u8{};
+        self.len = 0;
     }
 
     /// Check whether the ArrayBuffer has been detached.

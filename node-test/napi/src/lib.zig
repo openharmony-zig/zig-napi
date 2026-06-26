@@ -78,6 +78,7 @@ pub const createExternalBufferSlice = values.createExternalBufferSlice;
 pub const createBufferSliceFromCopiedData = values.createBufferSliceFromCopiedData;
 pub const getEmptyTypedArray = values.getEmptyTypedArray;
 pub const u8ArrayToArray = values.u8ArrayToArray;
+pub const uint8ClampedArrayToArray = values.uint8ClampedArrayToArray;
 pub const i8ArrayToArray = values.i8ArrayToArray;
 pub const u16ArrayToArray = values.u16ArrayToArray;
 pub const i16ArrayToArray = values.i16ArrayToArray;
