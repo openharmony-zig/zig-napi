@@ -125,6 +125,80 @@ pub const napi_module = extern struct {
 };
 
 const use_windows_msvc_dynamic_symbols = builtin.os.tag == .windows and builtin.abi == .msvc;
+const use_wasm_emnapi_symbols = builtin.cpu.arch == .wasm32 and builtin.os.tag == .wasi;
+
+const wasm_node_release = "node";
+
+const wasm_error_messages = [_][*c]const u8{
+    null,
+    "Invalid argument",
+    "An object was expected",
+    "A string was expected",
+    "A string or symbol was expected",
+    "A function was expected",
+    "A number was expected",
+    "A boolean was expected",
+    "An array was expected",
+    "Unknown failure",
+    "An exception is pending",
+    "The async work item was cancelled",
+    "napi_escape_handle already called on scope",
+    "Invalid handle scope usage",
+    "Invalid callback scope usage",
+    "Thread-safe function queue is full",
+    "Thread-safe function handle is closing",
+    "A bigint was expected",
+    "A date was expected",
+    "An arraybuffer was expected",
+    "A detachable arraybuffer was expected",
+    "Main thread would deadlock",
+    "External buffers are not allowed",
+    "Cannot run JavaScript",
+};
+
+var wasm_last_error_info = napi_extended_error_info{
+    .error_message = null,
+    .engine_reserved = null,
+    .engine_error_code = 0,
+    .error_code = napi_ok,
+};
+
+var wasm_node_version = napi_node_version{
+    .major = 0,
+    .minor = 0,
+    .patch = 0,
+    .release = wasm_node_release,
+};
+
+var wasm_module_filename: ?[*c]u8 = null;
+
+const WasmAsyncContext = extern struct {
+    low: i32,
+    high: i32,
+};
+
+const WasmAsyncCleanupHook = ?*const fn (?*anyopaque, WasmAsyncCleanupDone, ?*anyopaque) callconv(.c) void;
+const WasmAsyncCleanupDone = ?*const fn (?*anyopaque) callconv(.c) void;
+
+const WasmAsyncCleanupHookInfo = extern struct {
+    env: napi_env,
+    fun: WasmAsyncCleanupHook,
+    arg: ?*anyopaque,
+    started: bool,
+};
+
+const WasmAsyncCleanupHookHandle = extern struct {
+    handle: ?*WasmAsyncCleanupHookInfo,
+    env: napi_env,
+    user_hook: napi_async_cleanup_hook,
+    user_data: ?*anyopaque,
+    done_cb: WasmAsyncCleanupDone,
+    done_data: ?*anyopaque,
+};
+
+extern fn malloc(size: usize) callconv(.c) ?*anyopaque;
+extern fn calloc(count: usize, size: usize) callconv(.c) ?*anyopaque;
+extern fn free(ptr: ?*anyopaque) callconv(.c) void;
 
 const WindowsMsvcLoader = struct {
     const windows = std.os.windows;
@@ -196,6 +270,256 @@ fn callNodeApi(comptime name: [:0]const u8, comptime Fn: type, args: anytype) no
 
     const function = @extern(Fn, .{ .name = name });
     return @call(.auto, function, args);
+}
+
+fn callWasmEmnapiApi(comptime name: [:0]const u8, comptime Fn: type, args: anytype) nodeApiReturnType(Fn) {
+    const function = @extern(Fn, .{ .name = name });
+    return @call(.auto, function, args);
+}
+
+fn callWasmNodeApi(comptime wasm_name: [:0]const u8, comptime native_name: [:0]const u8, comptime Fn: type, args: anytype) nodeApiReturnType(Fn) {
+    if (use_wasm_emnapi_symbols) {
+        return callWasmEmnapiApi(wasm_name, Fn, args);
+    }
+    return callNodeApi(native_name, Fn, args);
+}
+
+fn wasmSetLastError(env: node_api_basic_env, status: napi_status) napi_status {
+    const Fn = *const fn (node_api_basic_env, napi_status, u32, ?*anyopaque) callconv(.c) napi_status;
+    return callWasmEmnapiApi("napi_set_last_error", Fn, .{ env, status, 0, null });
+}
+
+fn wasmClearLastError(env: node_api_basic_env) napi_status {
+    const Fn = *const fn (node_api_basic_env) callconv(.c) napi_status;
+    return callWasmEmnapiApi("napi_clear_last_error", Fn, .{env});
+}
+
+fn wasmEnvCheckGcAccess(env: napi_env) void {
+    const Fn = *const fn (napi_env) callconv(.c) void;
+    callWasmEmnapiApi("_emnapi_env_check_gc_access", Fn, .{env});
+}
+
+fn wasmGetLastErrorInfo(env: node_api_basic_env, result: [*c][*c]const napi_extended_error_info) napi_status {
+    if (env == null) return napi_invalid_arg;
+    if (result == null) return wasmSetLastError(env, napi_invalid_arg);
+
+    const Fn = *const fn (napi_env, [*c]napi_status, [*c]u32, [*c]?*anyopaque) callconv(.c) void;
+    callWasmEmnapiApi("_emnapi_get_last_error_info", Fn, .{ env, &wasm_last_error_info.error_code, &wasm_last_error_info.engine_error_code, &wasm_last_error_info.engine_reserved });
+
+    if (wasm_last_error_info.error_code < wasm_error_messages.len) {
+        wasm_last_error_info.error_message = wasm_error_messages[@intCast(wasm_last_error_info.error_code)];
+    } else {
+        @trap();
+    }
+
+    if (wasm_last_error_info.error_code == napi_ok) {
+        _ = wasmClearLastError(env);
+        wasm_last_error_info.engine_error_code = 0;
+        wasm_last_error_info.engine_reserved = null;
+    }
+
+    result.* = &wasm_last_error_info;
+    return napi_ok;
+}
+
+fn wasmGetNodeVersion(env: node_api_basic_env, version: [*c][*c]const napi_node_version) napi_status {
+    if (env == null) return napi_invalid_arg;
+    if (version == null) return wasmSetLastError(env, napi_invalid_arg);
+
+    const Fn = *const fn ([*c]u32, [*c]u32, [*c]u32) callconv(.c) void;
+    callWasmEmnapiApi("_emnapi_get_node_version", Fn, .{ &wasm_node_version.major, &wasm_node_version.minor, &wasm_node_version.patch });
+
+    version.* = &wasm_node_version;
+    return wasmClearLastError(env);
+}
+
+fn wasmAsyncInit(env: napi_env, async_resource: napi_value, async_resource_name: napi_value, result: [*c]napi_async_context) napi_status {
+    if (env == null) return napi_invalid_arg;
+    wasmEnvCheckGcAccess(env);
+    if (async_resource_name == null) return wasmSetLastError(env, napi_invalid_arg);
+    if (result == null) return wasmSetLastError(env, napi_invalid_arg);
+
+    const context_ptr = malloc(@sizeOf(WasmAsyncContext)) orelse return wasmSetLastError(env, napi_generic_failure);
+    const context: *WasmAsyncContext = @ptrCast(@alignCast(context_ptr));
+    const async_context: napi_async_context = @ptrCast(context);
+
+    const Fn = *const fn (napi_value, napi_value, napi_async_context) callconv(.c) napi_status;
+    const status = callWasmEmnapiApi("_emnapi_async_init_js", Fn, .{ async_resource, async_resource_name, async_context });
+    if (status != napi_ok) {
+        free(context_ptr);
+        return wasmSetLastError(env, status);
+    }
+
+    result.* = async_context;
+    return wasmClearLastError(env);
+}
+
+fn wasmAsyncDestroy(env: napi_env, async_context: napi_async_context) napi_status {
+    if (env == null) return napi_invalid_arg;
+    wasmEnvCheckGcAccess(env);
+    if (async_context == null) return wasmSetLastError(env, napi_invalid_arg);
+
+    const Fn = *const fn (napi_async_context) callconv(.c) napi_status;
+    const status = callWasmEmnapiApi("_emnapi_async_destroy_js", Fn, .{async_context});
+    if (status != napi_ok) {
+        return wasmSetLastError(env, status);
+    }
+
+    free(async_context);
+    return wasmClearLastError(env);
+}
+
+fn wasmRuntimeKeepalivePush() void {
+    const Fn = *const fn () callconv(.c) void;
+    callWasmEmnapiApi("_emnapi_runtime_keepalive_push", Fn, .{});
+}
+
+fn wasmRuntimeKeepalivePop() void {
+    const Fn = *const fn () callconv(.c) void;
+    callWasmEmnapiApi("_emnapi_runtime_keepalive_pop", Fn, .{});
+}
+
+fn wasmCtxIncreaseWaitingRequestCounter() void {
+    const Fn = *const fn () callconv(.c) void;
+    callWasmEmnapiApi("_emnapi_ctx_increase_waiting_request_counter", Fn, .{});
+}
+
+fn wasmCtxDecreaseWaitingRequestCounter() void {
+    const Fn = *const fn () callconv(.c) void;
+    callWasmEmnapiApi("_emnapi_ctx_decrease_waiting_request_counter", Fn, .{});
+}
+
+fn wasmEnvRef(env: napi_env) void {
+    const Fn = *const fn (napi_env) callconv(.c) void;
+    callWasmEmnapiApi("_emnapi_env_ref", Fn, .{env});
+}
+
+fn wasmEnvUnref(env: napi_env) void {
+    const Fn = *const fn (napi_env) callconv(.c) void;
+    callWasmEmnapiApi("_emnapi_env_unref", Fn, .{env});
+}
+
+fn wasmSetImmediate(callback: WasmAsyncCleanupDone, data: ?*anyopaque) void {
+    const Fn = *const fn (WasmAsyncCleanupDone, ?*anyopaque) callconv(.c) void;
+    callWasmEmnapiApi("_emnapi_set_immediate", Fn, .{ callback, data });
+}
+
+fn wasmFinishAsyncCleanupHook(arg: ?*anyopaque) callconv(.c) void {
+    _ = arg;
+    wasmRuntimeKeepalivePop();
+    wasmCtxDecreaseWaitingRequestCounter();
+}
+
+fn wasmRunAsyncCleanupHook(arg: ?*anyopaque) callconv(.c) void {
+    const info: *WasmAsyncCleanupHookInfo = @ptrCast(@alignCast(arg.?));
+    wasmRuntimeKeepalivePush();
+    wasmCtxIncreaseWaitingRequestCounter();
+    info.started = true;
+    info.fun.?(info.arg, wasmFinishAsyncCleanupHook, info);
+}
+
+fn wasmAchHandleHook(data: ?*anyopaque, done_cb: WasmAsyncCleanupDone, done_data: ?*anyopaque) callconv(.c) void {
+    const handle: *WasmAsyncCleanupHookHandle = @ptrCast(@alignCast(data.?));
+    handle.done_cb = done_cb;
+    handle.done_data = done_data;
+    handle.user_hook.?(@ptrCast(handle), handle.user_data);
+}
+
+fn wasmAddAsyncEnvironmentCleanupHook(env: napi_env, fun: WasmAsyncCleanupHook, arg: ?*anyopaque) ?*WasmAsyncCleanupHookInfo {
+    const info_ptr = malloc(@sizeOf(WasmAsyncCleanupHookInfo)) orelse return null;
+    const info: *WasmAsyncCleanupHookInfo = @ptrCast(@alignCast(info_ptr));
+    info.* = .{
+        .env = env,
+        .fun = fun,
+        .arg = arg,
+        .started = false,
+    };
+
+    const status = napi_add_env_cleanup_hook(env, wasmRunAsyncCleanupHook, info);
+    if (status != napi_ok) {
+        free(info_ptr);
+        return null;
+    }
+
+    return info;
+}
+
+fn wasmRemoveAsyncEnvironmentCleanupHook(info: *WasmAsyncCleanupHookInfo) void {
+    if (info.started) return;
+    _ = napi_remove_env_cleanup_hook(info.env, wasmRunAsyncCleanupHook, info);
+}
+
+fn wasmAchHandleCreate(env: napi_env, user_hook: napi_async_cleanup_hook, user_data: ?*anyopaque) ?*WasmAsyncCleanupHookHandle {
+    const handle_ptr = calloc(1, @sizeOf(WasmAsyncCleanupHookHandle)) orelse return null;
+    const handle: *WasmAsyncCleanupHookHandle = @ptrCast(@alignCast(handle_ptr));
+    handle.env = env;
+    handle.user_hook = user_hook;
+    handle.user_data = user_data;
+    handle.handle = wasmAddAsyncEnvironmentCleanupHook(env, wasmAchHandleHook, handle) orelse {
+        free(handle_ptr);
+        return null;
+    };
+    wasmEnvRef(env);
+
+    return handle;
+}
+
+fn wasmAchHandleEnvUnref(arg: ?*anyopaque) callconv(.c) void {
+    wasmEnvUnref(@ptrCast(arg));
+}
+
+fn wasmAchHandleDelete(handle: *WasmAsyncCleanupHookHandle) void {
+    if (handle.handle) |info| {
+        wasmRemoveAsyncEnvironmentCleanupHook(info);
+        free(info);
+    }
+    if (handle.done_cb) |done_cb| done_cb(handle.done_data);
+
+    wasmSetImmediate(wasmAchHandleEnvUnref, handle.env);
+    free(handle);
+}
+
+fn wasmAddAsyncCleanupHook(env: node_api_basic_env, hook: napi_async_cleanup_hook, data: ?*anyopaque, remove_handle: [*c]napi_async_cleanup_hook_handle) napi_status {
+    if (env == null) return napi_invalid_arg;
+    if (hook == null) return wasmSetLastError(env, napi_invalid_arg);
+
+    const handle = wasmAchHandleCreate(env, hook, data) orelse return wasmSetLastError(env, napi_generic_failure);
+    if (remove_handle != null) {
+        remove_handle.* = @ptrCast(handle);
+    }
+
+    return wasmClearLastError(env);
+}
+
+fn wasmRemoveAsyncCleanupHook(remove_handle: napi_async_cleanup_hook_handle) napi_status {
+    const handle = remove_handle orelse return napi_invalid_arg;
+    wasmAchHandleDelete(@ptrCast(@alignCast(handle)));
+    return napi_ok;
+}
+
+fn wasmGetModuleFileName(env: node_api_basic_env, result: [*c][*c]const u8) napi_status {
+    if (env == null) return napi_invalid_arg;
+    if (result == null) return wasmSetLastError(env, napi_invalid_arg);
+
+    if (wasm_module_filename) |filename| {
+        free(filename);
+        wasm_module_filename = null;
+    }
+
+    const Fn = *const fn (napi_env, [*c]u8, c_int) callconv(.c) c_int;
+    var len = callWasmEmnapiApi("_emnapi_get_filename", Fn, .{ env, null, 0 });
+    if (len == 0) {
+        result.* = "";
+    } else {
+        const filename_ptr = malloc(@intCast(len + 1)) orelse return wasmSetLastError(env, napi_generic_failure);
+        const filename: [*c]u8 = @ptrCast(@alignCast(filename_ptr));
+        len = callWasmEmnapiApi("_emnapi_get_filename", Fn, .{ env, filename, len + 1 });
+        filename[@intCast(len)] = 0;
+        wasm_module_filename = filename;
+        result.* = filename;
+    }
+
+    return wasmClearLastError(env);
 }
 
 fn loadNodeApi(comptime name: [:0]const u8, comptime wrapper: anytype) void {
@@ -364,6 +688,7 @@ fn loadAllNodeApiSymbols() void {
     loadNodeApi("napi_create_object_with_properties", napi_create_object_with_properties);
 }
 pub fn napi_get_last_error_info(arg0: node_api_basic_env, arg1: [*c][*c]const napi_extended_error_info) callconv(.c) napi_status {
+    if (use_wasm_emnapi_symbols) return wasmGetLastErrorInfo(arg0, arg1);
     const Fn = *const fn (node_api_basic_env, [*c][*c]const napi_extended_error_info) callconv(.c) napi_status;
     return callNodeApi("napi_get_last_error_info", Fn, .{ arg0, arg1 });
 }
@@ -748,6 +1073,7 @@ pub fn napi_adjust_external_memory(arg0: node_api_basic_env, arg1: i64, arg2: [*
     return callNodeApi("napi_adjust_external_memory", Fn, .{ arg0, arg1, arg2 });
 }
 pub fn napi_module_register(arg0: [*c]napi_module) callconv(.c) void {
+    if (use_wasm_emnapi_symbols) return;
     const Fn = *const fn ([*c]napi_module) callconv(.c) void;
     return callNodeApi("napi_module_register", Fn, .{arg0});
 }
@@ -756,10 +1082,12 @@ pub fn napi_fatal_error(arg0: [*c]const u8, arg1: usize, arg2: [*c]const u8, arg
     return callNodeApi("napi_fatal_error", Fn, .{ arg0, arg1, arg2, arg3 });
 }
 pub fn napi_async_init(arg0: napi_env, arg1: napi_value, arg2: napi_value, arg3: [*c]napi_async_context) callconv(.c) napi_status {
+    if (use_wasm_emnapi_symbols) return wasmAsyncInit(arg0, arg1, arg2, arg3);
     const Fn = *const fn (napi_env, napi_value, napi_value, [*c]napi_async_context) callconv(.c) napi_status;
     return callNodeApi("napi_async_init", Fn, .{ arg0, arg1, arg2, arg3 });
 }
 pub fn napi_async_destroy(arg0: napi_env, arg1: napi_async_context) callconv(.c) napi_status {
+    if (use_wasm_emnapi_symbols) return wasmAsyncDestroy(arg0, arg1);
     const Fn = *const fn (napi_env, napi_async_context) callconv(.c) napi_status;
     return callNodeApi("napi_async_destroy", Fn, .{ arg0, arg1 });
 }
@@ -804,6 +1132,7 @@ pub fn napi_cancel_async_work(arg0: node_api_basic_env, arg1: napi_async_work) c
     return callNodeApi("napi_cancel_async_work", Fn, .{ arg0, arg1 });
 }
 pub fn napi_get_node_version(arg0: node_api_basic_env, arg1: [*c][*c]const napi_node_version) callconv(.c) napi_status {
+    if (use_wasm_emnapi_symbols) return wasmGetNodeVersion(arg0, arg1);
     const Fn = *const fn (node_api_basic_env, [*c][*c]const napi_node_version) callconv(.c) napi_status;
     return callNodeApi("napi_get_node_version", Fn, .{ arg0, arg1 });
 }
@@ -973,10 +1302,12 @@ pub fn napi_object_seal(arg0: napi_env, arg1: napi_value) callconv(.c) napi_stat
     return callNodeApi("napi_object_seal", Fn, .{ arg0, arg1 });
 }
 pub fn napi_add_async_cleanup_hook(arg0: node_api_basic_env, arg1: napi_async_cleanup_hook, arg2: ?*anyopaque, arg3: [*c]napi_async_cleanup_hook_handle) callconv(.c) napi_status {
+    if (use_wasm_emnapi_symbols) return wasmAddAsyncCleanupHook(arg0, arg1, arg2, arg3);
     const Fn = *const fn (node_api_basic_env, napi_async_cleanup_hook, ?*anyopaque, [*c]napi_async_cleanup_hook_handle) callconv(.c) napi_status;
     return callNodeApi("napi_add_async_cleanup_hook", Fn, .{ arg0, arg1, arg2, arg3 });
 }
 pub fn napi_remove_async_cleanup_hook(arg0: napi_async_cleanup_hook_handle) callconv(.c) napi_status {
+    if (use_wasm_emnapi_symbols) return wasmRemoveAsyncCleanupHook(arg0);
     const Fn = *const fn (napi_async_cleanup_hook_handle) callconv(.c) napi_status;
     return callNodeApi("napi_remove_async_cleanup_hook", Fn, .{arg0});
 }
@@ -994,6 +1325,7 @@ pub fn node_api_throw_syntax_error(arg0: napi_env, arg1: [*c]const u8, arg2: [*c
     return callNodeApi("node_api_throw_syntax_error", Fn, .{ arg0, arg1, arg2 });
 }
 pub fn node_api_get_module_file_name(arg0: node_api_basic_env, arg1: [*c][*c]const u8) callconv(.c) napi_status {
+    if (use_wasm_emnapi_symbols) return wasmGetModuleFileName(arg0, arg1);
     const Fn = *const fn (node_api_basic_env, [*c][*c]const u8) callconv(.c) napi_status;
     return callNodeApi("node_api_get_module_file_name", Fn, .{ arg0, arg1 });
 }
@@ -1029,5 +1361,5 @@ pub fn node_api_post_finalizer(arg0: node_api_basic_env, arg1: napi_finalize, ar
 }
 pub fn napi_create_object_with_properties(arg0: napi_env, arg1: napi_value, arg2: [*c]const napi_value, arg3: [*c]const napi_value, arg4: usize, arg5: [*c]napi_value) callconv(.c) napi_status {
     const Fn = *const fn (napi_env, napi_value, [*c]const napi_value, [*c]const napi_value, usize, [*c]napi_value) callconv(.c) napi_status;
-    return callNodeApi("napi_create_object_with_properties", Fn, .{ arg0, arg1, arg2, arg3, arg4, arg5 });
+    return callWasmNodeApi("node_api_create_object_with_properties", "napi_create_object_with_properties", Fn, .{ arg0, arg1, arg2, arg3, arg4, arg5 });
 }
