@@ -103,7 +103,7 @@ pub const Object = struct {
         }
     }
 
-    pub fn SetValue(self: Object, key: anytype, value: anytype) !void {
+    pub fn SetProperty(self: Object, key: anytype, value: anytype) !void {
         const key_raw = try Napi.to_napi_value_auto(self.env, key, null);
         const n_value = try Napi.to_napi_value_auto(self.env, value, null);
         const status = napi.napi_set_property(self.env, self.raw, key_raw, n_value);
@@ -112,8 +112,8 @@ pub const Object = struct {
         }
     }
 
-    pub fn setValue(self: Object, key: anytype, value: anytype) !void {
-        try self.SetValue(key, value);
+    pub fn setProperty(self: Object, key: anytype, value: anytype) !void {
+        try self.SetProperty(key, value);
     }
 
     pub fn Get(self: Object, key: []const u8, comptime T: type) T {
@@ -156,14 +156,13 @@ pub const Object = struct {
         return Array.from_raw(self.env, raw);
     }
 
-    pub fn isDate(self: Object) bool {
+    pub fn isDate(self: Object) !bool {
         comptime options.requireNapiVersion(.v5);
 
         var result: bool = false;
         const status = napi.napi_is_date(self.env, self.raw, &result);
         if (status != napi.napi_ok) {
-            NapiError.last_error = NapiError.Error.withStatus(NapiError.Status.New(status));
-            return false;
+            return NapiError.Error.fromStatus(NapiError.Status.New(status));
         }
         return result;
     }

@@ -6,14 +6,10 @@ const DateCandidate = union(enum) {
     object: napi.Object,
 };
 
-pub fn isDate(value: DateCandidate) bool {
+pub fn isDate(value: DateCandidate) !bool {
     return switch (value) {
         .number => false,
-        .object => |object| blk: {
-            var result = false;
-            _ = c.napi_is_date(object.env, object.raw, &result);
-            break :blk result;
-        },
+        .object => |object| try object.isDate(),
     };
 }
 
@@ -25,8 +21,5 @@ pub fn createDate(env: napi.Env, value: f64) !c.napi_value {
 }
 
 pub fn getDateValue(value: napi.Object) !f64 {
-    var result: f64 = 0;
-    const status = c.napi_get_date_value(value.env, value.raw, &result);
-    if (status != c.napi_ok) return napi.Error.fromStatus(napi.Status.New(status));
-    return result;
+    return try value.dateValue();
 }
