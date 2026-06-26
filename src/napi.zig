@@ -60,6 +60,7 @@ pub const ArrayBuffer = arraybuffer.ArrayBuffer;
 pub const TypedArray = typedarray.TypedArray;
 pub const Int8Array = typedarray.Int8Array;
 pub const Uint8Array = typedarray.Uint8Array;
+pub const Uint8ClampedArray = typedarray.Uint8ClampedArray;
 pub const Int16Array = typedarray.Int16Array;
 pub const Uint16Array = typedarray.Uint16Array;
 pub const Int32Array = typedarray.Int32Array;
