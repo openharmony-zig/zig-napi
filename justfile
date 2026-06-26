@@ -52,3 +52,12 @@ test-node-matrix:
 format:
     zig fmt $(git ls-files '*.zig' '*.zon')
     oxk format $(git ls-files '*.js' '*.jsx' '*.ts' '*.tsx' '*.ets')
+
+website-dev:
+    cd website && npm run dev
+
+website-build:
+    cd website && npm run build
+
+website-preview:
+    cd website && npm run preview

@@ -2,6 +2,8 @@
 .zig-cache
 zig-out
 node_modules
+website/.void
+website/dist
 node-test/*.node
 .tmp_arkvm_runner
 .tmp_arkvm_memory_runner
