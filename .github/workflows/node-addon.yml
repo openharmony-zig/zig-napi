@@ -87,7 +87,7 @@ jobs:
 
       - name: Build and test wasm Node addon
         env:
-          ZIG_NAPI_FORCE_WASI: '1'
+          NAPI_RS_FORCE_WASI: 'error'
         run: |
           node bin/zig-napi.js build --cwd examples/node --target wasm32-wasip1-threads -- --summary all
           node examples/node/test.js

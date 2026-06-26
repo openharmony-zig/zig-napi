@@ -263,7 +263,11 @@ if (!__wasmFilePath) {
   }
 }
 
-const { napiModule: __napiModule } = __emnapiInstantiateNapiModuleSync(__nodeFs.readFileSync(__wasmFilePath), {
+const {
+  instance: __napiInstance,
+  module: __wasiModule,
+  napiModule: __napiModule,
+} = __emnapiInstantiateNapiModuleSync(__nodeFs.readFileSync(__wasmFilePath), {
   context: __emnapiContext,
   asyncWorkPoolSize: (function () {
     const threadsSizeFromEnv = Number(process.env.NAPI_RS_ASYNC_WORK_POOL_SIZE ?? process.env.UV_THREADPOOL_SIZE)
@@ -278,7 +282,24 @@ const { napiModule: __napiModule } = __emnapiInstantiateNapiModuleSync(__nodeFs.
     worker.onmessage = ({ data }) => {
       __wasmCreateOnMessageForFsProxy(__nodeFs)(data)
     }
-    worker.unref()
+
+    {
+      const kPublicPort = Object.getOwnPropertySymbols(worker).find((symbol) =>
+        symbol.toString().includes('kPublicPort')
+      )
+      if (kPublicPort) {
+        worker[kPublicPort].ref = () => {}
+      }
+
+      const kHandle = Object.getOwnPropertySymbols(worker).find((symbol) =>
+        symbol.toString().includes('kHandle')
+      )
+      if (kHandle) {
+        worker[kHandle].ref = () => {}
+      }
+
+      worker.unref()
+    }
     return worker
   },
   overwriteImports(importObject) {
@@ -289,6 +310,13 @@ const { napiModule: __napiModule } = __emnapiInstantiateNapiModuleSync(__nodeFs.
       memory: __sharedMemory,
     }
     return importObject
+  },
+  beforeInit({ instance }) {
+    for (const name of Object.keys(instance.exports)) {
+      if (name.startsWith('__napi_register__')) {
+        instance.exports[name]()
+      }
+    }
   },
 })
 
@@ -319,7 +347,11 @@ const __sharedMemory = new WebAssembly.Memory({
 
 const __wasmFile = await fetch(__wasmUrl).then((res) => res.arrayBuffer())
 
-const { napiModule: __napiModule } = __emnapiInstantiateNapiModuleSync(__wasmFile, {
+const {
+  instance: __napiInstance,
+  module: __wasiModule,
+  napiModule: __napiModule,
+} = __emnapiInstantiateNapiModuleSync(__wasmFile, {
   context: __emnapiContext,
   asyncWorkPoolSize: 4,
   wasi: __wasi,
@@ -336,6 +368,13 @@ const { napiModule: __napiModule } = __emnapiInstantiateNapiModuleSync(__wasmFil
       memory: __sharedMemory,
     }
     return importObject
+  },
+  beforeInit({ instance }) {
+    for (const name of Object.keys(instance.exports)) {
+      if (name.startsWith('__napi_register__')) {
+        instance.exports[name]()
+      }
+    }
   },
 })
 

@@ -7,14 +7,19 @@ const binaryName = "__ADDON_NAME__";
 function loadAddon() {
   const platformArchABI = detectPlatformArchABI();
   const optionalPackage = optionalPackageName(packageName, platformArchABI);
-  const candidates = [
-    () => require(optionalPackage),
-    () => require(path.join(__dirname, `${binaryName}.${platformArchABI}.node`)),
+  const forceWasi =
+    process.env.NAPI_RS_FORCE_WASI === "true" || process.env.NAPI_RS_FORCE_WASI === "error";
+  const nativeCandidates = [
     () => require(path.join(__dirname, "zig-out", "node", `${binaryName}.${platformArchABI}.node`)),
-    () => require(optionalPackageName(packageName, "wasm32-wasi")),
-    () => require(path.join(__dirname, `${binaryName}.wasi.cjs`)),
-    () => require(path.join(__dirname, "zig-out", "node", `${binaryName}.wasi.cjs`)),
+    () => require(path.join(__dirname, `${binaryName}.${platformArchABI}.node`)),
+    () => require(optionalPackage),
   ];
+  const wasiCandidates = [
+    () => require(path.join(__dirname, "zig-out", "node", `${binaryName}.wasi.cjs`)),
+    () => require(path.join(__dirname, `${binaryName}.wasi.cjs`)),
+    () => require(optionalPackageName(packageName, "wasm32-wasi")),
+  ];
+  const candidates = forceWasi ? wasiCandidates : nativeCandidates.concat(wasiCandidates);
 
   const errors = [];
   for (const candidate of candidates) {
@@ -25,10 +30,13 @@ function loadAddon() {
     }
   }
 
-  throw new Error(
+  const message =
     `Unable to load ${binaryName}.${platformArchABI}.node or ${binaryName}.wasm32-wasi.wasm\n` +
-      errors.map((error) => `- ${error.message}`).join("\n"),
-  );
+    errors.map((error) => `- ${error.message}`).join("\n");
+  if (process.env.NAPI_RS_FORCE_WASI === "error") {
+    throw new Error(`Unable to load forced WASI binding for ${binaryName}\n${message}`);
+  }
+  throw new Error(message);
 }
 
 function optionalPackageName(name, platformArchABI) {
