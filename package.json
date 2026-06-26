@@ -1,0 +1,36 @@
+{
+  "name": "zig-napi",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CLI tools and Zig helpers for building Node.js addons with zig-napi.",
+  "bin": {
+    "zig-napi": "bin/zig-napi.js"
+  },
+  "files": [
+    "bin",
+    "templates",
+    "src",
+    "build.zig",
+    "build.zig.zon",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "format": "oxk format $(git ls-files '*.js' '*.jsx' '*.ts' '*.tsx' '*.ets')",
+    "lint": "oxlint . --deny-warnings",
+    "lint:fix": "oxlint . --fix",
+    "zig-napi": "node bin/zig-napi.js",
+    "node-example:build": "node bin/zig-napi.js build --cwd examples/node -- --summary all",
+    "node-example:create-npm-dirs": "node bin/zig-napi.js create-npm-dirs --cwd examples/node",
+    "node-example:artifacts": "node bin/zig-napi.js artifacts --cwd examples/node --output-dir zig-out/node",
+    "node-example:pre-publish": "node bin/zig-napi.js pre-publish --cwd examples/node --no-gh-release --skip-optional-publish",
+    "node-example:package": "node bin/zig-napi.js package --cwd examples/node"
+  },
+  "dependencies": {
+    "@napi-rs/cli": "^3.7.2"
+  },
+  "devDependencies": {
+    "oxlint": "^1.71.0"
+  },
+  "license": "MIT"
+}

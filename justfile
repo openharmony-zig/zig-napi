@@ -53,6 +53,9 @@ format:
     zig fmt $(git ls-files '*.zig' '*.zon')
     oxk format $(git ls-files '*.js' '*.jsx' '*.ts' '*.tsx' '*.ets')
 
+lint:
+    npm run lint
+
 website-dev:
     cd website && npm run dev
 

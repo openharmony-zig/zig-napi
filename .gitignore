@@ -4,6 +4,8 @@ zig-out
 node_modules
 website/.void
 website/dist
+examples/node/*.node
+examples/node/npm/*/*.node
 node-test/*.node
 .tmp_arkvm_runner
 .tmp_arkvm_memory_runner

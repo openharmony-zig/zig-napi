@@ -28,7 +28,7 @@ export function assertArrayEqual(
 export function assertThrows(run: () => void, message: string) {
   try {
     run();
-  } catch (_) {
+  } catch {
     return;
   }
   fail(`${message}: expected throw`);
