@@ -2,7 +2,16 @@ const builtin = @import("builtin");
 
 const node = @import("node.zig");
 
-pub const enabled = builtin.cpu.arch == .wasm32 and builtin.os.tag == .wasi;
+const is_enabled = builtin.cpu.arch == .wasm32 and builtin.os.tag == .wasi;
+
+pub const enabled = enabled: {
+    _ = AsyncWorkerExports;
+    break :enabled is_enabled;
+};
+
+pub fn setup() void {
+    _ = AsyncWorkerExports;
+}
 
 const node_release = "node";
 
@@ -116,11 +125,11 @@ fn asyncWorkerCreate(directly_spawn: c_int, global_address: ?*anyopaque) callcon
     return @intCast(block_addr);
 }
 
-comptime {
-    if (enabled) {
-        @export(&asyncWorkerCreate, .{ .name = "emnapi_async_worker_create" });
+const AsyncWorkerExports = if (is_enabled) struct {
+    export fn emnapi_async_worker_create(directly_spawn: c_int, global_address: ?*anyopaque) callconv(.c) c_int {
+        return asyncWorkerCreate(directly_spawn, global_address);
     }
-}
+} else struct {};
 
 fn setLastError(env: node.node_api_basic_env, status: node.napi_status) node.napi_status {
     const Fn = *const fn (node.node_api_basic_env, node.napi_status, u32, ?*anyopaque) callconv(.c) node.napi_status;

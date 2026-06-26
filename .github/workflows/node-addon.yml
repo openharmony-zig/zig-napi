@@ -85,9 +85,20 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build and test wasm Node addon
+      - name: Build and test wasm Node example
         env:
           NAPI_RS_FORCE_WASI: 'error'
         run: |
           node bin/zig-napi.js build --cwd examples/node --target wasm32-wasip1-threads -- --summary all
           node examples/node/test.js
+
+      - name: Build and test wasm node-test matrix
+        env:
+          NAPI_RS_FORCE_WASI: 'error'
+        run: |
+          cd node-test
+          npm install --no-package-lock
+          cd ..
+          node bin/zig-napi.js build --cwd node-test --target wasm32-wasip1-threads -- --summary all
+          cd node-test
+          npm test

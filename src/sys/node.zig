@@ -171,6 +171,9 @@ const WindowsMsvcLoader = struct {
 };
 
 pub fn setup() void {
+    if (wasm.enabled) {
+        wasm.setup();
+    }
     if (use_windows_msvc_dynamic_symbols) {
         WindowsMsvcLoader.setup();
         loadAllNodeApiSymbols();

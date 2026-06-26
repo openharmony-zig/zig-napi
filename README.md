@@ -178,7 +178,7 @@ Node.js matrix tests live in `node-test`. It mirrors the NAPI-RS example split w
 - `node-test/napi-compat-mode` covers compat-mode style APIs and runtime-gated N-API v4/v5/v6/v7/v8 scenarios.
 - `node-test/napi` covers the non compat-mode example surface such as values, strict validation, async, ThreadSafeFunction, and worker-thread loading.
 
-The Node addon CI runs those tests on Linux, macOS, and Windows for Node.js 12, 14, 16, 18, 20, and 22.
+The Node addon CI runs those tests on Linux, macOS, and Windows for Node.js 12, 14, 16, 18, 20, 22, and 24. It also builds `wasm32-wasip1-threads` addons and runs `node-test` with `NAPI_RS_FORCE_WASI=error` to verify the napi-rs compatible wasm runtime path.
 
 ## Website
 
