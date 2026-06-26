@@ -137,10 +137,13 @@ export interface ExternalPoint {
 export declare function test_i32(left: number, right: number): number;
 export declare function test_f32(left: number, right: number): number;
 export declare function test_u32(left: number, right: number): number;
+export declare const custom_add: (left: Number, right: Number) => Number;
 export declare function hello(name: string): string;
 export declare function raw_string_len(value: string): number;
 export declare function copied_string_len(value: string): number;
 export declare const text: string;
+export declare const custom_text: String;
+export declare function custom_string(name: string): String;
 export declare function throw_error(): void;
 export declare function result_ok(): number;
 export declare function result_error(): number;
