@@ -1,5 +1,4 @@
 const napi = @import("napi");
-const c = napi.napi_sys.napi_sys;
 
 const DateCandidate = union(enum) {
     number: i32,
@@ -13,11 +12,8 @@ pub fn isDate(value: DateCandidate) !bool {
     };
 }
 
-pub fn createDate(env: napi.Env, value: f64) !c.napi_value {
-    var raw: c.napi_value = undefined;
-    const status = c.napi_create_date(env.raw, value, &raw);
-    if (status != c.napi_ok) return napi.Error.fromStatus(napi.Status.New(status));
-    return raw;
+pub fn createDate(env: napi.Env, value: f64) !napi.Object {
+    return try env.createDate(value);
 }
 
 pub fn getDateValue(value: napi.Object) !f64 {

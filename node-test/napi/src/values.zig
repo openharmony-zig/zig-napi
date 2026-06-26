@@ -66,12 +66,6 @@ fn allocator() std.mem.Allocator {
     return napi.globalAllocator();
 }
 
-fn check(status: c.napi_status) !void {
-    if (status != c.napi_ok) {
-        return napi.Error.fromStatus(napi.Status.New(status));
-    }
-}
-
 fn concatRustString(input: []const u8) ![]u8 {
     return try std.fmt.allocPrint(allocator(), "{s} + Rust 🦀 string!", .{input});
 }
@@ -109,9 +103,7 @@ fn copyAs(comptime Dst: type, input: anytype) ![]Dst {
 }
 
 pub fn getNapiVersion(env: napi.Env) u32 {
-    var result: u32 = 0;
-    _ = c.napi_get_version(env.raw, &result);
-    return result;
+    return env.getNapiVersion();
 }
 
 pub fn add(left: i32, right: i32) i32 {
@@ -184,20 +176,20 @@ pub fn translatePoint(point: Point, dx: i32, dy: i32) Point {
     };
 }
 
-pub fn getMapping(env: napi.Env) !c.napi_value {
+pub fn getMapping(env: napi.Env) !napi.Object {
     const object = try napi.Object.Create(env);
     try object.Set("a", @as(i32, 101));
     try object.Set("b", @as(i32, 102));
     try object.Set("\x00c", @as(i32, 103));
-    return object.raw;
+    return object;
 }
 
 pub fn sumMapping(object: napi.Object) i32 {
     return object.Get("a", i32) + object.Get("b", i32) + object.Get("\x00c", i32);
 }
 
-pub fn indexmapPassthrough(object: napi.Object) c.napi_value {
-    return object.raw;
+pub fn indexmapPassthrough(object: napi.Object) napi.Object {
+    return object;
 }
 
 pub fn createNativeWrap(env: napi.Env, value: u32) !napi.Object {
@@ -279,16 +271,12 @@ pub fn createObj() Point {
     return .{ .x = 1, .y = 2 };
 }
 
-pub fn listObjKeys(env: napi.Env, object: napi.Object) !c.napi_value {
-    var raw: c.napi_value = undefined;
-    try check(c.napi_get_property_names(env.raw, object.raw, &raw));
-    return raw;
+pub fn listObjKeys(_: napi.Env, object: napi.Object) !napi.Array {
+    return try object.propertyNames();
 }
 
-pub fn getGlobal(env: napi.Env) !c.napi_value {
-    var raw: c.napi_value = undefined;
-    try check(c.napi_get_global(env.raw, &raw));
-    return raw;
+pub fn getGlobal(env: napi.Env) !napi.Object {
+    return try env.getGlobal();
 }
 
 pub fn getUndefined(env: napi.Env) napi.Undefined {
@@ -307,20 +295,14 @@ pub fn returnNull(env: napi.Env) napi.Null {
     return env.getNull();
 }
 
-pub fn createSymbol(env: napi.Env, description: []const u8) !c.napi_value {
-    const desc = napi.String.New(env, description);
-    var symbol: c.napi_value = undefined;
-    try check(c.napi_create_symbol(env.raw, desc.raw, &symbol));
-    return symbol;
+pub fn createSymbol(env: napi.Env, description: []const u8) !napi.NapiValue {
+    return try env.createSymbol(description);
 }
 
-pub fn setSymbolInObj(env: napi.Env, object: napi.Object) !c.napi_value {
-    const desc = napi.String.New(env, "native");
-    var symbol: c.napi_value = undefined;
-    try check(c.napi_create_symbol(env.raw, desc.raw, &symbol));
-    const value = napi.String.New(env, "symbol-value");
-    try check(c.napi_set_property(env.raw, object.raw, symbol, value.raw));
-    return object.raw;
+pub fn setSymbolInObj(env: napi.Env, object: napi.Object) !napi.Object {
+    const symbol = try env.createSymbol("native");
+    try object.SetProperty(symbol, "symbol-value");
+    return object;
 }
 
 pub fn throwError() !void {
@@ -388,8 +370,8 @@ pub fn appendBuffer(env: napi.Env, input: napi.Buffer) !napi.Buffer {
     return try napi.Buffer.copy(env, out);
 }
 
-pub fn bufferPassThrough(input: napi.Buffer) c.napi_value {
-    return input.raw;
+pub fn bufferPassThrough(input: napi.Buffer) napi.Buffer {
+    return input;
 }
 
 pub fn createArraybuffer(env: napi.Env, len: u32) !napi.ArrayBuffer {
@@ -404,8 +386,8 @@ pub fn acceptArraybuffer(input: napi.ArrayBuffer) usize {
     return input.length();
 }
 
-pub fn arrayBufferPassThrough(input: napi.ArrayBuffer) c.napi_value {
-    return input.raw;
+pub fn arrayBufferPassThrough(input: napi.ArrayBuffer) napi.ArrayBuffer {
+    return input;
 }
 
 pub fn getBufferSlice(env: napi.Env, input: napi.Buffer, start: u32, end: u32) !napi.Buffer {
@@ -587,17 +569,13 @@ pub fn bigintFromI128(env: napi.Env) napi.BigInt {
     return napi.BigInt.New(env, @as(i128, -100));
 }
 
-pub fn eitherStringOrNumber(env: napi.Env, value: NumberOrString) !c.napi_value {
+pub fn eitherStringOrNumber(env: napi.Env, value: NumberOrString) !napi.NapiValue {
     switch (value) {
         .number => |number| {
-            var raw: c.napi_value = undefined;
-            try check(c.napi_create_int32(env.raw, number + 100, &raw));
-            return raw;
+            return napi.NapiValue.from_raw(env.raw, napi.Number.New(env, number + 100).raw);
         },
         .string => |string| {
-            var raw: c.napi_value = undefined;
-            try check(c.napi_create_string_utf8(env.raw, string.ptr, string.len, &raw));
-            return raw;
+            return napi.NapiValue.from_raw(env.raw, napi.String.New(env, string).raw);
         },
     }
 }
@@ -661,6 +639,7 @@ pub fn createMisalignedExternal(env: napi.Env) !c.napi_value {
 
     const byte_ptr: [*]u8 = @ptrCast(storage.ptr);
     var raw: c.napi_value = undefined;
+    // Intentionally bypass zig-napi to create a foreign misaligned external for negative tests.
     const status = c.napi_create_external(
         env.raw,
         @ptrCast(byte_ptr + 1),
