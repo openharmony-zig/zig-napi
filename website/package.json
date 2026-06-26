@@ -1,0 +1,28 @@
+{
+  "name": "zig-napi-website",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host 127.0.0.1"
+  },
+  "dependencies": {
+    "@fontsource/maple-mono": "^5.2.6",
+    "@void/md": "^0.9.3",
+    "@void/react": "^0.9.3",
+    "react": "^19.2.1",
+    "react-dom": "^19.2.1",
+    "void": "^0.9.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.1",
+    "@types/node": "^26.0.1",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "tailwindcss": "^4.3.1",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.0"
+  }
+}

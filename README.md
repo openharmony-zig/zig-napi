@@ -155,6 +155,17 @@ Node.js matrix tests live in `node-test`. It mirrors the NAPI-RS example split w
 
 The Node addon CI runs those tests on Linux, macOS, and Windows for Node.js 12, 14, 16, 18, 20, and 22.
 
+## Website
+
+The documentation website lives in `website` and builds as a standalone Vite site.
+
+```bash
+cd website
+npm install
+npm run dev
+npm run build
+```
+
 ## Credits
 
 This zig-napi project is heavily inspired by:
