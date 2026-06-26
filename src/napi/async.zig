@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const napi = @import("napi-sys").napi_sys;
 const Env = @import("./env.zig").Env;
 const Promise = @import("./value/promise.zig").Promise;
@@ -18,6 +19,8 @@ var threaded_runtime_active_operations: usize = 0;
 var threaded_runtime_cleanup_registered = false;
 var threaded_runtime_cleanup_requested = false;
 var threaded_runtime: std.Io.Threaded = undefined;
+
+const use_wasm_emnapi_async_work = builtin.cpu.arch == .wasm32 and builtin.os.tag == .wasi;
 
 pub const RuntimeModel = enum {
     single,
@@ -402,6 +405,7 @@ fn AsyncTaskOperation(
         cancel_token: CancelToken = .{},
         future: ?std.Io.Future(void) = null,
         controller_future: ?std.Io.Future(void) = null,
+        async_work: napi.napi_async_work = null,
         tsfn_raw: napi.napi_threadsafe_function = null,
         state_mutex: std.Io.Mutex = .init,
         state_cond: std.Io.Condition = .init,
@@ -457,6 +461,11 @@ fn AsyncTaskOperation(
             switch (effectiveRuntime(runtime)) {
                 .single => self.runSingle(),
                 .thread => {
+                    if (comptime use_wasm_emnapi_async_work) {
+                        try self.runWasmAsyncWork();
+                        return promise;
+                    }
+
                     const io = try acquireThreadedRuntime(self.env);
                     self.uses_threaded_runtime = true;
                     try self.initThreadDispatcher();
@@ -504,7 +513,13 @@ fn AsyncTaskOperation(
             defer self.markTaskDone();
 
             const task_runtime = effectiveRuntime(runtime);
-            const io = ioForRuntime(task_runtime);
+            self.runTaskWithIo(ioForRuntime(task_runtime), switch (task_runtime) {
+                .single => .single,
+                .thread => .thread,
+            });
+        }
+
+        fn runTaskWithIo(self: *Self, io: std.Io, effective_runtime: RuntimeModel) void {
             var group: std.Io.Group = .init;
             defer group.cancel(io);
 
@@ -513,10 +528,7 @@ fn AsyncTaskOperation(
                 .io = io,
                 .group = &group,
                 .runtime = runtime,
-                .effective_runtime = switch (task_runtime) {
-                    .single => .single,
-                    .thread => .thread,
-                },
+                .effective_runtime = effective_runtime,
                 .cancel_token = &self.cancel_token,
                 .emitter_ptr = if (Event == void) null else @ptrCast(self),
                 .emit_fn = if (Event == void) null else emitFromContext,
@@ -529,6 +541,52 @@ fn AsyncTaskOperation(
             };
             group.await(io) catch |err| {
                 self.err = mapAnyError(err);
+            };
+        }
+
+        fn runWasmAsyncWork(self: *Self) !void {
+            try self.initThreadDispatcher();
+
+            const resource_name = String.New(Env.from_raw(self.env), "ZigAsyncTask");
+            var async_work: napi.napi_async_work = null;
+            const create_status = napi.napi_create_async_work(
+                self.env,
+                null,
+                resource_name.raw,
+                wasmAsyncWorkExecute,
+                wasmAsyncWorkComplete,
+                @ptrCast(self),
+                &async_work,
+            );
+            if (create_status != napi.napi_ok) {
+                return NapiError.Error.fromStatus(NapiError.Status.New(create_status));
+            }
+            self.async_work = async_work;
+
+            const queue_status = napi.napi_queue_async_work(self.env, async_work);
+            if (queue_status != napi.napi_ok) {
+                _ = napi.napi_delete_async_work(self.env, async_work);
+                self.async_work = null;
+                return NapiError.Error.fromStatus(NapiError.Status.New(queue_status));
+            }
+        }
+
+        fn wasmAsyncWorkExecute(_: napi.napi_env, data: ?*anyopaque) callconv(.c) void {
+            const self: *Self = @ptrCast(@alignCast(data));
+            self.runTaskWithIo(singleIo(), .thread);
+        }
+
+        fn wasmAsyncWorkComplete(inner_env: napi.napi_env, status: napi.napi_status, data: ?*anyopaque) callconv(.c) void {
+            const self: *Self = @ptrCast(@alignCast(data));
+            if (status == napi.napi_cancelled) {
+                self.cancel_dispatched = true;
+            }
+            if (self.async_work != null) {
+                _ = napi.napi_delete_async_work(inner_env, self.async_work);
+                self.async_work = null;
+            }
+            self.queueCompletion() catch {
+                self.dispatchCompletion(inner_env);
             };
         }
 
@@ -554,6 +612,11 @@ fn AsyncTaskOperation(
             defer self.state_mutex.unlock(io);
             if (self.task_done) return;
             self.cancel_requested = true;
+            if (comptime use_wasm_emnapi_async_work) {
+                if (self.async_work != null) {
+                    _ = napi.napi_cancel_async_work(self.env, self.async_work);
+                }
+            }
             self.state_cond.signal(io);
         }
 
@@ -778,6 +841,10 @@ fn AsyncTaskOperation(
             if (self.tsfn_raw != null) {
                 _ = napi.napi_release_threadsafe_function(self.tsfn_raw, napi.napi_tsfn_release);
                 self.tsfn_raw = null;
+            }
+            if (self.async_work != null) {
+                _ = napi.napi_delete_async_work(env_raw, self.async_work);
+                self.async_work = null;
             }
             var deinit_state = Napi.DeinitState{};
             Napi.deinit_napi_value_with_state(Input, self.input, &deinit_state);

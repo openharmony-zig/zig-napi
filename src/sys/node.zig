@@ -196,9 +196,19 @@ const WasmAsyncCleanupHookHandle = extern struct {
     done_data: ?*anyopaque,
 };
 
+const WasmAsyncWorkerArgs = extern struct {
+    stack_base: ?*anyopaque,
+    tls_base: ?*anyopaque,
+};
+
+const wasm_async_worker_stack_size = 2 * 1024 * 1024;
+
 extern fn malloc(size: usize) callconv(.c) ?*anyopaque;
 extern fn calloc(count: usize, size: usize) callconv(.c) ?*anyopaque;
 extern fn free(ptr: ?*anyopaque) callconv(.c) void;
+
+extern fn _emnapi_async_worker(arg: ?*anyopaque) callconv(.c) ?*anyopaque;
+extern fn _emnapi_spawn_worker(worker: *const fn (?*anyopaque) callconv(.c) ?*anyopaque, arg: ?*anyopaque) callconv(.c) c_int;
 
 const WindowsMsvcLoader = struct {
     const windows = std.os.windows;
@@ -282,6 +292,32 @@ fn callWasmNodeApi(comptime wasm_name: [:0]const u8, comptime native_name: [:0]c
         return callWasmEmnapiApi(wasm_name, Fn, args);
     }
     return callNodeApi(native_name, Fn, args);
+}
+
+fn wasmAsyncWorkerCreate(directly_spawn: c_int, global_address: ?*anyopaque) callconv(.c) c_int {
+    // Delegate actual worker creation to @napi-rs/wasm-runtime; this only matches emnapi's C ABI.
+    if (directly_spawn != 0) {
+        const index = _emnapi_spawn_worker(_emnapi_async_worker, global_address);
+        if (index < 0) return 0;
+        return -(index + 1);
+    }
+
+    const args_size = @sizeOf(WasmAsyncWorkerArgs);
+    const total_size = args_size + wasm_async_worker_stack_size;
+    const block_ptr = calloc(1, total_size) orelse return 0;
+    const block_addr = @intFromPtr(block_ptr);
+    const args: *WasmAsyncWorkerArgs = @ptrCast(@alignCast(block_ptr));
+    args.* = .{
+        .stack_base = @ptrFromInt(block_addr + total_size),
+        .tls_base = null,
+    };
+    return @intCast(block_addr);
+}
+
+comptime {
+    if (use_wasm_emnapi_symbols) {
+        @export(&wasmAsyncWorkerCreate, .{ .name = "emnapi_async_worker_create" });
+    }
 }
 
 fn wasmSetLastError(env: node_api_basic_env, status: napi_status) napi_status {
