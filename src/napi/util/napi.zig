@@ -44,6 +44,27 @@ fn isTypedArrayValue(env: napi.napi_env, raw: napi.napi_value) bool {
     return result;
 }
 
+fn typedArrayValueMatchesType(env: napi.napi_env, raw: napi.napi_value, comptime T: type) bool {
+    if (!isTypedArrayValue(env, raw)) return false;
+    if (!@hasDecl(T, "raw_typedarray_type")) return true;
+
+    var actual_type: napi.napi_typedarray_type = undefined;
+    var len: usize = 0;
+    var data: ?*anyopaque = null;
+    var arraybuffer: napi.napi_value = undefined;
+    var byte_offset: usize = 0;
+    const status = napi.napi_get_typedarray_info(
+        env,
+        raw,
+        &actual_type,
+        &len,
+        &data,
+        &arraybuffer,
+        &byte_offset,
+    );
+    return status == napi.napi_ok and actual_type == @field(T, "raw_typedarray_type");
+}
+
 fn isDataViewValue(env: napi.napi_env, raw: napi.napi_value) bool {
     var result = false;
     _ = napi.napi_is_dataview(env, raw, &result);
@@ -133,6 +154,7 @@ fn valueMatchesType(env: napi.napi_env, raw: napi.napi_value, comptime T: type) 
     switch (T) {
         NapiValue.Number => return napiTypeOf(env, raw) == napi.napi_number,
         NapiValue.String => return napiTypeOf(env, raw) == napi.napi_string,
+        NapiValue.NapiValue => return true,
         NapiValue.BigInt => {
             comptime options.requireNapiVersion(.v6);
             return napiTypeOf(env, raw) == napi.napi_bigint;
@@ -170,7 +192,7 @@ fn valueMatchesType(env: napi.napi_env, raw: napi.napi_value, comptime T: type) 
         .@"struct" => blk: {
             if (comptime helper.isAbortSignal(T)) break :blk napiTypeOf(env, raw) == napi.napi_object;
             if (comptime helper.isNapiFunction(T)) break :blk napiTypeOf(env, raw) == napi.napi_function;
-            if (comptime helper.isTypedArray(T)) break :blk isTypedArrayValue(env, raw);
+            if (comptime helper.isTypedArray(T)) break :blk typedArrayValueMatchesType(env, raw, T);
             if (comptime helper.isDataView(T)) break :blk isDataViewValue(env, raw);
             if (comptime helper.isReference(T)) break :blk true;
             if (comptime helper.isExternal(T)) break :blk T.matches_napi_value(env, raw);
@@ -432,6 +454,7 @@ pub const Napi = struct {
                     helper.isReference(T) or
                     helper.isExternal(T) or
                     helper.isAbortSignal(T) or
+                    T == NapiValue.NapiValue or
                     T == NapiValue.BigInt or
                     T == NapiValue.Bool or
                     T == NapiValue.Number or
@@ -479,7 +502,7 @@ pub const Napi = struct {
     pub fn from_napi_value(env: napi.napi_env, raw: napi.napi_value, comptime T: type) T {
         const infos = @typeInfo(T);
         switch (T) {
-            NapiValue.BigInt, NapiValue.Number, NapiValue.String, NapiValue.Object, NapiValue.Promise, NapiValue.Array, NapiValue.Undefined, NapiValue.Null, Buffer, ArrayBuffer, DataView => {
+            NapiValue.NapiValue, NapiValue.BigInt, NapiValue.Number, NapiValue.String, NapiValue.Object, NapiValue.Promise, NapiValue.Array, NapiValue.Undefined, NapiValue.Null, Buffer, ArrayBuffer, DataView => {
                 return T.from_raw(env, raw);
             },
             else => {
@@ -644,7 +667,7 @@ pub const Napi = struct {
         }
 
         switch (value_type) {
-            NapiValue.BigInt, NapiValue.Bool, NapiValue.Number, NapiValue.String, NapiValue.Object, NapiValue.Promise, NapiValue.Array, NapiValue.Undefined, NapiValue.Null, Buffer, ArrayBuffer, DataView => {
+            NapiValue.NapiValue, NapiValue.BigInt, NapiValue.Bool, NapiValue.Number, NapiValue.String, NapiValue.Object, NapiValue.Promise, NapiValue.Array, NapiValue.Undefined, NapiValue.Null, Buffer, ArrayBuffer, DataView => {
                 return value.raw;
             },
             // If value is already a napi_value, return it directly

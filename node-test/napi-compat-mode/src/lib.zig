@@ -75,6 +75,7 @@ pub const bigintAdd = bigint.bigintAdd;
 pub const mutateI64Array = bigint.mutateI64Array;
 
 pub const detachArrayBuffer = detachable_arraybuffer.detachArrayBuffer;
+pub const detachArrayBufferLength = detachable_arraybuffer.detachArrayBufferLength;
 pub const isDetachedArrayBuffer = detachable_arraybuffer.isDetachedArrayBuffer;
 
 pub const freezeObject = object.freezeObject;

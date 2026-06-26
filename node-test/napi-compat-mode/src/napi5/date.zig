@@ -5,10 +5,10 @@ const DateCandidate = union(enum) {
     object: napi.Object,
 };
 
-pub fn isDate(value: DateCandidate) bool {
+pub fn isDate(value: DateCandidate) !bool {
     return switch (value) {
         .number => false,
-        .object => |object| object.isDate(),
+        .object => |object| try object.isDate(),
     };
 }
 

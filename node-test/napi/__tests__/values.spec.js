@@ -183,6 +183,8 @@ test("TypedArray", (t) => {
   t.is(bindings.getEmptyTypedArray().length, 0);
 
   t.deepEqual(bindings.u8ArrayToArray(new Uint8Array([1, 2, 3])), [1, 2, 3]);
+  t.deepEqual(bindings.uint8ClampedArrayToArray(new Uint8ClampedArray([1, 2, 3])), [1, 2, 3]);
+  t.throws(() => bindings.uint8ClampedArrayToArray(new Uint8Array([1, 2, 3])));
   t.deepEqual(bindings.i8ArrayToArray(new Int8Array([-1, 2])), [-1, 2]);
   t.deepEqual(bindings.u16ArrayToArray(new Uint16Array([1, 2])), [1, 2]);
   t.deepEqual(bindings.i16ArrayToArray(new Int16Array([-1, 2])), [-1, 2]);

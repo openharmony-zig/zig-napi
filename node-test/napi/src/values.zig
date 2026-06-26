@@ -301,7 +301,7 @@ pub fn createSymbol(env: napi.Env, description: []const u8) !napi.NapiValue {
 
 pub fn setSymbolInObj(env: napi.Env, object: napi.Object) !napi.Object {
     const symbol = try env.createSymbol("native");
-    try object.SetValue(symbol, "symbol-value");
+    try object.SetProperty(symbol, "symbol-value");
     return object;
 }
 
@@ -417,6 +417,10 @@ pub fn u8ArrayToArray(input: napi.Uint8Array) ![]i32 {
     return try copyAs(i32, input.asConstSlice());
 }
 
+pub fn uint8ClampedArrayToArray(input: napi.Uint8ClampedArray) ![]i32 {
+    return try copyAs(i32, input.asConstSlice());
+}
+
 pub fn i8ArrayToArray(input: napi.Int8Array) ![]i32 {
     return try copyAs(i32, input.asConstSlice());
 }
@@ -482,10 +486,7 @@ pub fn mutateArraybuffer(input: napi.ArrayBuffer) void {
 }
 
 pub fn createUint8ClampedArrayFromData(env: napi.Env) !napi.Uint8ClampedArray {
-    var arraybuffer = try napi.ArrayBuffer.New(env, 3);
-    @memcpy(arraybuffer.asSlice(), &[_]u8{ 1, 2, 255 });
-
-    return try napi.Uint8ClampedArray.fromArrayBuffer(env, arraybuffer, 3, 0);
+    return try napi.Uint8ClampedArray.copy(env, &[_]u8{ 1, 2, 255 });
 }
 
 pub fn arrayBufferFromData(env: napi.Env) !napi.ArrayBuffer {

@@ -15,6 +15,16 @@ test("should be able to detach ArrayBuffer", (t) => {
   }
 });
 
+test("should clear wrapper length after detach", (t) => {
+  const buf = Buffer.from("hello world");
+  const ab = buf.buffer.slice(0, buf.length);
+  try {
+    t.is(bindings.detachArrayBufferLength(ab), 0);
+  } catch (e) {
+    t.is(e.code, "DetachableArraybufferExpected");
+  }
+});
+
 test("is detached arraybuffer should work fine", (t) => {
   const buf = Buffer.from("hello world");
   const ab = buf.buffer.slice(0, buf.length);

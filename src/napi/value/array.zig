@@ -317,6 +317,25 @@ pub const Array = struct {
         };
     }
 
+    pub fn CreateWithLength(env: Env, len: u32) !Array {
+        var raw: napi.napi_value = undefined;
+        const status = napi.napi_create_array_with_length(env.raw, @intCast(len), &raw);
+        if (status != napi.napi_ok) {
+            return NapiError.Error.fromStatus(NapiError.Status.New(status));
+        }
+
+        return Array{
+            .env = env.raw,
+            .raw = raw,
+            .len = len,
+            .type = napi.napi_object,
+        };
+    }
+
+    pub fn createWithLength(env: Env, len: u32) !Array {
+        return Array.CreateWithLength(env, len);
+    }
+
     pub fn Set(self: *Array, index: u32, value: anytype) !void {
         const napi_value = try Napi.to_napi_value_auto(self.env, value, null);
         const status = napi.napi_set_element(self.env, self.raw, index, napi_value);
@@ -324,6 +343,32 @@ pub const Array = struct {
             return NapiError.Error.fromStatus(NapiError.Status.New(status));
         }
         self.len = @max(self.len, index + 1);
+    }
+
+    pub fn HasElement(self: Array, index: u32) !bool {
+        var result: bool = false;
+        const status = napi.napi_has_element(self.env, self.raw, index, &result);
+        if (status != napi.napi_ok) {
+            return NapiError.Error.fromStatus(NapiError.Status.New(status));
+        }
+        return result;
+    }
+
+    pub fn hasElement(self: Array, index: u32) !bool {
+        return self.HasElement(index);
+    }
+
+    pub fn DeleteElement(self: Array, index: u32) !bool {
+        var result: bool = false;
+        const status = napi.napi_delete_element(self.env, self.raw, index, &result);
+        if (status != napi.napi_ok) {
+            return NapiError.Error.fromStatus(NapiError.Status.New(status));
+        }
+        return result;
+    }
+
+    pub fn deleteElement(self: Array, index: u32) !bool {
+        return self.DeleteElement(index);
     }
 
     pub fn Push(self: *Array, value: anytype) !void {
