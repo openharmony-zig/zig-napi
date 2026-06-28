@@ -19,6 +19,7 @@ const external = @import("./napi/wrapper/external.zig");
 const native_wrap = @import("./napi/wrapper/native_wrap.zig");
 const global_allocator = @import("./napi/util/allocator.zig");
 const options = @import("./napi/options.zig");
+const dts_override = @import("./napi/dts.zig");
 
 pub const napi_sys = @import("napi-sys");
 pub const NapiVersion = options.NapiVersion;
@@ -78,6 +79,8 @@ pub fn FunctionRef(comptime Args: type, comptime Return: type) type {
     return reference.Reference(function.Function(Args, Return));
 }
 pub const ObjectRef = reference.Reference(value.Object);
+pub const Dts = dts_override.Dts;
+pub const dts = dts_override.dts;
 
 pub fn globalAllocator() std.mem.Allocator {
     return global_allocator.globalAllocator();
