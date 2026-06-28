@@ -1,15 +1,13 @@
 #!/usr/bin/env node
 
-const childProcess = require("node:child_process");
-const fs = require("node:fs");
-const path = require("node:path");
-const { NapiCli } = require("@napi-rs/cli");
+const childProcess = require("child_process");
+const fs = require("fs");
+const path = require("path");
 const { Command } = require("commander");
 
 const packageDir = path.resolve(__dirname, "..");
 const workspaceRoot = path.resolve(packageDir, "..", "..");
 const templateDir = path.join(packageDir, "templates", "node-addon");
-const napiCli = new NapiCli();
 
 const availableTargets = [
   "aarch64-apple-darwin",
@@ -120,6 +118,10 @@ function formatJsonStringArrayItems(values, indent) {
   return values.map((value) => `${indent}${JSON.stringify(value)}`).join(",\n");
 }
 
+function replaceAllText(text, search, replacement) {
+  return text.split(search).join(replacement);
+}
+
 function copyTemplate(from, to, replacements) {
   const stat = fs.statSync(from);
   if (stat.isDirectory()) {
@@ -132,12 +134,12 @@ function copyTemplate(from, to, replacements) {
 
   let outputPath = to;
   for (const [key, value] of Object.entries(replacements)) {
-    outputPath = outputPath.replaceAll(key, value);
+    outputPath = replaceAllText(outputPath, key, value);
   }
 
   let text = fs.readFileSync(from, "utf8");
   for (const [key, value] of Object.entries(replacements)) {
-    text = text.replaceAll(key, value);
+    text = replaceAllText(text, key, value);
   }
   fs.writeFileSync(outputPath, text);
 }
@@ -188,6 +190,11 @@ function cleanOptions(options) {
   return Object.fromEntries(Object.entries(options).filter(([, value]) => value !== undefined));
 }
 
+function createNapiCli() {
+  const { NapiCli } = require("@napi-rs/cli");
+  return new NapiCli();
+}
+
 function commandNew(projectDir, flags) {
   const targetDir = path.resolve(process.cwd(), projectDir);
   if (fs.existsSync(targetDir) && fs.readdirSync(targetDir).length && !flags.force) {
@@ -230,6 +237,7 @@ function commandDts(flags, passthrough = []) {
 }
 
 async function commandCreateNpmDirs(flags) {
+  const napiCli = createNapiCli();
   await napiCli.createNpmDirs(
     cleanOptions({
       cwd: path.resolve(process.cwd(), flags.cwd || "."),
@@ -242,14 +250,17 @@ async function commandCreateNpmDirs(flags) {
 }
 
 async function commandArtifacts(flags) {
+  const napiCli = createNapiCli();
   await napiCli.artifacts(cleanOptions(napiOptions(flags)));
 }
 
 async function commandPrePublish(flags) {
+  const napiCli = createNapiCli();
   await napiCli.prePublish(cleanOptions(napiOptions(flags)));
 }
 
 async function commandPackage(flags) {
+  const napiCli = createNapiCli();
   const cwd = path.resolve(process.cwd(), flags.cwd || ".");
   await napiCli.createNpmDirs(
     cleanOptions({
