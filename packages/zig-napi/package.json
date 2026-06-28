@@ -1,0 +1,23 @@
+{
+  "name": "zig-napi",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CLI tools for building Node.js addons with zig-napi.",
+  "bin": {
+    "zig-napi": "bin/zig-napi.js"
+  },
+  "scripts": {
+    "cli": "node bin/zig-napi.js"
+  },
+  "files": [
+    "bin",
+    "templates",
+    "README.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "@napi-rs/cli": "^3.7.2",
+    "commander": "^9.5.0"
+  },
+  "license": "MIT"
+}

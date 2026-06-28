@@ -142,8 +142,8 @@ The Node.js example is in `examples/node`:
 
 ```bash
 cd examples/node
-zig build
-node test.js
+pnpm build
+pnpm test
 ```
 
 It installs the addon as `zig-out/node/hello.<platform-arch-abi>.node`, for example `hello.darwin-arm64.node`, `hello.linux-x64-gnu.node`, or `hello.win32-x64-msvc.node`.
@@ -153,20 +153,22 @@ The package also provides a `zig-napi` CLI for Node.js addons. Zig-specific comm
 Create a new Node addon project:
 
 ```bash
-npm install
-npm run zig-napi -- new ./my-addon --name my-addon --addon my_addon
+pnpm install
+pnpm --filter zig-napi cli new ../../my-addon --name my-addon --addon my_addon
 cd my-addon
-npm install
-npm run package
-npm test
+pnpm install
+pnpm build
+pnpm test
 ```
+
+`zig-napi new` uses the same default target behavior as napi-rs. Pass `--targets <triple>` repeatedly or as a comma-separated list to choose the generated package targets manually, or pass `--enable-all-targets` to enable every napi-rs target known to the CLI.
 
 Run the bundled Node example:
 
 ```bash
-npm install
-npm run node-example:package
-cd examples/node && node test.js
+pnpm install
+pnpm run node-example:package
+pnpm --filter zig-napi-node-example run test
 ```
 
 `zig-napi create-npm-dirs` calls `@napi-rs/cli`'s `createNpmDirs` API and creates `npm/<platform-arch-abi>` packages from the `napi` field in `package.json`. `zig-napi artifacts --output-dir zig-out/node` calls the community `artifacts` API and copies Zig's `<binary>.<platform-arch-abi>.node` outputs into those packages and into the root package. `zig-napi pre-publish` calls the community `prePublish` API to update optional dependencies and handle publish preparation.
@@ -186,9 +188,9 @@ The documentation website lives in `website` and builds as a standalone Vite sit
 
 ```bash
 cd website
-npm install
-npm run dev
-npm run build
+pnpm install
+pnpm dev
+pnpm build
 ```
 
 ## Credits

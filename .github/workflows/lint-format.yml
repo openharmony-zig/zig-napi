@@ -25,21 +25,22 @@ jobs:
         with:
           node-version: 22
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.24.0
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
       - name: Validate prek config
-        run: npm exec --yes --package @j178/prek -- prek validate-config prek.toml
+        run: pnpm exec prek validate-config prek.toml
 
       - name: Check Zig syntax
-        run: |
-          set -euo pipefail
-          while IFS= read -r -d '' file; do
-            zig ast-check "$file"
-          done < <(git ls-files -z '*.zig')
-          while IFS= read -r -d '' file; do
-            zig ast-check --zon "$file"
-          done < <(git ls-files -z '*.zon')
+        run: pnpm run check:zig
 
       - name: Build root package
-        run: zig build --summary all
+        run: pnpm run build
 
   format:
     runs-on: ubuntu-latest
@@ -59,10 +60,16 @@ jobs:
         with:
           node-version: 22
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.24.0
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Format
+        run: pnpm run format
+
       - name: Check formatting
-        run: |
-          set -euo pipefail
-          git ls-files -z '*.zig' '*.zon' | xargs -0 zig fmt
-          git ls-files -z '*.js' '*.jsx' '*.ts' '*.tsx' '*.ets' \
-            | xargs -0 npm exec --yes --package @ohos-rs/oxk -- oxk format
-          git diff --exit-code
+        run: git diff --exit-code

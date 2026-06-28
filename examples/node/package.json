@@ -15,10 +15,13 @@
     "artifacts": "zig-napi artifacts --output-dir zig-out/node",
     "pre-publish": "zig-napi pre-publish --no-gh-release --skip-optional-publish",
     "package": "zig-napi package",
-    "test": "node test.js"
+    "test": "npm run build:test && npm run test:run",
+    "build:test": "npm run build",
+    "test:run": "node test.js",
+    "clean": "rm -rf .zig-cache zig-out *.node npm/*/*.node"
   },
   "devDependencies": {
-    "zig-napi": "file:../.."
+    "zig-napi": "workspace:*"
   },
   "napi": {
     "binaryName": "hello",

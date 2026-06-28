@@ -5,7 +5,7 @@
     .fingerprint = __FINGERPRINT__,
     .dependencies = .{
         .@"zig-napi" = .{
-            .path = "__ZIG_NAPI_PATH__",
+            .path = "__ZIG_NAPI_ZIG_PATH__",
         },
     },
     .paths = .{
@@ -13,7 +13,7 @@
         "build.zig.zon",
         "src",
         "index.js",
-        "test.js",
+        "__test__",
         "package.json",
     },
 }
