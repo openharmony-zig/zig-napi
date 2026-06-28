@@ -21,3 +21,8 @@ pub fn copied_string_len(value: napi.String) usize {
 }
 
 pub const text = "Hello World";
+pub const custom_text = napi.dts(text, "String");
+
+pub fn custom_string(env: napi.Env, name: []u8) napi.Dts(napi.String, "String") {
+    return napi.dts(hello(env, name), "String");
+}

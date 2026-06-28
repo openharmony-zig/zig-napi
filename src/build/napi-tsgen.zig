@@ -201,6 +201,14 @@ fn isStringEnumType(comptime T: type) bool {
     return @hasDecl(T, "napi_string_enum") and @TypeOf(@field(T, "napi_string_enum")) == bool and @field(T, "napi_string_enum");
 }
 
+fn isDtsType(comptime T: type) bool {
+    switch (@typeInfo(T)) {
+        .@"struct", .@"enum", .@"union", .@"opaque" => {},
+        else => return false,
+    }
+    return @hasDecl(T, "is_napi_dts") and @TypeOf(@field(T, "is_napi_dts")) == bool and @field(T, "is_napi_dts");
+}
+
 fn isArrayList(comptime T: type) bool {
     const info = @typeInfo(T);
     if (info != .@"struct") return false;
@@ -238,6 +246,7 @@ fn isObjectLikeStruct(comptime T: type) bool {
     if (isReferenceType(T)) return false;
     if (isExternalType(T)) return false;
     if (isClassType(T)) return false;
+    if (isDtsType(T)) return false;
     return true;
 }
 
@@ -815,6 +824,8 @@ fn parseCallArguments(allocator: std.mem.Allocator, content: []const u8, lparen_
     var depth_paren: usize = 0;
     var depth_brace: usize = 0;
     var depth_bracket: usize = 0;
+    var in_string = false;
+    var escaped = false;
     var start = lparen_index + 1;
     var i = lparen_index + 1;
     var args = std.array_list.Managed([]const u8).init(allocator);
@@ -822,6 +833,22 @@ fn parseCallArguments(allocator: std.mem.Allocator, content: []const u8, lparen_
 
     while (i < content.len) : (i += 1) {
         const ch = content[i];
+        if (in_string) {
+            if (escaped) {
+                escaped = false;
+            } else if (ch == '\\') {
+                escaped = true;
+            } else if (ch == '"') {
+                in_string = false;
+            }
+            continue;
+        }
+
+        if (ch == '"') {
+            in_string = true;
+            continue;
+        }
+
         switch (ch) {
             '(' => depth_paren += 1,
             ')' => {
@@ -1003,6 +1030,7 @@ fn isIdentifierChar(ch: u8) bool {
 }
 
 fn emitType(state: *State, comptime T: type) ![]const u8 {
+    if (comptime isDtsType(T)) return T.ts_type;
     if (comptime isResultType(T)) return emitType(state, resultPayloadType(T));
 
     switch (T) {
@@ -1424,6 +1452,36 @@ fn isStringLiteral(text: []const u8) bool {
     return trimmed.len >= 2 and trimmed[0] == '"' and trimmed[trimmed.len - 1] == '"';
 }
 
+fn unquoteZigStringLiteral(allocator: std.mem.Allocator, text: []const u8) !?[]const u8 {
+    const trimmed = std.mem.trim(u8, text, " \t\r\n");
+    if (!isStringLiteral(trimmed)) return null;
+
+    var buf = StringBuilder.init(allocator);
+    errdefer buf.deinit();
+
+    var i: usize = 1;
+    while (i + 1 < trimmed.len) : (i += 1) {
+        const ch = trimmed[i];
+        if (ch != '\\') {
+            try buf.append(ch);
+            continue;
+        }
+
+        i += 1;
+        if (i + 1 > trimmed.len) break;
+        const escaped = trimmed[i];
+        try buf.append(switch (escaped) {
+            'n' => '\n',
+            'r' => '\r',
+            't' => '\t',
+            '"', '\\' => escaped,
+            else => escaped,
+        });
+    }
+
+    return try buf.toOwnedSlice();
+}
+
 fn isNumericLiteral(text: []const u8) bool {
     const trimmed = std.mem.trim(u8, text, " \t\r\n");
     if (trimmed.len == 0) return false;
@@ -1502,6 +1560,34 @@ const TypeCall = struct {
     callee: []const u8,
     arg: []const u8,
 };
+
+const DtsCall = struct {
+    ts_type: []const u8,
+};
+
+fn isDtsValueCallee(callee: []const u8) bool {
+    const trimmed = std.mem.trim(u8, callee, " \t\r\n");
+    return std.mem.eql(u8, trimmed, "dts") or std.mem.endsWith(u8, trimmed, ".dts");
+}
+
+fn isDtsTypeCallee(callee: []const u8) bool {
+    const trimmed = std.mem.trim(u8, callee, " \t\r\n");
+    return std.mem.eql(u8, trimmed, "Dts") or std.mem.endsWith(u8, trimmed, ".Dts");
+}
+
+fn parseDtsCall(allocator: std.mem.Allocator, text: []const u8, comptime isExpectedCallee: fn ([]const u8) bool) !?DtsCall {
+    const trimmed = std.mem.trim(u8, text, " \t\r\n");
+    if (trimmed.len == 0 or trimmed[trimmed.len - 1] != ')') return null;
+    const open = std.mem.indexOfScalar(u8, trimmed, '(') orelse return null;
+    const callee = std.mem.trim(u8, trimmed[0..open], " \t");
+    if (!isExpectedCallee(callee)) return null;
+
+    const args = try parseCallArguments(allocator, trimmed, open);
+    if (args.items.len != 2) return null;
+
+    const ts_type = try unquoteZigStringLiteral(allocator, args.items[1]) orelse return null;
+    return .{ .ts_type = ts_type };
+}
 
 fn parseSingleArgTypeCall(text: []const u8) ?TypeCall {
     const trimmed = std.mem.trim(u8, text, " \t\r\n");
@@ -1653,6 +1739,56 @@ fn parseAsyncSourceTypeExpr(allocator: std.mem.Allocator, type_expr: []const u8)
     return null;
 }
 
+fn lastTopLevelBang(text: []const u8) ?usize {
+    var depth_paren: usize = 0;
+    var depth_brace: usize = 0;
+    var depth_bracket: usize = 0;
+    var in_string = false;
+    var escaped = false;
+    var result: ?usize = null;
+
+    for (text, 0..) |ch, idx| {
+        if (in_string) {
+            if (escaped) {
+                escaped = false;
+            } else if (ch == '\\') {
+                escaped = true;
+            } else if (ch == '"') {
+                in_string = false;
+            }
+            continue;
+        }
+
+        if (ch == '"') {
+            in_string = true;
+            continue;
+        }
+
+        switch (ch) {
+            '(' => depth_paren += 1,
+            ')' => {
+                if (depth_paren > 0) depth_paren -= 1;
+            },
+            '{' => depth_brace += 1,
+            '}' => {
+                if (depth_brace > 0) depth_brace -= 1;
+            },
+            '[' => depth_bracket += 1,
+            ']' => {
+                if (depth_bracket > 0) depth_bracket -= 1;
+            },
+            '!' => {
+                if (depth_paren == 0 and depth_brace == 0 and depth_bracket == 0) {
+                    result = idx;
+                }
+            },
+            else => {},
+        }
+    }
+
+    return result;
+}
+
 fn emitSourceTypeExpr(state: *State, file_path: []const u8, type_expr: []const u8, depth: usize) anyerror![]const u8 {
     if (depth > 8) return "unknown";
 
@@ -1664,8 +1800,12 @@ fn emitSourceTypeExpr(state: *State, file_path: []const u8, type_expr: []const u
         return try std.fmt.allocPrint(state.allocator, "{s} | undefined | null", .{child});
     }
 
-    if (std.mem.lastIndexOfScalar(u8, trimmed, '!')) |idx| {
+    if (lastTopLevelBang(trimmed)) |idx| {
         return try emitSourceTypeExpr(state, file_path, trimmed[idx + 1 ..], depth + 1);
+    }
+
+    if (try parseDtsCall(state.allocator, trimmed, isDtsTypeCallee)) |dts_call| {
+        return dts_call.ts_type;
     }
 
     if (std.mem.eql(u8, trimmed, "void")) return "void";
@@ -1754,6 +1894,10 @@ fn inferSourceValueType(state: *State, file_path: []const u8, init_body: []const
     const trimmed = std.mem.trim(u8, expr, " \t\r\n");
     if (trimmed.len == 0) return "unknown";
 
+    if (try parseDtsCall(state.allocator, trimmed, isDtsValueCallee)) |dts_call| {
+        return dts_call.ts_type;
+    }
+
     if (isStringLiteral(trimmed)) return "string";
     if (isNumericLiteral(trimmed)) return "number";
     if (std.mem.eql(u8, trimmed, "true") or std.mem.eql(u8, trimmed, "false")) return "boolean";
@@ -1777,6 +1921,10 @@ fn resolveInitValue(state: *State, file_path: []const u8, init_body: []const u8,
 
     const trimmed = std.mem.trim(u8, expr, " \t\r\n");
     if (trimmed.len == 0) return .{ .value_type = "unknown" };
+
+    if (try parseDtsCall(state.allocator, trimmed, isDtsValueCallee)) |dts_call| {
+        return .{ .value_type = dts_call.ts_type };
+    }
 
     if (isSimpleIdentifier(trimmed)) {
         if (findLocalConstInitializer(init_body, trimmed)) |initializer| {

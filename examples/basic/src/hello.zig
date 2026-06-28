@@ -26,11 +26,14 @@ const external = @import("external.zig");
 pub const test_i32 = number.test_i32;
 pub const test_f32 = number.test_f32;
 pub const test_u32 = number.test_u32;
+pub const custom_add = napi.dts(number.test_i32, "(left: Number, right: Number) => Number");
 
 pub const hello = string.hello;
 pub const raw_string_len = string.raw_string_len;
 pub const copied_string_len = string.copied_string_len;
 pub const text = string.text;
+pub const custom_text = string.custom_text;
+pub const custom_string = string.custom_string;
 
 pub const throw_error = err.throw_error;
 pub const result_ok = err.result_ok;
