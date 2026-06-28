@@ -1,0 +1,108 @@
+<svg width="960" height="520" viewBox="0 0 960 520" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">zig-napi build pipeline</title>
+  <desc id="desc">A minimal dark pipeline diagram showing Zig exports passing through zig-napi into OpenHarmony, Node.js, and TypeScript outputs.</desc>
+
+  <defs>
+    <linearGradient id="panel" x1="50" y1="44" x2="910" y2="476" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#17130f"/>
+      <stop offset="1" stop-color="#0b0a09"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(484 118) rotate(90) scale(300 520)">
+      <stop stop-color="#d8913f" stop-opacity=".28"/>
+      <stop offset=".58" stop-color="#d8913f" stop-opacity=".06"/>
+      <stop offset="1" stop-color="#0b0a09" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="flowWarm" x1="282" y1="260" x2="712" y2="260" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8c867c" stop-opacity=".35"/>
+      <stop offset=".42" stop-color="#d8913f"/>
+      <stop offset="1" stop-color="#e9b05c"/>
+    </linearGradient>
+    <linearGradient id="flowCool" x1="582" y1="142" x2="712" y2="142" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#d8913f"/>
+      <stop offset="1" stop-color="#68a6a1"/>
+    </linearGradient>
+    <filter id="shadow" x="20" y="20" width="920" height="480" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="22" stdDeviation="24" flood-color="#000000" flood-opacity=".34"/>
+    </filter>
+    <pattern id="grid" width="34" height="34" patternUnits="userSpaceOnUse">
+      <path d="M34 0H0V34" stroke="#fffaf5" stroke-opacity=".035"/>
+    </pattern>
+  </defs>
+
+  <rect width="960" height="520" fill="#0b0a09"/>
+  <g filter="url(#shadow)">
+    <rect x="44" y="42" width="872" height="436" rx="24" fill="url(#panel)" stroke="#fffaf5" stroke-opacity=".12"/>
+    <rect x="44" y="42" width="872" height="436" rx="24" fill="url(#glow)"/>
+    <rect x="44" y="42" width="872" height="436" rx="24" fill="url(#grid)"/>
+  </g>
+
+  <g>
+    <rect x="92" y="202" width="190" height="116" rx="16" fill="#11100e" stroke="#fffaf5" stroke-opacity=".12"/>
+    <rect x="92" y="202" width="190" height="34" rx="16" fill="#1d1914"/>
+    <circle cx="116" cy="219" r="4" fill="#e0714b"/>
+    <circle cx="131" cy="219" r="4" fill="#e9b05c"/>
+    <circle cx="146" cy="219" r="4" fill="#68a6a1"/>
+
+    <text x="126" y="262" fill="#f4f1ec" font-family="Maple Mono, ui-monospace, monospace" font-size="24" font-weight="700">Zig</text>
+    <rect x="126" y="282" width="96" height="5" rx="2.5" fill="#e9b05c" fill-opacity=".56"/>
+    <rect x="126" y="296" width="120" height="5" rx="2.5" fill="#fffaf5" fill-opacity=".16"/>
+    <rect x="126" y="310" width="72" height="5" rx="2.5" fill="#68a6a1" fill-opacity=".46"/>
+  </g>
+
+  <g>
+    <rect x="382" y="106" width="200" height="308" rx="18" fill="#19140f" stroke="#d8913f" stroke-opacity=".42"/>
+    <rect x="410" y="124" width="124" height="36" rx="10" fill="#101b1a" stroke="#68a6a1" stroke-opacity=".24"/>
+    <circle cx="428" cy="142" r="4" fill="#68a6a1"/>
+    <rect x="442" y="137" width="64" height="5" rx="2.5" fill="#8bc3bd" fill-opacity=".62"/>
+    <rect x="442" y="149" width="42" height="4" rx="2" fill="#fffaf5" fill-opacity=".16"/>
+
+    <circle cx="432" cy="260" r="20" fill="#d8913f"/>
+    <path d="M423 260H441M432 251V269" stroke="#1a1208" stroke-width="3" stroke-linecap="round"/>
+    <text x="468" y="267" fill="#f4f1ec" font-family="Maple Mono, ui-monospace, monospace" font-size="20" font-weight="700">zig-napi</text>
+
+    <rect x="410" y="360" width="124" height="36" rx="10" fill="#171412" stroke="#fffaf5" stroke-opacity=".14"/>
+    <circle cx="428" cy="378" r="4" fill="#e9b05c"/>
+    <rect x="442" y="373" width="58" height="5" rx="2.5" fill="#e9b05c" fill-opacity=".62"/>
+    <rect x="442" y="385" width="72" height="4" rx="2" fill="#fffaf5" fill-opacity=".14"/>
+  </g>
+
+  <g>
+    <rect x="712" y="106" width="160" height="72" rx="14" fill="#211811" stroke="#d8913f" stroke-opacity=".44"/>
+    <text x="746" y="139" fill="#f4f1ec" font-family="Maple Mono, ui-monospace, monospace" font-size="18" font-weight="700">OHOS</text>
+    <text x="762" y="161" fill="#e9b05c" font-family="Maple Mono, ui-monospace, monospace" font-size="12">.so</text>
+    <rect x="826" y="127" width="22" height="30" rx="5" fill="#d8913f" fill-opacity=".14" stroke="#d8913f" stroke-opacity=".24"/>
+  </g>
+
+  <g>
+    <rect x="712" y="224" width="160" height="72" rx="14" fill="#101b1a" stroke="#68a6a1" stroke-opacity=".42"/>
+    <text x="746" y="257" fill="#f4f1ec" font-family="Maple Mono, ui-monospace, monospace" font-size="18" font-weight="700">Node</text>
+    <text x="754" y="279" fill="#8bc3bd" font-family="Maple Mono, ui-monospace, monospace" font-size="12">.node</text>
+    <rect x="826" y="245" width="22" height="30" rx="5" fill="#68a6a1" fill-opacity=".13" stroke="#68a6a1" stroke-opacity=".24"/>
+  </g>
+
+  <g>
+    <rect x="712" y="342" width="160" height="72" rx="14" fill="#181715" stroke="#fffaf5" stroke-opacity=".14"/>
+    <text x="746" y="375" fill="#f4f1ec" font-family="Maple Mono, ui-monospace, monospace" font-size="18" font-weight="700">Types</text>
+    <text x="758" y="397" fill="#cfc8bd" font-family="Maple Mono, ui-monospace, monospace" font-size="12">.d.ts</text>
+    <rect x="826" y="363" width="22" height="30" rx="5" fill="#fffaf5" fill-opacity=".08" stroke="#fffaf5" stroke-opacity=".16"/>
+  </g>
+
+  <g>
+    <path d="M282 260H370" stroke="url(#flowWarm)" stroke-width="3" stroke-linecap="round"/>
+    <path d="M382 260L368 252V268Z" fill="#e9b05c"/>
+  </g>
+
+  <g>
+    <path d="M582 142H698" stroke="url(#flowCool)" stroke-width="3" stroke-linecap="round"/>
+    <path d="M712 142L698 134V150Z" fill="#68a6a1"/>
+    <circle cx="582" cy="142" r="4" fill="#68a6a1"/>
+
+    <path d="M582 260H698" stroke="url(#flowWarm)" stroke-width="3" stroke-linecap="round"/>
+    <path d="M712 260L698 252V268Z" fill="#e9b05c"/>
+    <circle cx="582" cy="260" r="4" fill="#e9b05c"/>
+
+    <path d="M582 378H698" stroke="url(#flowWarm)" stroke-width="3" stroke-linecap="round"/>
+    <path d="M712 378L698 370V386Z" fill="#e9b05c"/>
+    <circle cx="582" cy="378" r="4" fill="#e9b05c"/>
+  </g>
+</svg>
