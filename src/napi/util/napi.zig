@@ -151,6 +151,10 @@ fn enumTypeToObject(env: napi.napi_env, comptime E: type) !napi.napi_value {
 }
 
 fn valueMatchesType(env: napi.napi_env, raw: napi.napi_value, comptime T: type) bool {
+    if (comptime helper.isDts(T)) {
+        return valueMatchesType(env, raw, T.wrapped_type);
+    }
+
     switch (T) {
         NapiValue.Number => return napiTypeOf(env, raw) == napi.napi_number,
         NapiValue.String => return napiTypeOf(env, raw) == napi.napi_string,
@@ -425,6 +429,14 @@ pub const Napi = struct {
             return;
         }
 
+        if (comptime helper.isDts(T)) {
+            if (comptime !@hasField(T, "value")) {
+                @compileError("Type-only dts wrappers cannot be converted from JavaScript values");
+            }
+            Napi.deinit_napi_value_with_state(T.wrapped_type, value.value, state);
+            return;
+        }
+
         switch (infos) {
             .array => {
                 for (value) |item| {
@@ -501,6 +513,13 @@ pub const Napi = struct {
 
     pub fn from_napi_value(env: napi.napi_env, raw: napi.napi_value, comptime T: type) T {
         const infos = @typeInfo(T);
+        if (comptime helper.isDts(T)) {
+            if (comptime !@hasField(T, "value")) {
+                @compileError("Type-only dts wrappers cannot be converted from JavaScript values");
+            }
+            return .{ .value = Napi.from_napi_value_auto(env, raw, T.wrapped_type) };
+        }
+
         switch (T) {
             NapiValue.NapiValue, NapiValue.BigInt, NapiValue.Number, NapiValue.String, NapiValue.Object, NapiValue.Promise, NapiValue.Array, NapiValue.Undefined, NapiValue.Null, Buffer, ArrayBuffer, DataView => {
                 return T.from_raw(env, raw);
@@ -655,6 +674,13 @@ pub const Napi = struct {
     pub fn to_napi_value(env: napi.napi_env, value: anytype, comptime name: ?[]const u8) !napi.napi_value {
         const value_type = @TypeOf(value);
         const infos = @typeInfo(value_type);
+
+        if (comptime helper.isDts(value_type)) {
+            if (comptime !@hasField(value_type, "value")) {
+                @compileError("Type-only dts wrappers cannot be converted to JavaScript values");
+            }
+            return try Napi.to_napi_value_auto(env, value.value, name);
+        }
 
         if (comptime NapiError.isResult(value_type)) {
             return switch (value) {

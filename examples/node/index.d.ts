@@ -6,7 +6,6 @@ export interface CountProgress {
   total: number
 }
 
-
 export declare function add(left: number, right: number): number
 export declare function hello(): string
 export declare function requestedNapiVersion(): number

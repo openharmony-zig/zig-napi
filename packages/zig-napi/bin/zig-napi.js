@@ -4,69 +4,46 @@ const childProcess = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 const { NapiCli, parseTriple } = require("@napi-rs/cli");
+const { Command } = require("commander");
 
-const rootDir = path.resolve(__dirname, "..");
-const templateDir = path.join(rootDir, "templates", "node-addon");
+const packageDir = path.resolve(__dirname, "..");
+const workspaceRoot = path.resolve(packageDir, "..", "..");
+const templateDir = path.join(packageDir, "templates", "node-addon");
 const napiCli = new NapiCli();
 
-function printHelp() {
-  console.log(`zig-napi
+const availableTargets = [
+  "aarch64-apple-darwin",
+  "aarch64-linux-android",
+  "aarch64-unknown-linux-gnu",
+  "aarch64-unknown-linux-musl",
+  "aarch64-unknown-linux-ohos",
+  "aarch64-pc-windows-msvc",
+  "x86_64-apple-darwin",
+  "x86_64-pc-windows-msvc",
+  "x86_64-pc-windows-gnu",
+  "x86_64-unknown-linux-gnu",
+  "x86_64-unknown-linux-musl",
+  "x86_64-unknown-linux-ohos",
+  "x86_64-unknown-freebsd",
+  "i686-pc-windows-msvc",
+  "armv7-unknown-linux-gnueabihf",
+  "armv7-unknown-linux-musleabihf",
+  "armv7-linux-androideabi",
+  "universal-apple-darwin",
+  "loongarch64-unknown-linux-gnu",
+  "riscv64gc-unknown-linux-gnu",
+  "powerpc64le-unknown-linux-gnu",
+  "s390x-unknown-linux-gnu",
+  "wasm32-wasi-preview1-threads",
+  "wasm32-wasip1-threads",
+];
 
-Usage:
-  zig-napi new <dir> [--name <package>] [--addon <name>] [--zig-napi <path>] [--force]
-  zig-napi build [--cwd <dir>] [--release] [--target <zig-target>] [-- <zig-build-args>]
-  zig-napi dts [--cwd <dir>] [-- <zig-build-args>]
-  zig-napi create-npm-dirs [--cwd <dir>] [--config-path <file>] [--package-json-path <file>] [--npm-dir <dir>] [--dry-run]
-  zig-napi artifacts [--cwd <dir>] [--config-path <file>] [--package-json-path <file>] [--output-dir <dir>] [--npm-dir <dir>]
-  zig-napi pre-publish [--cwd <dir>] [--config-path <file>] [--package-json-path <file>] [--npm-dir <dir>] [--no-gh-release] [--skip-optional-publish] [--dry-run]
-  zig-napi package [--cwd <dir>] [--release] [--target <zig-target>] [--npm-dir <dir>] [--output-dir <dir>]
-
-Commands:
-  new              Create a Zig Node-API addon project.
-  build            Run zig build for a Zig addon project.
-  dts              Run zig build so template projects emit index.d.ts.
-  create-npm-dirs  Call @napi-rs/cli createNpmDirs API.
-  artifacts        Call @napi-rs/cli artifacts API.
-  pre-publish      Call @napi-rs/cli prePublish API.
-  package          Run create-npm-dirs, build, and artifacts.
-`);
-}
-
-function parseArgs(argv) {
-  const args = [];
-  const flags = {};
-  let passthrough = [];
-
-  for (let i = 0; i < argv.length; i += 1) {
-    const item = argv[i];
-    if (item === "--") {
-      passthrough = argv.slice(i + 1);
-      break;
-    }
-    if (!item.startsWith("--")) {
-      args.push(item);
-      continue;
-    }
-
-    const eq = item.indexOf("=");
-    if (eq !== -1) {
-      flags[item.slice(2, eq)] = item.slice(eq + 1);
-      continue;
-    }
-
-    const key = item.startsWith("--no-") ? item.slice(5) : item.slice(2);
-    if (item.startsWith("--no-")) {
-      flags[key] = false;
-    } else if (i + 1 < argv.length && !argv[i + 1].startsWith("--")) {
-      flags[key] = argv[i + 1];
-      i += 1;
-    } else {
-      flags[key] = true;
-    }
-  }
-
-  return { args, flags, passthrough };
-}
+const defaultTargets = [
+  "x86_64-apple-darwin",
+  "aarch64-apple-darwin",
+  "x86_64-pc-windows-msvc",
+  "x86_64-unknown-linux-gnu",
+];
 
 function fail(message) {
   console.error(`zig-napi: ${message}`);
@@ -101,6 +78,159 @@ function packageLeafName(input) {
 function sanitizeZigName(input) {
   const value = packageLeafName(sanitizePackageName(input)).replace(/-/g, "_");
   return /^[a-zA-Z_]/.test(value) ? value : `addon_${value}`;
+}
+
+function collectTargets(value, previous) {
+  return previous.concat(
+    value
+      .split(",")
+      .map((target) => target.trim())
+      .filter(Boolean),
+  );
+}
+
+function resolveNewTargets(flags) {
+  const targets = flags.targets.map(normalizeTargetName);
+
+  if (!targets.length) {
+    fail("at least one target must be enabled");
+  }
+
+  validateTargets(targets);
+
+  return targets;
+}
+
+function resolveNonInteractiveTargets(flags) {
+  const targets = flags.enableAllTargets
+    ? availableTargets
+    : flags.targets.length
+      ? flags.targets
+      : flags.enableDefaultTargets
+        ? defaultTargets
+        : [];
+
+  return resolveNewTargets({ ...flags, targets });
+}
+
+function validateTargets(targets) {
+  if (!targets.length) {
+    fail("at least one target must be enabled");
+  }
+
+  const seen = new Set();
+  for (const target of targets) {
+    if (!availableTargets.includes(target)) {
+      fail(`unknown target: ${target}`);
+    }
+    if (seen.has(target)) {
+      fail(`duplicate target: ${target}`);
+    }
+    seen.add(target);
+  }
+}
+
+function normalizeTargetName(target) {
+  return target === "wasm32-wasi-preview1-threads" ? "wasm32-wasip1-threads" : target;
+}
+
+function formatJsonStringArrayItems(values, indent) {
+  return values.map((value) => `${indent}${JSON.stringify(value)}`).join(",\n");
+}
+
+function isInteractive(flags) {
+  return flags.interactive && process.stdin.isTTY && process.stdout.isTTY;
+}
+
+function validatePackageName(value) {
+  if (!sanitizePackageName(value)) {
+    return "Package name must contain at least one valid package name character";
+  }
+  return true;
+}
+
+function validateAddonName(value) {
+  if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(value)) {
+    return true;
+  }
+  return "Addon name must be a valid Zig identifier";
+}
+
+function normalizePackageNameOrFail(value) {
+  const packageName = sanitizePackageName(value);
+  if (!packageName) {
+    fail("package name must contain at least one valid package name character");
+  }
+  return packageName;
+}
+
+function validateAddonNameOrFail(value) {
+  const result = validateAddonName(value);
+  if (result !== true) {
+    fail(result);
+  }
+  return value;
+}
+
+async function promptNewOptions(projectDir, flags) {
+  if (!isInteractive(flags)) {
+    if (!projectDir) {
+      fail("project directory is required; pass <dir> or run in an interactive terminal");
+    }
+    const packageName = normalizePackageNameOrFail(
+      flags.name || sanitizePackageName(path.basename(projectDir)),
+    );
+    return {
+      projectDir,
+      packageName,
+      addonName: validateAddonNameOrFail(flags.addon || sanitizeZigName(packageName)),
+      targets: resolveNonInteractiveTargets(flags),
+    };
+  }
+
+  const { checkbox, input } = await import("@inquirer/prompts");
+  const targetPath =
+    projectDir ||
+    (await input({
+      message: "Target path to create the project, relative to cwd.",
+      validate: (value) => Boolean(value.trim()) || "Target path is required",
+    }));
+  const defaultPackageName = sanitizePackageName(path.basename(targetPath));
+  const packageName =
+    flags.name ||
+    (await input({
+      message: "Package name (the name field in your package.json file)",
+      default: defaultPackageName,
+      validate: validatePackageName,
+    }));
+  const addonName =
+    flags.addon ||
+    (await input({
+      message: "Native addon binary name",
+      default: sanitizeZigName(packageName),
+      validate: validateAddonName,
+    }));
+
+  const targets = flags.enableAllTargets
+    ? availableTargets
+    : flags.targets.length
+      ? flags.targets
+      : await checkbox({
+          loop: false,
+          message: "Choose target(s) your addon will be compiled to",
+          choices: availableTargets.map((target) => ({
+            name: target,
+            value: target,
+            checked: flags.enableDefaultTargets && defaultTargets.includes(target),
+          })),
+        });
+
+  return {
+    projectDir: targetPath,
+    packageName: normalizePackageNameOrFail(packageName),
+    addonName: validateAddonNameOrFail(addonName),
+    targets: resolveNewTargets({ ...flags, targets }),
+  };
 }
 
 function copyTemplate(from, to, replacements) {
@@ -153,17 +283,17 @@ function repairZigFingerprint(projectDir) {
 function napiOptions(flags) {
   return {
     cwd: path.resolve(process.cwd(), flags.cwd || "."),
-    configPath: flags["config-path"],
-    packageJsonPath: flags["package-json-path"],
-    npmDir: flags["npm-dir"],
-    outputDir: flags["output-dir"],
-    buildOutputDir: flags["build-output-dir"],
-    tagStyle: flags["tag-style"],
-    ghRelease: flags["gh-release"],
-    ghReleaseName: flags["gh-release-name"],
-    ghReleaseId: flags["gh-release-id"],
-    skipOptionalPublish: flags["skip-optional-publish"],
-    dryRun: flags["dry-run"],
+    configPath: flags.configPath,
+    packageJsonPath: flags.packageJsonPath,
+    npmDir: flags.npmDir,
+    outputDir: flags.outputDir,
+    buildOutputDir: flags.buildOutputDir,
+    tagStyle: flags.tagStyle,
+    ghRelease: flags.ghRelease,
+    ghReleaseName: flags.ghReleaseName,
+    ghReleaseId: flags.ghReleaseId,
+    skipOptionalPublish: flags.skipOptionalPublish,
+    dryRun: flags.dryRun,
   };
 }
 
@@ -176,9 +306,9 @@ function readJson(file) {
 }
 
 function readZigNapiConfig(cwd, flags) {
-  const packageJsonPath = path.resolve(cwd, flags["package-json-path"] || "package.json");
+  const packageJsonPath = path.resolve(cwd, flags.packageJsonPath || "package.json");
   const packageJson = readJson(packageJsonPath);
-  const configPath = flags["config-path"] ? path.resolve(cwd, flags["config-path"]) : null;
+  const configPath = flags.configPath ? path.resolve(cwd, flags.configPath) : null;
   const config = configPath ? readJson(configPath) : packageJson.napi || {};
   return {
     binaryName: config.binaryName,
@@ -495,7 +625,7 @@ async function generateWasiBindings(cwd, flags) {
   if (binaryNames.length === 0) fail("missing napi.binaryName; required to generate wasm bindings");
   if (!config.packageName) fail("missing package name; required to generate wasm bindings");
 
-  const outputDir = path.resolve(cwd, flags["build-output-dir"] || ".");
+  const outputDir = path.resolve(cwd, flags.buildOutputDir || ".");
   fs.mkdirSync(outputDir, { recursive: true });
 
   const initialMemory = config.wasm.initialMemory || 4000;
@@ -516,26 +646,24 @@ async function generateWasiBindings(cwd, flags) {
   fs.writeFileSync(path.join(outputDir, "wasi-worker-browser.mjs"), WASI_BROWSER_WORKER_TEMPLATE);
 }
 
-function commandNew(argv) {
-  const { args, flags } = parseArgs(argv);
-  const projectDir = args[0];
-  if (!projectDir) fail("missing project directory");
-
-  const targetDir = path.resolve(process.cwd(), projectDir);
+async function commandNew(projectDir, flags) {
+  const options = await promptNewOptions(projectDir, flags);
+  const targetDir = path.resolve(process.cwd(), options.projectDir);
   if (fs.existsSync(targetDir) && fs.readdirSync(targetDir).length && !flags.force) {
     fail(`${targetDir} is not empty; pass --force to write into it`);
   }
 
-  const packageName = flags.name || sanitizePackageName(path.basename(targetDir));
-  const addonName = flags.addon || sanitizeZigName(packageName);
-  const zigNapiPath = flags["zig-napi"] || path.relative(targetDir, rootDir) || ".";
+  const packageName = options.packageName;
+  const addonName = options.addonName;
+  const zigNapiZigPath = flags.zigNapi || path.relative(targetDir, workspaceRoot) || ".";
 
   fs.mkdirSync(targetDir, { recursive: true });
   copyTemplate(templateDir, targetDir, {
     __PACKAGE_NAME__: packageName,
     __ADDON_NAME__: addonName,
     __ZIG_PACKAGE_NAME__: sanitizeZigName(packageName),
-    __ZIG_NAPI_PATH__: normalizePathForZig(zigNapiPath),
+    __ZIG_NAPI_ZIG_PATH__: normalizePathForZig(zigNapiZigPath),
+    '      "__NAPI_TARGETS__"': formatJsonStringArrayItems(options.targets, "      "),
     __FINGERPRINT__: "0x0",
   });
   repairZigFingerprint(targetDir);
@@ -543,111 +671,183 @@ function commandNew(argv) {
   console.log(`Created ${packageName} in ${targetDir}`);
 }
 
-async function commandBuild(argv) {
-  const { flags, passthrough } = parseArgs(argv);
+async function commandBuild(flags, passthrough = []) {
   const cwd = path.resolve(process.cwd(), flags.cwd || ".");
   const args = ["build"];
   if (flags.release) args.push("-Doptimize=ReleaseFast");
-  if (flags.target) args.push(`-Dtarget=${isWasiThreadsTargetName(flags.target) ? "wasm32-wasi" : flags.target}`);
+  if (flags.target) {
+    args.push(`-Dtarget=${isWasiThreadsTargetName(flags.target) ? "wasm32-wasi" : flags.target}`);
+  }
   appendWasiThreadsBuildFlags(args, flags.target, passthrough);
   args.push(...passthrough);
   run("zig", args, { cwd });
   await generateWasiBindings(cwd, flags);
 }
 
-function commandDts(argv) {
-  const { flags, passthrough } = parseArgs(argv);
+function commandDts(flags, passthrough = []) {
   const cwd = path.resolve(process.cwd(), flags.cwd || ".");
   run("zig", ["build", ...passthrough], { cwd });
 }
 
-async function commandCreateNpmDirs(argv) {
-  const { flags } = parseArgs(argv);
+async function commandCreateNpmDirs(flags) {
   await napiCli.createNpmDirs(
     cleanOptions({
       cwd: path.resolve(process.cwd(), flags.cwd || "."),
-      configPath: flags["config-path"],
-      packageJsonPath: flags["package-json-path"],
-      npmDir: flags["npm-dir"],
-      dryRun: flags["dry-run"],
+      configPath: flags.configPath,
+      packageJsonPath: flags.packageJsonPath,
+      npmDir: flags.npmDir,
+      dryRun: flags.dryRun,
     }),
   );
 }
 
-async function commandArtifacts(argv) {
-  const { flags } = parseArgs(argv);
+async function commandArtifacts(flags) {
   await generateWasiBindings(path.resolve(process.cwd(), flags.cwd || "."), flags);
   await napiCli.artifacts(cleanOptions(napiOptions(flags)));
 }
 
-async function commandPrePublish(argv) {
-  const { flags } = parseArgs(argv);
+async function commandPrePublish(flags) {
   await napiCli.prePublish(cleanOptions(napiOptions(flags)));
 }
 
-async function commandPackage(argv) {
-  const { flags } = parseArgs(argv);
+async function commandPackage(flags) {
   const cwd = path.resolve(process.cwd(), flags.cwd || ".");
   await napiCli.createNpmDirs(
     cleanOptions({
       cwd,
-      configPath: flags["config-path"],
-      packageJsonPath: flags["package-json-path"],
-      npmDir: flags["npm-dir"],
-      dryRun: flags["dry-run"],
+      configPath: flags.configPath,
+      packageJsonPath: flags.packageJsonPath,
+      npmDir: flags.npmDir,
+      dryRun: flags.dryRun,
     }),
   );
-  await commandBuild([
-    "--cwd",
-    cwd,
-    ...(flags.release ? ["--release"] : []),
-    ...(flags.target ? ["--target", flags.target] : []),
-  ]);
-  await generateWasiBindings(cwd, flags);
+  await commandBuild({ ...flags, cwd, release: flags.release, target: flags.target });
   await napiCli.artifacts(
     cleanOptions({
       cwd,
-      configPath: flags["config-path"],
-      packageJsonPath: flags["package-json-path"],
-      outputDir: flags["output-dir"] || "zig-out/node",
-      npmDir: flags["npm-dir"],
-      buildOutputDir: flags["build-output-dir"],
+      configPath: flags.configPath,
+      packageJsonPath: flags.packageJsonPath,
+      outputDir: flags.outputDir || "zig-out/node",
+      npmDir: flags.npmDir,
+      buildOutputDir: flags.buildOutputDir,
     }),
   );
 }
 
+function addCwdOption(command) {
+  return command.option("--cwd <dir>", "project directory", ".");
+}
+
+function addBuildOptions(command) {
+  return addBuildFlags(addCwdOption(command));
+}
+
+function addBuildFlags(command) {
+  return command
+    .option("--release", "build with ReleaseFast optimization")
+    .option("--target <zig-target>", "Zig target triple");
+}
+
+function addNapiPathOptions(command) {
+  return addCwdOption(command)
+    .option("--config-path <file>", "path to napi config")
+    .option("--package-json-path <file>", "path to package.json")
+    .option("--npm-dir <dir>", "npm package directory");
+}
+
+function addNapiOptions(command) {
+  return addNapiPathOptions(command)
+    .option("--output-dir <dir>", "Zig build output directory")
+    .option("--build-output-dir <dir>", "build output directory")
+    .option("--tag-style <style>", "npm tag style")
+    .option("--gh-release", "enable GitHub release handling")
+    .option("--no-gh-release", "disable GitHub release handling")
+    .option("--gh-release-name <name>", "GitHub release name")
+    .option("--gh-release-id <id>", "GitHub release id")
+    .option("--skip-optional-publish", "skip optional dependency package publishing")
+    .option("--dry-run", "print planned changes without writing");
+}
+
+function createProgram() {
+  const program = new Command();
+
+  program
+    .name("zig-napi")
+    .description("CLI tools for building Node.js addons with zig-napi")
+    .showHelpAfterError()
+    .showSuggestionAfterError();
+
+  program
+    .command("new")
+    .description("create a Zig Node-API addon project")
+    .argument("[dir]", "project directory")
+    .option("--name <package>", "npm package name")
+    .option("--addon <name>", "native addon binary name")
+    .option("--zig-napi <path>", "path to zig-napi Zig package from the new project")
+    .option("-i, --interactive", "ask project information interactively", true)
+    .option("--no-interactive", "disable interactive prompts")
+    .option(
+      "-t, --targets <target>",
+      "target triple to enable; repeat or comma-separate",
+      collectTargets,
+      [],
+    )
+    .option("--enable-default-targets", "enable the default napi-rs targets", true)
+    .option("--no-enable-default-targets", "disable the default napi-rs targets")
+    .option("--enable-all-targets", "enable all napi-rs targets")
+    .option("--force", "write into a non-empty directory")
+    .action(commandNew);
+
+  addBuildOptions(
+    program
+      .command("build")
+      .description("run zig build for a Zig addon project")
+      .allowUnknownOption(true)
+      .argument("[zigBuildArgs...]", "extra arguments forwarded to zig build"),
+  ).action((zigBuildArgs, options) => commandBuild(options, zigBuildArgs));
+
+  addCwdOption(
+    program
+      .command("dts")
+      .description("run zig build so template projects emit index.d.ts")
+      .allowUnknownOption(true)
+      .argument("[zigBuildArgs...]", "extra arguments forwarded to zig build"),
+  ).action((zigBuildArgs, options) => commandDts(options, zigBuildArgs));
+
+  addNapiPathOptions(
+    program.command("create-npm-dirs").description("call @napi-rs/cli createNpmDirs API"),
+  )
+    .option("--dry-run", "print planned changes without writing")
+    .action(commandCreateNpmDirs);
+
+  addNapiOptions(
+    program.command("artifacts").description("call @napi-rs/cli artifacts API"),
+  ).action(commandArtifacts);
+
+  addNapiOptions(
+    program.command("pre-publish").description("call @napi-rs/cli prePublish API"),
+  ).action(commandPrePublish);
+
+  addBuildFlags(
+    addNapiPathOptions(
+      program.command("package").description("run create-npm-dirs, build, and artifacts"),
+    ),
+  )
+    .option("--output-dir <dir>", "Zig build output directory", "zig-out/node")
+    .option("--build-output-dir <dir>", "build output directory")
+    .option("--dry-run", "print planned changes without writing")
+    .action(commandPackage);
+
+  return program;
+}
+
 async function main() {
-  const [command, ...argv] = process.argv.slice(2);
-  if (!command || command === "-h" || command === "--help" || command === "help") {
-    printHelp();
+  const program = createProgram();
+  if (process.argv.length <= 2) {
+    program.outputHelp();
     return;
   }
-
-  switch (command) {
-    case "new":
-      commandNew(argv);
-      break;
-    case "build":
-      await commandBuild(argv);
-      break;
-    case "dts":
-      commandDts(argv);
-      break;
-    case "create-npm-dirs":
-      await commandCreateNpmDirs(argv);
-      break;
-    case "artifacts":
-      await commandArtifacts(argv);
-      break;
-    case "pre-publish":
-      await commandPrePublish(argv);
-      break;
-    case "package":
-      await commandPackage(argv);
-      break;
-    default:
-      fail(`unknown command: ${command}`);
-  }
+  await program.parseAsync(process.argv);
 }
 
 main().catch((error) => {

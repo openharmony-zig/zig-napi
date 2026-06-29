@@ -116,6 +116,14 @@ pub fn isExternal(comptime T: type) bool {
     return @hasDecl(T, "is_napi_external");
 }
 
+pub fn isDts(comptime T: type) bool {
+    switch (@typeInfo(T)) {
+        .@"struct", .@"enum", .@"union", .@"opaque" => {},
+        else => return false,
+    }
+    return @hasDecl(T, "is_napi_dts") and @TypeOf(@field(T, "is_napi_dts")) == bool and @field(T, "is_napi_dts");
+}
+
 pub fn isArrayList(comptime T: type) bool {
     const info = @typeInfo(T);
     if (info != .@"struct") {
