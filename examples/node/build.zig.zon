@@ -4,5 +4,5 @@
     .minimum_zig_version = "0.16.0",
     .fingerprint = 0xc8e4deed2741664f,
     .dependencies = .{ .@"zig-napi" = .{ .path = "../.." } },
-    .paths = .{ "build.zig", "build.zig.zon", "src", "test.js" },
+    .paths = .{ "build.zig", "build.zig.zon", "src", "index.js", "test.js", "package.json" },
 }

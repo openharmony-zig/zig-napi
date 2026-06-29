@@ -1,0 +1,19 @@
+{
+  "name": "zig-napi-node-example-linux-arm64-gnu",
+  "version": "0.1.0",
+  "cpu": [
+    "arm64"
+  ],
+  "main": "hello.linux-arm64-gnu.node",
+  "files": [
+    "hello.linux-arm64-gnu.node"
+  ],
+  "description": "Node.js addon example built with zig-napi.",
+  "license": "MIT",
+  "os": [
+    "linux"
+  ],
+  "libc": [
+    "glibc"
+  ]
+}

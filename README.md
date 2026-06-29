@@ -142,11 +142,46 @@ The Node.js example is in `examples/node`:
 
 ```bash
 cd examples/node
-zig build
-node test.js
+pnpm build
+pnpm test
 ```
 
 It installs the addon as `zig-out/node/hello.<platform-arch-abi>.node`, for example `hello.darwin-arm64.node`, `hello.linux-x64-gnu.node`, or `hello.win32-x64-msvc.node`.
+
+The package also provides a `zig-napi` CLI for Node.js addons. Zig-specific commands such as `new` and `build` are implemented by this project. Packaging commands reuse the community `@napi-rs/cli` API for npm package directory creation, artifact collection, and pre-publish processing.
+
+The CLI requires Node.js 20.17 or newer.
+
+Create a new Node addon project:
+
+```bash
+pnpm install
+pnpm --filter zig-napi cli new ../../my-addon
+cd my-addon
+pnpm install
+pnpm build
+pnpm test
+```
+
+`zig-napi new` asks for the package name, native addon binary name, and target platforms interactively by default, matching napi-rs' `new` workflow. For scripted usage, pass `--no-interactive` with explicit options:
+
+```bash
+pnpm --filter zig-napi cli new ../../my-addon --no-interactive --name my-addon --addon my_addon --targets x86_64-unknown-linux-gnu
+```
+
+Pass `--targets <triple>` repeatedly or as a comma-separated list to choose the generated package targets manually, or pass `--enable-all-targets` to enable every napi-rs target known to the CLI.
+
+Run the bundled Node example:
+
+```bash
+pnpm install
+pnpm run node-example:package
+pnpm --filter zig-napi-node-example run test
+```
+
+`zig-napi create-npm-dirs` calls `@napi-rs/cli`'s `createNpmDirs` API and creates `npm/<platform-arch-abi>` packages from the `napi` field in `package.json`. `zig-napi artifacts --output-dir zig-out/node` calls the community `artifacts` API and copies Zig's `<binary>.<platform-arch-abi>.node` outputs into those packages and into the root package. `zig-napi pre-publish` calls the community `prePublish` API to update optional dependencies and handle publish preparation.
+
+Upstream `napi build` and `napi new` are not used directly for Zig addons because they currently expect Cargo projects and napi-rs' Rust templates.
 
 Node.js matrix tests live in `node-test`. It mirrors the NAPI-RS example split with two independent demos:
 
@@ -161,9 +196,9 @@ The documentation website lives in `website` and builds as a standalone Vite sit
 
 ```bash
 cd website
-npm install
-npm run dev
-npm run build
+pnpm install
+pnpm dev
+pnpm build
 ```
 
 ## Credits

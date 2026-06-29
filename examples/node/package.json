@@ -1,0 +1,41 @@
+{
+  "name": "zig-napi-node-example",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Node.js addon example built with zig-napi.",
+  "main": "index.js",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "*.node"
+  ],
+  "scripts": {
+    "build": "zig-napi build -- --summary all",
+    "create-npm-dirs": "zig-napi create-npm-dirs",
+    "artifacts": "zig-napi artifacts --output-dir zig-out/node",
+    "pre-publish": "zig-napi pre-publish --no-gh-release --skip-optional-publish",
+    "package": "zig-napi package",
+    "test": "npm run build:test && npm run test:run",
+    "build:test": "npm run build",
+    "test:run": "node test.js",
+    "clean": "rm -rf .zig-cache zig-out *.node npm/*/*.node"
+  },
+  "devDependencies": {
+    "zig-napi": "workspace:*"
+  },
+  "napi": {
+    "binaryName": "hello",
+    "packageName": "zig-napi-node-example",
+    "targets": [
+      "x86_64-apple-darwin",
+      "aarch64-apple-darwin",
+      "x86_64-unknown-linux-gnu",
+      "x86_64-unknown-linux-musl",
+      "aarch64-unknown-linux-gnu",
+      "aarch64-unknown-linux-musl",
+      "x86_64-pc-windows-msvc",
+      "aarch64-pc-windows-msvc"
+    ]
+  },
+  "license": "MIT"
+}

@@ -1,0 +1,16 @@
+{
+  "name": "zig-napi-node-example-darwin-arm64",
+  "version": "0.1.0",
+  "cpu": [
+    "arm64"
+  ],
+  "main": "hello.darwin-arm64.node",
+  "files": [
+    "hello.darwin-arm64.node"
+  ],
+  "description": "Node.js addon example built with zig-napi.",
+  "license": "MIT",
+  "os": [
+    "darwin"
+  ]
+}

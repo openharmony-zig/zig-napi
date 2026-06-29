@@ -9,14 +9,14 @@ pub fn build(b: *std.Build) !void {
     const napi = zig_napi.module("napi");
 
     const addon = try napi_build.nodeAddonBuild(b, .{
-        .name = "hello",
+        .name = "__ADDON_NAME__",
         .napi_module = napi,
         .node_api = .{
             .version = .v8,
             .experimental = false,
         },
         .root_module_options = .{
-            .root_source_file = b.path("src/hello.zig"),
+            .root_source_file = b.path("src/lib.zig"),
             .target = target,
             .optimize = optimize,
         },
@@ -24,7 +24,7 @@ pub fn build(b: *std.Build) !void {
     _ = addon;
 
     const dts = try napi_build.generateTypeDefinition(b, .{
-        .root_source_file = b.path("src/hello.zig"),
+        .root_source_file = b.path("src/lib.zig"),
         .output = b.path("index.d.ts"),
         .napi_module = napi,
         .node_api = .{

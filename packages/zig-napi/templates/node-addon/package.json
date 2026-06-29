@@ -1,0 +1,46 @@
+{
+  "name": "__PACKAGE_NAME__",
+  "version": "0.1.0",
+  "description": "A Node.js native addon built with zig-napi.",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "keywords": [
+    "zig-napi",
+    "NAPI",
+    "N-API",
+    "Zig",
+    "node-addon",
+    "node-addon-api"
+  ],
+  "files": [
+    "index.js",
+    "index.d.ts"
+  ],
+  "scripts": {
+    "artifacts": "zig-napi artifacts",
+    "build": "zig-napi build --release",
+    "build:debug": "zig-napi build",
+    "prepublishOnly": "zig-napi pre-publish --no-gh-release",
+    "test": "npm run build:test && npm run test:run",
+    "build:test": "npm run build",
+    "test:run": "ava"
+  },
+  "devDependencies": {
+    "ava": "^8.0.0",
+    "zig-napi": "^0.1.0"
+  },
+  "napi": {
+    "binaryName": "__ADDON_NAME__",
+    "targets": [
+      "__NAPI_TARGETS__"
+    ]
+  },
+  "engines": {
+    "node": ">=20.17"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
+  "license": "MIT"
+}

@@ -39,26 +39,42 @@ jobs:
       - name: Verify Zig
         run: zig version
 
-      - name: Setup Node.js
+      - name: Setup Node.js for install
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.24.0
+
+      - name: Install node-test dependencies
+        run: pnpm install --filter zig-napi-node-test --frozen-lockfile
+
+      - name: Setup Node.js for test
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
 
-      - name: Build and test Node addon matrix
+      - name: Build Node addon matrix
         if: runner.os != 'Windows'
-        run: |
-          cd node-test
-          npm install --no-package-lock
-          zig build --summary all
-          find . -maxdepth 2 -name '*.node' -print
-          npm test
+        working-directory: node-test
+        run: npm run build:test
 
-      - name: Build and test Node addon matrix
+      - name: Test Node addon matrix
+        if: runner.os != 'Windows'
+        working-directory: node-test
+        run: npm run test:run
+
+      - name: Build Windows Node addon matrix
         if: runner.os == 'Windows'
         shell: pwsh
-        run: |
-          cd node-test
-          npm install --no-package-lock
-          zig build -Dtarget=x86_64-windows-msvc --summary all
-          Get-ChildItem -Recurse -Filter *.node | ForEach-Object { $_.FullName }
-          npm test
+        working-directory: node-test
+        run: npm run build:test:windows
+
+      - name: Test Windows Node addon matrix
+        if: runner.os == 'Windows'
+        shell: pwsh
+        working-directory: node-test
+        run: npm run test:run

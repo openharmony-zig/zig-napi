@@ -4,7 +4,7 @@ declare function requireNapiPreview(name: string, isApp: boolean): ESObject;
 declare function print(message: string): void;
 declare function setInterval(callback: () => void, delay: number): number;
 declare function clearInterval(id: number): void;
-declare const globalThis: ESObject;
+const arkGlobal = globalThis as ESObject;
 
 type NativeAddon = ESObject;
 
@@ -37,7 +37,7 @@ export function delay(ms: number) {
 }
 
 function forceGc() {
-  const tools = globalThis.ArkTools;
+  const tools = arkGlobal.ArkTools;
   if (!tools) {
     return;
   }
