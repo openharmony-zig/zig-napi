@@ -34,7 +34,6 @@ const availableTargets = [
   "riscv64gc-unknown-linux-gnu",
   "powerpc64le-unknown-linux-gnu",
   "s390x-unknown-linux-gnu",
-  "wasm32-wasi-preview1-threads",
   "wasm32-wasip1-threads",
 ];
 
