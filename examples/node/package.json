@@ -4,9 +4,11 @@
   "private": true,
   "description": "Node.js addon example built with zig-napi.",
   "main": "index.js",
+  "browser": "browser.js",
   "files": [
     "index.js",
     "index.d.ts",
+    "browser.js",
     "*.node",
     "*.wasm",
     "*.wasi.cjs",

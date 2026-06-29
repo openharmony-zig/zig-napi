@@ -30,20 +30,16 @@ const __sharedMemory = new WebAssembly.Memory({
   shared: true,
 })
 
-const __wasmCandidates = [
-  __nodePath.join(__dirname, 'hello.wasm32-wasi.debug.wasm'),
-  __nodePath.join(__dirname, 'hello.wasm32-wasi.wasm'),
-  __nodePath.join(__dirname, 'zig-out', 'node', 'hello.wasm32-wasi.debug.wasm'),
-  __nodePath.join(__dirname, 'zig-out', 'node', 'hello.wasm32-wasi.wasm'),
-]
+let __wasmFilePath = __nodePath.join(__dirname, '__ADDON_NAME__.wasm32-wasi.wasm')
+const __wasmDebugFilePath = __nodePath.join(__dirname, '__ADDON_NAME__.wasm32-wasi.debug.wasm')
 
-let __wasmFilePath = __wasmCandidates.find((candidate) => __nodeFs.existsSync(candidate))
-
-if (!__wasmFilePath) {
+if (__nodeFs.existsSync(__wasmDebugFilePath)) {
+  __wasmFilePath = __wasmDebugFilePath
+} else if (!__nodeFs.existsSync(__wasmFilePath)) {
   try {
-    __wasmFilePath = require.resolve('zig-napi-node-example-wasm32-wasi/hello.wasm32-wasi.wasm')
+    __wasmFilePath = require.resolve('__PACKAGE_NAME__-wasm32-wasi/__ADDON_NAME__.wasm32-wasi.wasm')
   } catch {
-    throw new Error('Cannot find hello.wasm32-wasi.wasm file, and zig-napi-node-example-wasm32-wasi package is not installed.')
+    throw new Error('Cannot find __ADDON_NAME__.wasm32-wasi.wasm file, and __PACKAGE_NAME__-wasm32-wasi package is not installed.')
   }
 }
 
@@ -66,24 +62,7 @@ const {
     worker.onmessage = ({ data }) => {
       __wasmCreateOnMessageForFsProxy(__nodeFs)(data)
     }
-
-    {
-      const kPublicPort = Object.getOwnPropertySymbols(worker).find((symbol) =>
-        symbol.toString().includes('kPublicPort')
-      )
-      if (kPublicPort) {
-        worker[kPublicPort].ref = () => {}
-      }
-
-      const kHandle = Object.getOwnPropertySymbols(worker).find((symbol) =>
-        symbol.toString().includes('kHandle')
-      )
-      if (kHandle) {
-        worker[kHandle].ref = () => {}
-      }
-
-      worker.unref()
-    }
+    worker.unref()
     return worker
   },
   overwriteImports(importObject) {
@@ -107,6 +86,3 @@ const {
 module.exports = __napiModule.exports
 module.exports.add = __napiModule.exports.add
 module.exports.hello = __napiModule.exports.hello
-module.exports.requestedNapiVersion = __napiModule.exports.requestedNapiVersion
-module.exports.fibonacciAsync = __napiModule.exports.fibonacciAsync
-module.exports.countAsyncProgress = __napiModule.exports.countAsyncProgress

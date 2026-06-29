@@ -3,61 +3,99 @@ const path = require("path");
 
 const packageName = "__PACKAGE_NAME__";
 const binaryName = "__ADDON_NAME__";
+let nativeBinding = null;
+const loadErrors = [];
 
-function loadAddon() {
-  const errors = [];
+function requireNative() {
   if (process.env.NAPI_RS_NATIVE_LIBRARY_PATH) {
     try {
       return require(process.env.NAPI_RS_NATIVE_LIBRARY_PATH);
     } catch (error) {
-      errors.push(error);
+      loadErrors.push(error);
     }
   }
 
-  const forceWasi =
-    process.env.NAPI_RS_FORCE_WASI === "true" || process.env.NAPI_RS_FORCE_WASI === "error";
+  for (const platformArchABI of detectPlatformArchABIs()) {
+    const binding = requireTuple(platformArchABI);
+    if (binding) {
+      return binding;
+    }
+  }
+}
 
-  if (!forceWasi) {
-    for (const platformArchABI of detectPlatformArchABIs()) {
-      const optionalPackage = optionalPackageName(packageName, platformArchABI);
-      const candidates = [
-        () => require(path.join(__dirname, `${binaryName}.${platformArchABI}.node`)),
-        () => require(optionalPackage),
-        () =>
-          require(path.join(__dirname, "zig-out", "node", `${binaryName}.${platformArchABI}.node`)),
-      ];
+function requireTuple(platformArchABI) {
+  try {
+    return require(path.join(__dirname, "zig-out", "node", `${binaryName}.${platformArchABI}.node`));
+  } catch (error) {
+    loadErrors.push(error);
+  }
+  try {
+    return require(path.join(__dirname, `${binaryName}.${platformArchABI}.node`));
+  } catch (error) {
+    loadErrors.push(error);
+  }
+  try {
+    return require(optionalPackageName(packageName, platformArchABI));
+  } catch (error) {
+    loadErrors.push(error);
+  }
+}
 
-      for (const candidate of candidates) {
-        try {
-          return candidate();
-        } catch (error) {
-          errors.push(error);
+nativeBinding = requireNative();
+
+// NAPI_RS_FORCE_WASI is a tri-state flag:
+//   unset / any other value -> native binding preferred, WASI is only a fallback
+//   'true'                  -> force WASI fallback even if native loaded
+//   'error'                 -> force WASI and throw if no WASI binding is found
+const forceWasi =
+  process.env.NAPI_RS_FORCE_WASI === "true" || process.env.NAPI_RS_FORCE_WASI === "error";
+
+if (!nativeBinding || forceWasi) {
+  let wasiBinding = null;
+  let wasiBindingError = null;
+  try {
+    wasiBinding = require(path.join(__dirname, "zig-out", "node", `${binaryName}.wasi.cjs`));
+    nativeBinding = wasiBinding;
+  } catch (error) {
+    if (forceWasi) {
+      wasiBindingError = error;
+    }
+  }
+  if (!nativeBinding || forceWasi) {
+    try {
+      wasiBinding = require(path.join(__dirname, `${binaryName}.wasi.cjs`));
+      nativeBinding = wasiBinding;
+    } catch (error) {
+      if (forceWasi) {
+        if (!wasiBindingError) {
+          wasiBindingError = error;
+        } else {
+          wasiBindingError.cause = error;
         }
+        loadErrors.push(error);
       }
     }
   }
-
-  const wasiCandidates = [
-    () => require(path.join(__dirname, `${binaryName}.wasi.cjs`)),
-    () => require(path.join(__dirname, "zig-out", "node", `${binaryName}.wasi.cjs`)),
-    () => require(optionalPackageName(packageName, "wasm32-wasi")),
-  ];
-
-  for (const candidate of wasiCandidates) {
+  if (!nativeBinding || forceWasi) {
     try {
-      return candidate();
+      wasiBinding = require(optionalPackageName(packageName, "wasm32-wasi"));
+      nativeBinding = wasiBinding;
     } catch (error) {
-      errors.push(error);
+      if (forceWasi) {
+        if (!wasiBindingError) {
+          wasiBindingError = error;
+        } else {
+          wasiBindingError.cause = error;
+        }
+        loadErrors.push(error);
+      }
     }
   }
-
-  const message =
-    `Unable to load ${binaryName} native binding or ${binaryName}.wasm32-wasi.wasm\n` +
-    errors.map((error) => `- ${error.message}`).join("\n");
-  if (process.env.NAPI_RS_FORCE_WASI === "error") {
-    throw new Error(`Unable to load forced WASI binding for ${binaryName}\n${message}`);
+  if (process.env.NAPI_RS_FORCE_WASI === "error" && !wasiBinding) {
+    const error = new Error("WASI binding not found and NAPI_RS_FORCE_WASI is set to error");
+    error.cause = wasiBindingError;
+    throw error;
   }
-  throw new Error(message);
 }
 
 function optionalPackageName(name, platformArchABI) {
@@ -121,4 +159,20 @@ function isMusl() {
   }
 }
 
-module.exports = loadAddon();
+if (!nativeBinding) {
+  if (loadErrors.length > 0) {
+    const error = new Error(
+      "Cannot find native binding. npm has a bug related to optional dependencies (https://github.com/npm/cli/issues/4828). Please try `npm i` again after removing both package-lock.json and node_modules directory.",
+    );
+    error.cause = loadErrors.reduce((err, cur) => {
+      cur.cause = err;
+      return cur;
+    });
+    throw error;
+  }
+  throw new Error("Failed to load native binding");
+}
+
+module.exports = nativeBinding;
+module.exports.add = nativeBinding.add;
+module.exports.hello = nativeBinding.hello;
