@@ -6,6 +6,9 @@
   "bin": {
     "zig-napi": "bin/zig-napi.js"
   },
+  "engines": {
+    "node": ">=16"
+  },
   "scripts": {
     "cli": "node bin/zig-napi.js"
   },

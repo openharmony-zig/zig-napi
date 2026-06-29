@@ -37,15 +37,5 @@
       "aarch64-pc-windows-msvc"
     ]
   },
-  "license": "MIT",
-  "optionalDependencies": {
-    "zig-napi-node-example-darwin-x64": "0.1.0",
-    "zig-napi-node-example-darwin-arm64": "0.1.0",
-    "zig-napi-node-example-linux-x64-gnu": "0.1.0",
-    "zig-napi-node-example-linux-x64-musl": "0.1.0",
-    "zig-napi-node-example-linux-arm64-gnu": "0.1.0",
-    "zig-napi-node-example-linux-arm64-musl": "0.1.0",
-    "zig-napi-node-example-win32-x64-msvc": "0.1.0",
-    "zig-napi-node-example-win32-arm64-msvc": "0.1.0"
-  }
+  "license": "MIT"
 }

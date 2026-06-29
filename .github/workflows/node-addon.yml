@@ -49,8 +49,8 @@ jobs:
         with:
           version: 10.24.0
 
-      - name: Install workspace dependencies
-        run: pnpm install --frozen-lockfile
+      - name: Install node-test dependencies
+        run: pnpm install --filter zig-napi-node-test --frozen-lockfile
 
       - name: Setup Node.js for test
         uses: actions/setup-node@v4
