@@ -150,18 +150,26 @@ It installs the addon as `zig-out/node/hello.<platform-arch-abi>.node`, for exam
 
 The package also provides a `zig-napi` CLI for Node.js addons. Zig-specific commands such as `new` and `build` are implemented by this project. Packaging commands reuse the community `@napi-rs/cli` API for npm package directory creation, artifact collection, and pre-publish processing.
 
+The CLI requires Node.js 20.17 or newer.
+
 Create a new Node addon project:
 
 ```bash
 pnpm install
-pnpm --filter zig-napi cli new ../../my-addon --name my-addon --addon my_addon
+pnpm --filter zig-napi cli new ../../my-addon
 cd my-addon
 pnpm install
 pnpm build
 pnpm test
 ```
 
-`zig-napi new` uses the same default target behavior as napi-rs. Pass `--targets <triple>` repeatedly or as a comma-separated list to choose the generated package targets manually, or pass `--enable-all-targets` to enable every napi-rs target known to the CLI.
+`zig-napi new` asks for the package name, native addon binary name, and target platforms interactively by default, matching napi-rs' `new` workflow. For scripted usage, pass `--no-interactive` with explicit options:
+
+```bash
+pnpm --filter zig-napi cli new ../../my-addon --no-interactive --name my-addon --addon my_addon --targets x86_64-unknown-linux-gnu
+```
+
+Pass `--targets <triple>` repeatedly or as a comma-separated list to choose the generated package targets manually, or pass `--enable-all-targets` to enable every napi-rs target known to the CLI.
 
 Run the bundled Node example:
 

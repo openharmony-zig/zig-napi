@@ -32,6 +32,9 @@ importers:
 
   packages/zig-napi:
     dependencies:
+      '@inquirer/prompts':
+        specifier: ^8.5.2
+        version: 8.5.2(@types/node@26.0.1)
       '@napi-rs/cli':
         specifier: ^3.7.2
         version: 3.7.2(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)(@types/node@26.0.1)

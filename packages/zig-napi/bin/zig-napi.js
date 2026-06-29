@@ -90,6 +90,18 @@ function collectTargets(value, previous) {
 }
 
 function resolveNewTargets(flags) {
+  const targets = flags.targets;
+
+  if (!targets.length) {
+    fail("at least one target must be enabled");
+  }
+
+  validateTargets(targets);
+
+  return targets;
+}
+
+function resolveNonInteractiveTargets(flags) {
   const targets = flags.enableAllTargets
     ? availableTargets
     : flags.targets.length
@@ -98,6 +110,10 @@ function resolveNewTargets(flags) {
         ? defaultTargets
         : [];
 
+  return resolveNewTargets({ ...flags, targets });
+}
+
+function validateTargets(targets) {
   if (!targets.length) {
     fail("at least one target must be enabled");
   }
@@ -112,12 +128,105 @@ function resolveNewTargets(flags) {
     }
     seen.add(target);
   }
-
-  return targets;
 }
 
 function formatJsonStringArrayItems(values, indent) {
   return values.map((value) => `${indent}${JSON.stringify(value)}`).join(",\n");
+}
+
+function isInteractive(flags) {
+  return flags.interactive && process.stdin.isTTY && process.stdout.isTTY;
+}
+
+function validatePackageName(value) {
+  if (!sanitizePackageName(value)) {
+    return "Package name must contain at least one valid package name character";
+  }
+  return true;
+}
+
+function validateAddonName(value) {
+  if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(value)) {
+    return true;
+  }
+  return "Addon name must be a valid Zig identifier";
+}
+
+function normalizePackageNameOrFail(value) {
+  const packageName = sanitizePackageName(value);
+  if (!packageName) {
+    fail("package name must contain at least one valid package name character");
+  }
+  return packageName;
+}
+
+function validateAddonNameOrFail(value) {
+  const result = validateAddonName(value);
+  if (result !== true) {
+    fail(result);
+  }
+  return value;
+}
+
+async function promptNewOptions(projectDir, flags) {
+  if (!isInteractive(flags)) {
+    if (!projectDir) {
+      fail("project directory is required; pass <dir> or run in an interactive terminal");
+    }
+    const packageName = normalizePackageNameOrFail(
+      flags.name || sanitizePackageName(path.basename(projectDir)),
+    );
+    return {
+      projectDir,
+      packageName,
+      addonName: validateAddonNameOrFail(flags.addon || sanitizeZigName(packageName)),
+      targets: resolveNonInteractiveTargets(flags),
+    };
+  }
+
+  const { checkbox, input } = await import("@inquirer/prompts");
+  const targetPath =
+    projectDir ||
+    (await input({
+      message: "Target path to create the project, relative to cwd.",
+      validate: (value) => Boolean(value.trim()) || "Target path is required",
+    }));
+  const defaultPackageName = sanitizePackageName(path.basename(targetPath));
+  const packageName =
+    flags.name ||
+    (await input({
+      message: "Package name (the name field in your package.json file)",
+      default: defaultPackageName,
+      validate: validatePackageName,
+    }));
+  const addonName =
+    flags.addon ||
+    (await input({
+      message: "Native addon binary name",
+      default: sanitizeZigName(packageName),
+      validate: validateAddonName,
+    }));
+
+  const targets = flags.enableAllTargets
+    ? availableTargets
+    : flags.targets.length
+      ? flags.targets
+      : await checkbox({
+          loop: false,
+          message: "Choose target(s) your addon will be compiled to",
+          choices: availableTargets.map((target) => ({
+            name: target,
+            value: target,
+            checked: flags.enableDefaultTargets && defaultTargets.includes(target),
+          })),
+        });
+
+  return {
+    projectDir: targetPath,
+    packageName: normalizePackageNameOrFail(packageName),
+    addonName: validateAddonNameOrFail(addonName),
+    targets: resolveNewTargets({ ...flags, targets }),
+  };
 }
 
 function copyTemplate(from, to, replacements) {
@@ -188,17 +297,17 @@ function cleanOptions(options) {
   return Object.fromEntries(Object.entries(options).filter(([, value]) => value !== undefined));
 }
 
-function commandNew(projectDir, flags) {
-  const targetDir = path.resolve(process.cwd(), projectDir);
+async function commandNew(projectDir, flags) {
+  const options = await promptNewOptions(projectDir, flags);
+  const targetDir = path.resolve(process.cwd(), options.projectDir);
   if (fs.existsSync(targetDir) && fs.readdirSync(targetDir).length && !flags.force) {
     fail(`${targetDir} is not empty; pass --force to write into it`);
   }
 
-  const packageName = flags.name || sanitizePackageName(path.basename(targetDir));
-  const addonName = flags.addon || sanitizeZigName(packageName);
+  const packageName = options.packageName;
+  const addonName = options.addonName;
   const zigNapiNpmPath = flags.zigNapi || path.relative(targetDir, packageDir) || ".";
   const zigNapiZigPath = flags.zigNapi || path.relative(targetDir, workspaceRoot) || ".";
-  const targets = resolveNewTargets(flags);
 
   fs.mkdirSync(targetDir, { recursive: true });
   copyTemplate(templateDir, targetDir, {
@@ -207,7 +316,7 @@ function commandNew(projectDir, flags) {
     __ZIG_PACKAGE_NAME__: sanitizeZigName(packageName),
     __ZIG_NAPI_NPM_PATH__: normalizePathForZig(zigNapiNpmPath),
     __ZIG_NAPI_ZIG_PATH__: normalizePathForZig(zigNapiZigPath),
-    '      "__NAPI_TARGETS__"': formatJsonStringArrayItems(targets, "      "),
+    '      "__NAPI_TARGETS__"': formatJsonStringArrayItems(options.targets, "      "),
     __FINGERPRINT__: "0x0",
   });
   repairZigFingerprint(targetDir);
@@ -319,10 +428,12 @@ function createProgram() {
   program
     .command("new")
     .description("create a Zig Node-API addon project")
-    .argument("<dir>", "project directory")
+    .argument("[dir]", "project directory")
     .option("--name <package>", "npm package name")
     .option("--addon <name>", "native addon binary name")
     .option("--zig-napi <path>", "path to zig-napi from the new project")
+    .option("-i, --interactive", "ask project information interactively", true)
+    .option("--no-interactive", "disable interactive prompts")
     .option(
       "-t, --targets <target>",
       "target triple to enable; repeat or comma-separate",
