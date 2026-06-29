@@ -306,7 +306,6 @@ async function commandNew(projectDir, flags) {
 
   const packageName = options.packageName;
   const addonName = options.addonName;
-  const zigNapiNpmPath = flags.zigNapi || path.relative(targetDir, packageDir) || ".";
   const zigNapiZigPath = flags.zigNapi || path.relative(targetDir, workspaceRoot) || ".";
 
   fs.mkdirSync(targetDir, { recursive: true });
@@ -314,7 +313,6 @@ async function commandNew(projectDir, flags) {
     __PACKAGE_NAME__: packageName,
     __ADDON_NAME__: addonName,
     __ZIG_PACKAGE_NAME__: sanitizeZigName(packageName),
-    __ZIG_NAPI_NPM_PATH__: normalizePathForZig(zigNapiNpmPath),
     __ZIG_NAPI_ZIG_PATH__: normalizePathForZig(zigNapiZigPath),
     '      "__NAPI_TARGETS__"': formatJsonStringArrayItems(options.targets, "      "),
     __FINGERPRINT__: "0x0",
@@ -431,7 +429,7 @@ function createProgram() {
     .argument("[dir]", "project directory")
     .option("--name <package>", "npm package name")
     .option("--addon <name>", "native addon binary name")
-    .option("--zig-napi <path>", "path to zig-napi from the new project")
+    .option("--zig-napi <path>", "path to zig-napi Zig package from the new project")
     .option("-i, --interactive", "ask project information interactively", true)
     .option("--no-interactive", "disable interactive prompts")
     .option(

@@ -27,7 +27,7 @@
   },
   "devDependencies": {
     "ava": "^8.0.0",
-    "zig-napi": "file:__ZIG_NAPI_NPM_PATH__"
+    "zig-napi": "^0.1.0"
   },
   "napi": {
     "binaryName": "__ADDON_NAME__",
