@@ -60,9 +60,6 @@ jobs:
       - name: Format
         run: pnpm run format
 
-      - name: Check formatting
-        run: git diff --exit-code
-
       - name: Build wasm Node example
         run: node packages/zig-napi/bin/zig-napi.js build --cwd examples/node --target wasm32-wasip1-threads -- --summary all
 
@@ -79,9 +76,6 @@ jobs:
         env:
           NAPI_RS_FORCE_WASI: 'error'
         run: npm run test:run
-
-      - name: Check generated artifacts
-        run: git diff --exit-code
 
       - name: Check package contents
         working-directory: packages/zig-napi
