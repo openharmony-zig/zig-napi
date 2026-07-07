@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const build_options = @import("build_options");
 
 pub const NapiVersion = enum(i32) {
@@ -29,6 +30,10 @@ pub fn experimentalEnabled() bool {
 
 pub fn isNodeAddon() bool {
     return build_options.node_addon;
+}
+
+pub fn isWasmNodeAddon() bool {
+    return build_options.node_addon and builtin.cpu.arch == .wasm32 and builtin.os.tag == .wasi;
 }
 
 pub fn isOhosAddon() bool {

@@ -250,6 +250,7 @@ pub const ArrayBuffer = struct {
 
     /// Sync wasm-side mutations back to the JavaScript ArrayBuffer when running on emnapi.
     pub fn flush(self: ArrayBuffer) !void {
+        if (comptime !options.isWasmNodeAddon()) return;
         if (self.len == 0) return;
         var raw = self.raw;
         const status = napi.emnapi_sync_memory(self.env, false, &raw, 0, self.len);

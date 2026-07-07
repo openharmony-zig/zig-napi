@@ -228,6 +228,7 @@ fn TypedArrayWithRawType(comptime T: type, comptime raw_type: napi.napi_typedarr
 
         /// Sync wasm-side mutations back to the JavaScript TypedArray when running on emnapi.
         pub fn flush(self: Self) !void {
+            if (comptime !options.isWasmNodeAddon()) return;
             if (self.byteLength() == 0) return;
             var raw = self.raw;
             const status = napi.emnapi_sync_memory(self.env, false, &raw, 0, self.byteLength());

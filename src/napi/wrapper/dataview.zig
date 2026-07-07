@@ -3,6 +3,7 @@ const napi = @import("napi-sys").napi_sys;
 const Env = @import("../env.zig").Env;
 const ArrayBuffer = @import("./arraybuffer.zig").ArrayBuffer;
 const NapiError = @import("./error.zig");
+const options = @import("../options.zig");
 const Endian = std.builtin.Endian;
 
 pub const DataView = struct {
@@ -101,6 +102,7 @@ pub const DataView = struct {
 
     /// Sync wasm-side mutations back to the JavaScript DataView when running on emnapi.
     pub fn flush(self: DataView) !void {
+        if (comptime !options.isWasmNodeAddon()) return;
         if (self.byte_length == 0) return;
         var raw = self.raw;
         const status = napi.emnapi_sync_memory(self.env, false, &raw, 0, self.byte_length);
