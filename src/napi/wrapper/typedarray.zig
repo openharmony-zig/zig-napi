@@ -228,10 +228,18 @@ fn TypedArrayWithRawType(comptime T: type, comptime raw_type: napi.napi_typedarr
 
         /// Sync wasm-side mutations back to the JavaScript TypedArray when running on emnapi.
         pub fn flush(self: Self) !void {
+            try self.flushRange(0, self.byteLength());
+        }
+
+        /// Sync wasm-side mutations for a byte range relative to this TypedArray view.
+        pub fn flushRange(self: Self, byte_offset: usize, byte_length: usize) !void {
             if (comptime !options.isWasmNodeAddon()) return;
-            if (self.byteLength() == 0) return;
+            if (byte_offset > self.byteLength() or byte_length > self.byteLength() - byte_offset) {
+                return NapiError.Error.fromStatus(NapiError.Status.InvalidArg);
+            }
+            if (byte_length == 0) return;
             var raw = self.raw;
-            const status = napi.emnapi_sync_memory(self.env, false, &raw, 0, self.byteLength());
+            const status = napi.emnapi_sync_memory(self.env, false, &raw, byte_offset, byte_length);
             if (status != napi.napi_ok) {
                 return NapiError.Error.fromStatus(NapiError.Status.New(status));
             }

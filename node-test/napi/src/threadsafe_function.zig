@@ -22,14 +22,12 @@ fn queueThreadSafeFunction(tsfn: *Tsfn) void {
 
 pub fn callThreadsafeFunction(tsfn: *Tsfn) !void {
     try tsfn.acquire();
+    errdefer tsfn.release(.Release) catch {};
     if (comptime use_wasm_async_work) {
         queueThreadSafeFunction(tsfn);
-        try tsfn.release(.Release);
         return;
     }
 
     const worker = try std.Thread.spawn(.{}, executeThreadSafeFunction, .{tsfn});
     worker.detach();
-
-    try tsfn.release(.Release);
 }

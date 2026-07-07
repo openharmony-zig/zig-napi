@@ -216,6 +216,11 @@ test("DataView", (t) => {
   const view = new DataView(new ArrayBuffer(4));
   bindings.mutateDataView(view);
   t.is(view.getUint16(0, true), 0x1234);
+
+  const fixture = new Uint8Array([0, 1, 2, 3]);
+  const offsetView = new DataView(fixture.buffer, 1, 2);
+  bindings.mutateDataView(offsetView);
+  t.deepEqual(Array.from(fixture), [0, 0x34, 0x12, 3]);
 });
 
 test("async", async (t) => {

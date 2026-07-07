@@ -85,6 +85,12 @@ pub const napi_cleanup_hook = ?*const fn (arg: ?*anyopaque) callconv(.c) void;
 pub const napi_async_execute_callback = ?*const fn (env: napi_env, data: ?*anyopaque) callconv(.c) void;
 pub const napi_async_complete_callback = ?*const fn (env: napi_env, status: napi_status, data: ?*anyopaque) callconv(.c) void;
 pub const napi_addon_register_func = ?*const fn (env: napi_env, exports: napi_value) callconv(.c) napi_value;
+pub const napi_async_cleanup_hook_handle__ = opaque {};
+pub const napi_async_cleanup_hook_handle = ?*napi_async_cleanup_hook_handle__;
+pub const napi_async_cleanup_hook = ?*const fn (handle: napi_async_cleanup_hook_handle, data: ?*anyopaque) callconv(.c) void;
+
+pub extern fn napi_add_env_cleanup_hook(env: node_api_basic_env, hook: napi_cleanup_hook, data: ?*anyopaque) callconv(.c) napi_status;
+pub extern fn napi_remove_env_cleanup_hook(env: node_api_basic_env, hook: napi_cleanup_hook, data: ?*anyopaque) callconv(.c) napi_status;
 
 pub const napi_property_descriptor = extern struct {
     utf8name: [*c]const u8,

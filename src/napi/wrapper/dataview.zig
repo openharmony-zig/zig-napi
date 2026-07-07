@@ -102,10 +102,16 @@ pub const DataView = struct {
 
     /// Sync wasm-side mutations back to the JavaScript DataView when running on emnapi.
     pub fn flush(self: DataView) !void {
+        try self.flushRange(0, self.byte_length);
+    }
+
+    /// Sync wasm-side mutations for a byte range relative to this DataView.
+    pub fn flushRange(self: DataView, byte_offset: usize, byte_length: usize) !void {
         if (comptime !options.isWasmNodeAddon()) return;
-        if (self.byte_length == 0) return;
+        try self.ensureRange(byte_offset, byte_length);
+        if (byte_length == 0) return;
         var raw = self.raw;
-        const status = napi.emnapi_sync_memory(self.env, false, &raw, 0, self.byte_length);
+        const status = napi.emnapi_sync_memory(self.env, false, &raw, byte_offset, byte_length);
         if (status != napi.napi_ok) {
             return NapiError.Error.fromStatus(NapiError.Status.New(status));
         }
