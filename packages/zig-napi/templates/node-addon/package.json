@@ -36,7 +36,8 @@
   "dependencies": {
     "@emnapi/core": "^1.11.0",
     "@emnapi/runtime": "^1.11.0",
-    "@napi-rs/wasm-runtime": "^1.1.6"
+    "@napi-rs/wasm-runtime": "^1.1.6",
+    "emnapi": "^1.11.1"
   },
   "devDependencies": {
     "ava": "^8.0.0",

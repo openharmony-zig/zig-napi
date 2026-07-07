@@ -14,6 +14,9 @@ importers:
       '@ohos-rs/oxk':
         specifier: ^0.6.0
         version: 0.6.0(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)
+      emnapi:
+        specifier: ^1.11.1
+        version: 1.11.1
       oxlint:
         specifier: ^1.71.0
         version: 1.71.0
@@ -29,6 +32,9 @@ importers:
       '@napi-rs/wasm-runtime':
         specifier: ^1.1.6
         version: 1.1.6(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)
+      emnapi:
+        specifier: ^1.11.1
+        version: 1.11.1
     devDependencies:
       zig-napi:
         specifier: workspace:*
@@ -48,6 +54,9 @@ importers:
       ava:
         specifier: 3.15.0
         version: 3.15.0
+      emnapi:
+        specifier: ^1.11.1
+        version: 1.11.1
 
   packages/zig-napi:
     dependencies:
