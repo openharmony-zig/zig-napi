@@ -2,12 +2,15 @@
 /* eslint-disable */
 
 export interface CountProgress {
-  current: number
-  total: number
+  current: number;
+  total: number;
 }
 
-export declare function add(left: number, right: number): number
-export declare function hello(): string
-export declare function requestedNapiVersion(): number
-export declare function fibonacciAsync(n: number): Promise<number>
-export declare function countAsyncProgress(total: number, onEvent?: (event: CountProgress) => void): Promise<number>
+export declare function add(left: number, right: number): number;
+export declare function hello(): string;
+export declare function requestedNapiVersion(): number;
+export declare function fibonacciAsync(n: number): Promise<number>;
+export declare function countAsyncProgress(
+  total: number,
+  onEvent?: (event: CountProgress) => void,
+): Promise<number>;

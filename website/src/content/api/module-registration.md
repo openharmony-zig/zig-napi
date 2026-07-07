@@ -57,14 +57,14 @@ Returning `null` keeps the generated export object. Returning an object replaces
 
 ## Export Rules
 
-| Root member | Export behavior |
-| --- | --- |
-| `pub fn` declaration | Converted into a JavaScript function. |
-| `pub const` declaration | Converted through the `Napi.to_napi_value` conversion layer. |
-| public struct field on the root type | Converted and attached as an export. |
-| `pub const` class wrapper | Exported as a JavaScript class constructor. |
-| `pub const` enum type | Exported as a TypeScript enum during declaration generation. |
-| `pub const napi_allocator` | Reserved for allocator configuration and not exported. |
+| Root member                          | Export behavior                                              |
+| ------------------------------------ | ------------------------------------------------------------ |
+| `pub fn` declaration                 | Converted into a JavaScript function.                        |
+| `pub const` declaration              | Converted through the `Napi.to_napi_value` conversion layer. |
+| public struct field on the root type | Converted and attached as an export.                         |
+| `pub const` class wrapper            | Exported as a JavaScript class constructor.                  |
+| `pub const` enum type                | Exported as a TypeScript enum during declaration generation. |
+| `pub const napi_allocator`           | Reserved for allocator configuration and not exported.       |
 
 If conversion fails during module initialization, the wrapper throws the pending JavaScript error into the current `Env`.
 

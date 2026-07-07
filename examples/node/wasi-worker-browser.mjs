@@ -1,8 +1,8 @@
-import { instantiateNapiModuleSync, MessageHandler, WASI } from '@napi-rs/wasm-runtime'
+import { instantiateNapiModuleSync, MessageHandler, WASI } from "@napi-rs/wasm-runtime";
 
 const handler = new MessageHandler({
   onLoad({ wasmModule, wasmMemory }) {
-    const wasi = new WASI({})
+    const wasi = new WASI({});
     return instantiateNapiModuleSync(wasmModule, {
       childThread: true,
       wasi,
@@ -12,12 +12,12 @@ const handler = new MessageHandler({
           ...importObject.napi,
           ...importObject.emnapi,
           memory: wasmMemory,
-        }
+        };
       },
-    })
+    });
   },
-})
+});
 
 globalThis.onmessage = function (event) {
-  handler.handle(event)
-}
+  handler.handle(event);
+};

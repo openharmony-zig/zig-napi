@@ -6,7 +6,11 @@ import { parentPort, Worker } from "node:worker_threads";
 
 const require = createRequire(import.meta.url);
 
-const { instantiateNapiModuleSync, MessageHandler, getDefaultContext } = require("@napi-rs/wasm-runtime");
+const {
+  instantiateNapiModuleSync,
+  MessageHandler,
+  getDefaultContext,
+} = require("@napi-rs/wasm-runtime");
 
 if (parentPort) {
   parentPort.on("message", (data) => {
@@ -19,7 +23,7 @@ Object.assign(globalThis, {
   require,
   Worker,
   importScripts(f) {
-    ;(0, eval)(fs.readFileSync(f, "utf8") + "//# sourceURL=" + f);
+    (0, eval)(fs.readFileSync(f, "utf8") + "//# sourceURL=" + f);
   },
   postMessage(msg) {
     if (parentPort) {

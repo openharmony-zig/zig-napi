@@ -47,11 +47,11 @@ hello.wasm32-wasi.wasm
 
 The helper exposes these utilities:
 
-| Helper | Description |
-| --- | --- |
-| `nodePlatformArchAbi(build, target)` | Returns the platform-arch-abi suffix. |
-| `nodeAddonExtension(target)` | Returns `node` for native targets and `wasm` for WASI. |
-| `nodeAddonFilename(build, name, target)` | Returns the final `.node` or `.wasm` filename. |
+| Helper                                   | Description                                            |
+| ---------------------------------------- | ------------------------------------------------------ |
+| `nodePlatformArchAbi(build, target)`     | Returns the platform-arch-abi suffix.                  |
+| `nodeAddonExtension(target)`             | Returns `node` for native targets and `wasm` for WASI. |
+| `nodeAddonFilename(build, name, target)` | Returns the final `.node` or `.wasm` filename.         |
 
 ## Target Selection
 
@@ -75,18 +75,18 @@ Windows GNU builds search `LIBNODE_PATH`, then `LIBPATH`, then `PATH` for `libno
 
 `NodeAddonBuildOptionsWithModule` accepts:
 
-| Field | Use |
-| --- | --- |
-| `name` | Base addon name. |
-| `napi_module` | `zig-napi` module imported into the addon root. |
-| `root_module_options` | Source file, target, optimize mode, imports, and Zig module options. |
-| `node_api` | Node-API version and experimental mode. |
-| `node_import_lib` | Optional Windows import library override. |
-| `version` | Optional semantic version. |
-| `max_rss` | Build step memory limit. |
-| `use_llvm` / `use_lld` | Override Zig backend/linker selection. |
-| `zig_lib_dir` | Optional Zig lib directory. |
-| `win32_manifest` | Optional Windows manifest. |
+| Field                  | Use                                                                  |
+| ---------------------- | -------------------------------------------------------------------- |
+| `name`                 | Base addon name.                                                     |
+| `napi_module`          | `zig-napi` module imported into the addon root.                      |
+| `root_module_options`  | Source file, target, optimize mode, imports, and Zig module options. |
+| `node_api`             | Node-API version and experimental mode.                              |
+| `node_import_lib`      | Optional Windows import library override.                            |
+| `version`              | Optional semantic version.                                           |
+| `max_rss`              | Build step memory limit.                                             |
+| `use_llvm` / `use_lld` | Override Zig backend/linker selection.                               |
+| `zig_lib_dir`          | Optional Zig lib directory.                                          |
+| `win32_manifest`       | Optional Windows manifest.                                           |
 
 The helper injects `build_options` into the addon root and configures `@import("napi")` with the selected Node-API version.
 

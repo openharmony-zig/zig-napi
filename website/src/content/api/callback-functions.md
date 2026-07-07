@@ -22,12 +22,12 @@ pub fn call(callback: Callback) !i32 {
 }
 ```
 
-| Method | Use |
-| --- | --- |
-| `from_raw(env, raw)` | Wrap an existing JavaScript function. |
-| `New(env, name, value)` | Create a JavaScript function from a Zig function. |
-| `Call(args)` | Call the JavaScript function and convert the result. |
-| `CreateRef()` | Create `Reference(Function(Args, Return))`. |
+| Method                  | Use                                                  |
+| ----------------------- | ---------------------------------------------------- |
+| `from_raw(env, raw)`    | Wrap an existing JavaScript function.                |
+| `New(env, name, value)` | Create a JavaScript function from a Zig function.    |
+| `Call(args)`            | Call the JavaScript function and convert the result. |
+| `CreateRef()`           | Create `Reference(Function(Args, Return))`.          |
 
 `Args` may be a tuple type for multiple arguments, a non-tuple type for one argument, or an empty struct for no arguments.
 
@@ -61,16 +61,16 @@ napi.CallbackInfo
 
 `CallbackInfo` is the low-level callback context. It reads callback arguments with an inline buffer for up to eight arguments and heap storage for larger calls.
 
-| Method | Use |
-| --- | --- |
-| `from_raw(env, info)` | Read callback information. |
-| `deinit()` | Free heap-backed argument storage. |
-| `Env()` | Return `napi.Env`. |
-| `Get(index)` | Return argument as `NapiValue`. |
-| `Len()` | Argument count. |
-| `ArgsRaw()` | Raw `napi_value` slice. |
-| `ArgRaw(index)` | One raw argument. |
-| `This()` | Raw `this` value. |
+| Method                | Use                                |
+| --------------------- | ---------------------------------- |
+| `from_raw(env, info)` | Read callback information.         |
+| `deinit()`            | Free heap-backed argument storage. |
+| `Env()`               | Return `napi.Env`.                 |
+| `Get(index)`          | Return argument as `NapiValue`.    |
+| `Len()`               | Argument count.                    |
+| `ArgsRaw()`           | Raw `napi_value` slice.            |
+| `ArgRaw(index)`       | One raw argument.                  |
+| `This()`              | Raw `this` value.                  |
 
 Most exported functions should use typed Zig parameters instead. `CallbackInfo` is useful for variadic or dynamic APIs.
 
@@ -89,16 +89,16 @@ Use `ThreadSafeFunction` to call a JavaScript function from native threads. It r
 
 `ThreadSafeFunctionCalleeHandled = true` makes the JavaScript callback receive an error-first argument: `(err, ...args) => void`.
 
-| Method | Use |
-| --- | --- |
+| Method               | Use                                       |
+| -------------------- | ----------------------------------------- |
 | `from_raw(env, raw)` | Create a TSFN from a JavaScript function. |
-| `acquire()` | Increment active thread usage. |
-| `release(mode)` | Release usage or abort release. |
-| `abort()` | Stop future calls. |
-| `ref()` / `unref()` | Control event-loop lifetime. |
-| `Ok(args, mode)` | Send a successful call. |
-| `Err(error, mode)` | Send an error call. |
-| `deinit()` | Destroy the wrapper allocation. |
+| `acquire()`          | Increment active thread usage.            |
+| `release(mode)`      | Release usage or abort release.           |
+| `abort()`            | Stop future calls.                        |
+| `ref()` / `unref()`  | Control event-loop lifetime.              |
+| `Ok(args, mode)`     | Send a successful call.                   |
+| `Err(error, mode)`   | Send an error call.                       |
+| `deinit()`           | Destroy the wrapper allocation.           |
 
 ## TSFN Modes
 

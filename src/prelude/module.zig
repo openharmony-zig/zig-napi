@@ -118,7 +118,7 @@ pub fn NODE_API_MODULE_WITH_INIT(
 
     comptime {
         if (build_options.node_addon) {
-            if (builtin.cpu.arch == .wasm32) {
+            if (options.isWasmNodeAddon()) {
                 @export(&ModuleImpl.node_init, .{ .linkage = .strong, .name = "napi_register_wasm_v1" });
             } else {
                 @export(&ModuleImpl.node_init, .{ .linkage = .strong, .name = "napi_register_module_v1" });

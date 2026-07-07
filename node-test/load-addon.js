@@ -53,7 +53,7 @@ module.exports = function loadAddon(name) {
 
   throw new Error(
     [
-      `Unable to load ${name}.node or ${name}.wasm32-wasi.wasm`,
+      `Unable to load ${name}.node or ${name}.wasi.cjs`,
       ...loadErrors.map((error) => `- ${error && error.message ? error.message : error}`),
     ].join("\n"),
   );

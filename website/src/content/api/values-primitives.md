@@ -24,11 +24,11 @@ pub fn read(value: napi.NapiValue) i32 {
 
 ## Number, Bool, String, BigInt
 
-| Wrapper | Typical Zig values |
-| --- | --- |
-| `napi.Number` | integers, floats, comptime numeric values |
-| `napi.Bool` | `bool` |
-| `napi.String` | UTF-8 or UTF-16 string-like values |
+| Wrapper       | Typical Zig values                                      |
+| ------------- | ------------------------------------------------------- |
+| `napi.Number` | integers, floats, comptime numeric values               |
+| `napi.Bool`   | `bool`                                                  |
+| `napi.String` | UTF-8 or UTF-16 string-like values                      |
 | `napi.BigInt` | integer values that should cross as JavaScript `bigint` |
 
 `BigInt` requires Node-API v6 or newer.
@@ -43,12 +43,12 @@ Use `BigInt` for `i128`, `u128`, and values that should not be represented as Ja
 
 `String.New(env, bytes)` creates a UTF-8 JavaScript string.
 
-| Method | Use |
-| --- | --- |
-| `utf8Len()` | Byte length of the UTF-8 representation. |
-| `utf16Len()` | Code-unit length of the UTF-16 representation. |
-| `copyUtf8()` | Allocate and return `[]u8`. |
-| `copyUtf16()` | Allocate and return `[]u16`. |
+| Method        | Use                                            |
+| ------------- | ---------------------------------------------- |
+| `utf8Len()`   | Byte length of the UTF-8 representation.       |
+| `utf16Len()`  | Code-unit length of the UTF-16 representation. |
+| `copyUtf8()`  | Allocate and return `[]u8`.                    |
+| `copyUtf16()` | Allocate and return `[]u16`.                   |
 
 Automatic conversion supports UTF-8 and UTF-16 string-like Zig targets.
 

@@ -24,18 +24,18 @@ pub const Error = union(enum) {
 
 Create errors with:
 
-| Constructor | Use |
-| --- | --- |
-| `withReason(reason)` | Generic JavaScript `Error`. |
-| `withStatus(status)` | Error from `napi.Status` or custom status string. |
-| `withCodeAndMessage(code, message)` | Error with explicit code and message. |
-| `fromAnyError(err)` | Map a Zig error into `napi.Error`. |
-| `withTypeError(reason)` | JavaScript `TypeError`. |
-| `withRangeError(reason)` | JavaScript `RangeError`. |
-| `fromReason(reason)` | Store a pending error and return `error.GenericFailure`. |
-| `fromStatus(status)` | Store a pending status error and return `error.GenericFailure`. |
-| `typeError(message)` | Store a pending `TypeError`. |
-| `rangeError(message)` | Store a pending `RangeError`. |
+| Constructor                         | Use                                                             |
+| ----------------------------------- | --------------------------------------------------------------- |
+| `withReason(reason)`                | Generic JavaScript `Error`.                                     |
+| `withStatus(status)`                | Error from `napi.Status` or custom status string.               |
+| `withCodeAndMessage(code, message)` | Error with explicit code and message.                           |
+| `fromAnyError(err)`                 | Map a Zig error into `napi.Error`.                              |
+| `withTypeError(reason)`             | JavaScript `TypeError`.                                         |
+| `withRangeError(reason)`            | JavaScript `RangeError`.                                        |
+| `fromReason(reason)`                | Store a pending error and return `error.GenericFailure`.        |
+| `fromStatus(status)`                | Store a pending status error and return `error.GenericFailure`. |
+| `typeError(message)`                | Store a pending `TypeError`.                                    |
+| `rangeError(message)`               | Store a pending `RangeError`.                                   |
 
 Use `throwInto(env)` when manual code needs to throw into a JavaScript environment.
 
@@ -49,12 +49,12 @@ napi.JsRangeError
 
 These typed wrappers map directly to JavaScript `Error`, `TypeError`, and `RangeError`.
 
-| Method | Use |
-| --- | --- |
+| Method                 | Use                                       |
+| ---------------------- | ----------------------------------------- |
 | `fromMessage(message)` | Create with a message and generic status. |
-| `fromStatus(status)` | Create from status. |
-| `to_napi_error(env)` | Create a JavaScript error value. |
-| `throwInto(env)` | Throw into the environment. |
+| `fromStatus(status)`   | Create from status.                       |
+| `to_napi_error(env)`   | Create a JavaScript error value.          |
+| `throwInto(env)`       | Throw into the environment.               |
 
 ## Error Mapping
 
@@ -77,10 +77,10 @@ pub fn maybeRead(ok: bool) napi.Result([]const u8) {
 
 Use `Result(T)` when the public API should model a handled result without throwing through Zig error unions.
 
-| Method | Use |
-| --- | --- |
-| `Result(T).Ok(value)` | Return a payload. |
-| `Result(T).Err(err)` | Return a JavaScript error. |
+| Method                | Use                        |
+| --------------------- | -------------------------- |
+| `Result(T).Ok(value)` | Return a payload.          |
+| `Result(T).Err(err)`  | Return a JavaScript error. |
 
 `Result(void).Ok({})` converts to JavaScript `undefined`.
 
@@ -98,13 +98,13 @@ napi.Status
 
 `Status` wraps `napi_status`.
 
-| Method | Use |
-| --- | --- |
-| `from_raw(raw)` | Convert raw N-API status. |
-| `New(status)` | Convenience constructor. |
-| `isOk()` | Check for `Ok`. |
-| `code()` | Numeric status code. |
-| `toString()` / `ToString()` | Stable status text. |
+| Method                      | Use                       |
+| --------------------------- | ------------------------- |
+| `from_raw(raw)`             | Convert raw N-API status. |
+| `New(status)`               | Convenience constructor.  |
+| `isOk()`                    | Check for `Ok`.           |
+| `code()`                    | Numeric status code.      |
+| `toString()` / `ToString()` | Stable status text.       |
 
 ## Status Values
 

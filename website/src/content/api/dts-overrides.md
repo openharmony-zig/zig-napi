@@ -43,12 +43,12 @@ pub fn label() napi.Dts([]const u8, "String") {
 
 In normal runtime builds, `Dts(Value, TypeScriptType)` is exactly `Value`. In declaration-generation builds, it becomes a wrapper carrying:
 
-| Field | Use |
-| --- | --- |
-| `is_napi_dts` | Marker consumed by the conversion and tsgen layers. |
-| `wrapped_type` | Original Zig type. |
-| `ts_type` | TypeScript text to emit. |
-| `value` | Runtime value, when the wrapped value is not comptime-only. |
+| Field          | Use                                                         |
+| -------------- | ----------------------------------------------------------- |
+| `is_napi_dts`  | Marker consumed by the conversion and tsgen layers.         |
+| `wrapped_type` | Original Zig type.                                          |
+| `ts_type`      | TypeScript text to emit.                                    |
+| `value`        | Runtime value, when the wrapped value is not comptime-only. |
 
 The wrapper exposes `unwrap()` during declaration-generation builds. Most addon code should not need it because conversion unwraps `Dts` automatically.
 
@@ -60,11 +60,11 @@ The wrapper exposes `unwrap()` during declaration-generation builds. Most addon 
 
 The type string is emitted verbatim.
 
-| Input | Generated declaration intent |
-| --- | --- |
-| `"String"` | Use the boxed or project-specific `String` name exactly as written. |
-| `"string"` | Use the TypeScript primitive. |
-| `"(left: Number, right: Number) => Number"` | Replace a function declaration with an explicit callable type. |
-| `"ReadonlyArray<string>"` | Use a richer TypeScript utility type. |
+| Input                                       | Generated declaration intent                                        |
+| ------------------------------------------- | ------------------------------------------------------------------- |
+| `"String"`                                  | Use the boxed or project-specific `String` name exactly as written. |
+| `"string"`                                  | Use the TypeScript primitive.                                       |
+| `"(left: Number, right: Number) => Number"` | Replace a function declaration with an explicit callable type.      |
+| `"ReadonlyArray<string>"`                   | Use a richer TypeScript utility type.                               |
 
 Because the string is not parsed by Zig, keep it valid TypeScript.

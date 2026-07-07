@@ -3,8 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Node.js addon example built with zig-napi.",
-  "main": "index.js",
-  "browser": "browser.js",
+  "license": "MIT",
   "files": [
     "index.js",
     "index.d.ts",
@@ -16,6 +15,8 @@
     "wasi-worker.mjs",
     "wasi-worker-browser.mjs"
   ],
+  "main": "index.js",
+  "browser": "browser.js",
   "scripts": {
     "build": "zig-napi build -- --summary all",
     "create-npm-dirs": "zig-napi create-npm-dirs",
@@ -50,6 +51,5 @@
       "aarch64-pc-windows-msvc",
       "wasm32-wasip1-threads"
     ]
-  },
-  "license": "MIT"
+  }
 }

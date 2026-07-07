@@ -33,7 +33,7 @@
       "napi-compat-mode/__tests__/**/*.spec.js",
       "napi/__tests__/**/*.spec.js"
     ],
-    "workerThreads": false,
-    "timeout": "30s"
+    "timeout": "30s",
+    "workerThreads": false
   }
 }

@@ -16,17 +16,17 @@ Exports a Zig struct type as a JavaScript class with constructor initialization 
 
 `Class(T)` supports:
 
-| Zig declaration | JavaScript class member |
-| --- | --- |
-| struct fields | instance properties with getter and setter |
-| `pub fn init(...) T` or `!T` | constructor body |
-| no `init` | constructor parameters are the struct fields |
-| `pub fn method(self: *T, ...)` | instance method |
-| `pub fn method(self: T, ...)` | instance method with value receiver |
-| `pub fn staticMethod(...)` | static method |
-| static factory returning `T` or `*T` | static factory returning a class instance |
-| `pub const value = ...` | static readonly value |
-| `pub fn deinit(self: *T)` | called when the wrapped instance is finalized |
+| Zig declaration                      | JavaScript class member                       |
+| ------------------------------------ | --------------------------------------------- |
+| struct fields                        | instance properties with getter and setter    |
+| `pub fn init(...) T` or `!T`         | constructor body                              |
+| no `init`                            | constructor parameters are the struct fields  |
+| `pub fn method(self: *T, ...)`       | instance method                               |
+| `pub fn method(self: T, ...)`        | instance method with value receiver           |
+| `pub fn staticMethod(...)`           | static method                                 |
+| static factory returning `T` or `*T` | static factory returning a class instance     |
+| `pub const value = ...`              | static readonly value                         |
+| `pub fn deinit(self: *T)`            | called when the wrapped instance is finalized |
 
 ```zig
 const Counter = struct {
@@ -64,15 +64,15 @@ napi.Ref(comptime T: type)
 
 References keep JavaScript values alive across calls. `Ref` is an alias for `Reference`.
 
-| Method | Use |
-| --- | --- |
-| `New(env, value)` | Create a reference. |
-| `from_napi_value(env, raw)` | Convert a JavaScript value into a reference. |
-| `to_napi_value(env)` | Get the referenced value as raw `napi_value`. |
-| `get_value(env)` / `GetValue(env)` | Get the referenced wrapper value. |
-| `Ref(env)` | Increase the reference count and return the count. |
-| `Unref(env)` | Unref and delete the reference. |
-| `Delete(env)` | Alias for `Unref`. |
+| Method                             | Use                                                |
+| ---------------------------------- | -------------------------------------------------- |
+| `New(env, value)`                  | Create a reference.                                |
+| `from_napi_value(env, raw)`        | Convert a JavaScript value into a reference.       |
+| `to_napi_value(env)`               | Get the referenced value as raw `napi_value`.      |
+| `get_value(env)` / `GetValue(env)` | Get the referenced wrapper value.                  |
+| `Ref(env)`                         | Increase the reference count and return the count. |
+| `Unref(env)`                       | Unref and delete the reference.                    |
+| `Delete(env)`                      | Alias for `Unref`.                                 |
 
 ## `FunctionRef` And `ObjectRef`
 
@@ -93,19 +93,19 @@ napi.External(comptime T: type)
 
 Wraps a native payload in a JavaScript external value. The wrapper tags the external with the Zig type name, so `External(A)` does not match `External(B)`.
 
-| Method | Use |
-| --- | --- |
-| `New(payload)` / `new(payload)` | Create a detached external wrapper. |
-| `NewWithSizeHint(payload, size_hint)` | Create with memory pressure accounting. |
-| `newWithSizeHint(payload, size_hint)` | Lowercase alias. |
-| `from_raw(env, raw)` / `from_napi_value(env, raw)` | Read and validate an external value. |
-| `matches_napi_value(env, raw)` | Check whether a raw value is a zig-napi external of type `T`. |
-| `to_napi_value(env)` | Materialize the JavaScript external. |
-| `value()` / `asConstPtr()` | Immutable payload pointer. |
-| `valueMut()` / `asPtr()` | Mutable payload pointer. |
-| `sizeHint()` | Declared size hint. |
-| `adjustedSize()` | Last adjusted external memory value. |
-| `deinit()` / `Deinit()` | Destroy a detached external before it is materialized. |
+| Method                                             | Use                                                           |
+| -------------------------------------------------- | ------------------------------------------------------------- |
+| `New(payload)` / `new(payload)`                    | Create a detached external wrapper.                           |
+| `NewWithSizeHint(payload, size_hint)`              | Create with memory pressure accounting.                       |
+| `newWithSizeHint(payload, size_hint)`              | Lowercase alias.                                              |
+| `from_raw(env, raw)` / `from_napi_value(env, raw)` | Read and validate an external value.                          |
+| `matches_napi_value(env, raw)`                     | Check whether a raw value is a zig-napi external of type `T`. |
+| `to_napi_value(env)`                               | Materialize the JavaScript external.                          |
+| `value()` / `asConstPtr()`                         | Immutable payload pointer.                                    |
+| `valueMut()` / `asPtr()`                           | Mutable payload pointer.                                      |
+| `sizeHint()`                                       | Declared size hint.                                           |
+| `adjustedSize()`                                   | Last adjusted external memory value.                          |
+| `deinit()` / `Deinit()`                            | Destroy a detached external before it is materialized.        |
 
 If `T` has a `deinit` method, the conversion layer calls it when the external payload is destroyed.
 

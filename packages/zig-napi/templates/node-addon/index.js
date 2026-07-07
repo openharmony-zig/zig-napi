@@ -25,7 +25,9 @@ function requireNative() {
 
 function requireTuple(platformArchABI) {
   try {
-    return require(path.join(__dirname, "zig-out", "node", `${binaryName}.${platformArchABI}.node`));
+    return require(
+      path.join(__dirname, "zig-out", "node", `${binaryName}.${platformArchABI}.node`),
+    );
   } catch (error) {
     loadErrors.push(error);
   }

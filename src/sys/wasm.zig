@@ -42,6 +42,8 @@ const error_messages = [_][*c]const u8{
     "Cannot run JavaScript",
 };
 
+const unknown_error_message = "Unknown Node-API error";
+
 var last_error_info = node.napi_extended_error_info{
     .error_message = null,
     .engine_reserved = null,
@@ -156,7 +158,7 @@ pub fn getLastErrorInfo(env: node.node_api_basic_env, result: [*c][*c]const node
     if (last_error_info.error_code < error_messages.len) {
         last_error_info.error_message = error_messages[@intCast(last_error_info.error_code)];
     } else {
-        @trap();
+        last_error_info.error_message = unknown_error_message;
     }
 
     if (last_error_info.error_code == node.napi_ok) {

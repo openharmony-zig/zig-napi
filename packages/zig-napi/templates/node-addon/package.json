@@ -2,17 +2,15 @@
   "name": "__PACKAGE_NAME__",
   "version": "0.1.0",
   "description": "A Node.js native addon built with zig-napi.",
-  "main": "index.js",
-  "browser": "browser.js",
-  "types": "index.d.ts",
   "keywords": [
-    "zig-napi",
-    "NAPI",
     "N-API",
+    "NAPI",
     "Zig",
     "node-addon",
-    "node-addon-api"
+    "node-addon-api",
+    "zig-napi"
   ],
+  "license": "MIT",
   "files": [
     "index.js",
     "index.d.ts",
@@ -24,6 +22,13 @@
     "wasi-worker.mjs",
     "wasi-worker-browser.mjs"
   ],
+  "main": "index.js",
+  "browser": "browser.js",
+  "types": "index.d.ts",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "scripts": {
     "artifacts": "zig-napi artifacts",
     "build": "zig-napi build --release",
@@ -51,10 +56,5 @@
   },
   "engines": {
     "node": ">=20.17"
-  },
-  "publishConfig": {
-    "registry": "https://registry.npmjs.org/",
-    "access": "public"
-  },
-  "license": "MIT"
+  }
 }

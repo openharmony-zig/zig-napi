@@ -35,24 +35,24 @@ Environment:
 - Zig addon: `zig build -Darkvm-test=true -Doptimize=ReleaseFast`
 - Native addon: C source compiled in Docker with `gcc`
 
-| module | api content | iterations | native C N-API avg (us) | zig-napi avg (us) | diff (us) | ratio |
-| --- | --- | ---: | ---: | ---: | ---: | ---: |
-| global function | void(*)() | 100000 | 0.159 | 0.159 | 0 | 1.001x |
-| primitive | i32(i32, i32) | 100000 | 0.183 | 0.169 | -0.014 | 0.924x |
-| primitive | bool(bool) | 100000 | 0.169 | 0.169 | 0 | 1.003x |
-| string | len(string) | 100000 | 0.213 | 0.204 | -0.008 | 0.961x |
-| object | read properties | 100000 | 0.368 | 0.37 | 0.001 | 1.003x |
-| array | sum(number[]) | 100000 | 1.065 | 0.792 | -0.274 | 0.743x |
-| function | call callback | 100000 | 0.333 | 0.339 | 0.006 | 1.017x |
-| class | constructor | 20000 | 1.517 | 3.091 | 1.574 | 2.037x |
-| class | getter | 100000 | 0.264 | 0.266 | 0.002 | 1.009x |
-| class | setter | 100000 | 0.458 | 0.472 | 0.014 | 1.03x |
-| class | method | 100000 | 0.269 | 0.27 | 0.001 | 1.004x |
-| ArrayBuffer | constructor | 20000 | 0.339 | 0.424 | 0.085 | 1.251x |
-| ArrayBuffer | byteLength | 100000 | 0.2 | 0.198 | -0.002 | 0.989x |
-| Buffer | constructor | 20000 | 0.691 | 0.72 | 0.029 | 1.042x |
-| Buffer | length | 100000 | 0.207 | 0.204 | -0.004 | 0.983x |
-| TypedArray | Uint8Array constructor | 20000 | 0.548 | 0.647 | 0.099 | 1.18x |
-| TypedArray | Uint8Array sum | 100000 | 0.24 | 0.275 | 0.035 | 1.147x |
-| DataView | constructor | 20000 | 0.885 | 0.44 | -0.445 | 0.498x |
-| DataView | byteLength | 100000 | 0.201 | 0.235 | 0.034 | 1.169x |
+| module          | api content            | iterations | native C N-API avg (us) | zig-napi avg (us) | diff (us) |  ratio |
+| --------------- | ---------------------- | ---------: | ----------------------: | ----------------: | --------: | -----: |
+| global function | void(*)()              |     100000 |                   0.159 |             0.159 |         0 | 1.001x |
+| primitive       | i32(i32, i32)          |     100000 |                   0.183 |             0.169 |    -0.014 | 0.924x |
+| primitive       | bool(bool)             |     100000 |                   0.169 |             0.169 |         0 | 1.003x |
+| string          | len(string)            |     100000 |                   0.213 |             0.204 |    -0.008 | 0.961x |
+| object          | read properties        |     100000 |                   0.368 |              0.37 |     0.001 | 1.003x |
+| array           | sum(number[])          |     100000 |                   1.065 |             0.792 |    -0.274 | 0.743x |
+| function        | call callback          |     100000 |                   0.333 |             0.339 |     0.006 | 1.017x |
+| class           | constructor            |      20000 |                   1.517 |             3.091 |     1.574 | 2.037x |
+| class           | getter                 |     100000 |                   0.264 |             0.266 |     0.002 | 1.009x |
+| class           | setter                 |     100000 |                   0.458 |             0.472 |     0.014 |  1.03x |
+| class           | method                 |     100000 |                   0.269 |              0.27 |     0.001 | 1.004x |
+| ArrayBuffer     | constructor            |      20000 |                   0.339 |             0.424 |     0.085 | 1.251x |
+| ArrayBuffer     | byteLength             |     100000 |                     0.2 |             0.198 |    -0.002 | 0.989x |
+| Buffer          | constructor            |      20000 |                   0.691 |              0.72 |     0.029 | 1.042x |
+| Buffer          | length                 |     100000 |                   0.207 |             0.204 |    -0.004 | 0.983x |
+| TypedArray      | Uint8Array constructor |      20000 |                   0.548 |             0.647 |     0.099 |  1.18x |
+| TypedArray      | Uint8Array sum         |     100000 |                    0.24 |             0.275 |     0.035 | 1.147x |
+| DataView        | constructor            |      20000 |                   0.885 |              0.44 |    -0.445 | 0.498x |
+| DataView        | byteLength             |     100000 |                   0.201 |             0.235 |     0.034 | 1.169x |

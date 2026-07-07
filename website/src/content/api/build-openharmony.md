@@ -44,11 +44,11 @@ pub fn build(b: *std.Build) !void {
 
 The helper knows the supported OpenHarmony target triples:
 
-| Output slot | Target |
-| --- | --- |
-| `arm64` | `aarch64-linux-ohos` |
-| `arm` | `arm-linux-ohoseabi` |
-| `x64` | `x86_64-linux-ohos` |
+| Output slot | Target               |
+| ----------- | -------------------- |
+| `arm64`     | `aarch64-linux-ohos` |
+| `arm`       | `arm-linux-ohoseabi` |
+| `x64`       | `x86_64-linux-ohos`  |
 
 `NativeAddonBuildResult` stores the compile step for each enabled target.
 
@@ -58,17 +58,17 @@ If `root_module_options.target` is an OpenHarmony target, the helper builds only
 
 `NativeAddonBuildOptionsWithModule` accepts:
 
-| Field | Use |
-| --- | --- |
-| `name` | Shared library name. |
-| `napi_module` | Optional `zig-napi` module import. Required when `.node_api` is customized. |
-| `node_api` | Node-API version and experimental mode passed into the wrapper module. |
-| `root_module_options` | Source file, target, optimize mode, imports, libc/cpp flags, and other Zig module options. |
-| `version` | Optional semantic version for the shared library. |
-| `max_rss` | Build step memory limit. |
-| `use_llvm` / `use_lld` | Override Zig backend/linker selection. |
-| `zig_lib_dir` | Optional Zig lib directory. |
-| `win32_manifest` | Passed through for API parity with library options. |
+| Field                  | Use                                                                                        |
+| ---------------------- | ------------------------------------------------------------------------------------------ |
+| `name`                 | Shared library name.                                                                       |
+| `napi_module`          | Optional `zig-napi` module import. Required when `.node_api` is customized.                |
+| `node_api`             | Node-API version and experimental mode passed into the wrapper module.                     |
+| `root_module_options`  | Source file, target, optimize mode, imports, libc/cpp flags, and other Zig module options. |
+| `version`              | Optional semantic version for the shared library.                                          |
+| `max_rss`              | Build step memory limit.                                                                   |
+| `use_llvm` / `use_lld` | Override Zig backend/linker selection.                                                     |
+| `zig_lib_dir`          | Optional Zig lib directory.                                                                |
+| `win32_manifest`       | Passed through for API parity with library options.                                        |
 
 The helper clones the provided root module options for each target and injects configured `build_options` plus the configured `napi` import.
 
@@ -100,7 +100,7 @@ Passing `-Darkvm-test=true` builds a host Linux x64 artifact under `zig-out/arkv
 
 ## Helper Functions
 
-| Helper | Use |
-| --- | --- |
-| `resolveNdkPath(build)` | Returns `$OHOS_NDK_HOME/native`, `ohos_sdk_native`, or an empty string. |
-| `cloneLibraryOptions(build, option, target)` | Reuses addon library options for a resolved target. |
+| Helper                                       | Use                                                                     |
+| -------------------------------------------- | ----------------------------------------------------------------------- |
+| `resolveNdkPath(build)`                      | Returns `$OHOS_NDK_HOME/native`, `ohos_sdk_native`, or an empty string. |
+| `cloneLibraryOptions(build, option, target)` | Reuses addon library options for a resolved target.                     |
