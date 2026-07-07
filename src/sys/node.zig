@@ -1014,6 +1014,6 @@ pub fn node_api_post_finalizer(arg0: node_api_basic_env, arg1: napi_finalize, ar
 }
 pub fn napi_create_object_with_properties(arg0: napi_env, arg1: napi_value, arg2: [*c]const napi_value, arg3: [*c]const napi_value, arg4: usize, arg5: [*c]napi_value) callconv(.c) napi_status {
     const Fn = *const fn (napi_env, napi_value, [*c]const napi_value, [*c]const napi_value, usize, [*c]napi_value) callconv(.c) napi_status;
-    if (wasm.enabled) return wasm.callEmnapiApi("node_api_create_object_with_properties", Fn, .{ arg0, arg1, arg2, arg3, arg4, arg5 });
+    if (wasm.enabled) return wasm.callEmnapiApi("napi_create_object_with_properties", Fn, .{ arg0, arg1, arg2, arg3, arg4, arg5 });
     return callNodeApi("napi_create_object_with_properties", Fn, .{ arg0, arg1, arg2, arg3, arg4, arg5 });
 }
