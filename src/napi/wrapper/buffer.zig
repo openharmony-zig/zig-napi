@@ -245,6 +245,17 @@ pub const Buffer = struct {
     pub fn length(self: Buffer) usize {
         return self.len;
     }
+
+    /// Sync wasm-side mutations back to the JavaScript Buffer when running on emnapi.
+    pub fn flush(self: Buffer) !void {
+        if (comptime !options.isWasmNodeAddon()) return;
+        if (self.len == 0) return;
+        var raw = self.raw;
+        const status = napi.emnapi_sync_memory(self.env, false, &raw, 0, self.len);
+        if (status != napi.napi_ok) {
+            return NapiError.Error.fromStatus(NapiError.Status.New(status));
+        }
+    }
 };
 
 const BufferCopyStatus = struct {

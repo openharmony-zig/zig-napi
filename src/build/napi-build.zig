@@ -206,7 +206,31 @@ fn nodeAbi(target: std.Target) ?[]const u8 {
     };
 }
 
+fn isWasiNodeAddonTarget(target: std.Target) bool {
+    return target.cpu.arch == .wasm32 and target.os.tag == .wasi;
+}
+
+fn linkWasiEmnapi(compile: *std.Build.Step.Compile) void {
+    const package = compile.root_module.owner;
+    const lib_path = package.path("node_modules/emnapi/lib/wasm32-wasip1-threads/libemnapi-basic-napi-rs-mt.a");
+
+    compile.root_module.addObjectFile(lib_path);
+    compile.root_module.export_symbol_names = &.{
+        "malloc",
+        "free",
+        "napi_register_wasm_v1",
+        "node_api_module_get_api_version_v1",
+        "emnapi_thread_crashed",
+        "emnapi_async_worker_create",
+        "emnapi_async_worker_init",
+    };
+}
+
 pub fn nodePlatformArchAbi(build: *std.Build, target: std.Build.ResolvedTarget) []const u8 {
+    if (isWasiNodeAddonTarget(target.result)) {
+        return "wasm32-wasi";
+    }
+
     const platform = nodePlatform(target.result);
     const arch = nodeArch(target.result);
     if (nodeAbi(target.result)) |abi| {
@@ -215,8 +239,12 @@ pub fn nodePlatformArchAbi(build: *std.Build, target: std.Build.ResolvedTarget) 
     return build.fmt("{s}-{s}", .{ platform, arch });
 }
 
+pub fn nodeAddonExtension(target: std.Build.ResolvedTarget) []const u8 {
+    return if (isWasiNodeAddonTarget(target.result)) "wasm" else "node";
+}
+
 pub fn nodeAddonFilename(build: *std.Build, name: []const u8, target: std.Build.ResolvedTarget) []const u8 {
-    return build.fmt("{s}.{s}.node", .{ name, nodePlatformArchAbi(build, target) });
+    return build.fmt("{s}.{s}.{s}", .{ name, nodePlatformArchAbi(build, target), nodeAddonExtension(target) });
 }
 
 pub const NativeAddonBuildOptionsWithModule = struct {
@@ -357,14 +385,39 @@ pub fn nodeAddonBuild(build: *std.Build, option: NodeAddonBuildOptionsWithModule
         .node_api = option.node_api,
     });
     const target = option.root_module_options.target orelse build.graph.host;
+    const is_wasi = isWasiNodeAddonTarget(target.result);
 
     var nodeOption = cloneLibraryOptionsInternal(build, option, target);
     nodeOption.linkage = .dynamic;
 
-    const compile = build.addLibrary(nodeOption);
+    const compile = if (is_wasi) compile: {
+        const wasm = build.addExecutable(.{
+            .name = nodeOption.name,
+            .root_module = nodeOption.root_module,
+            .version = nodeOption.version,
+            .max_rss = nodeOption.max_rss,
+            .use_llvm = nodeOption.use_llvm,
+            .use_lld = nodeOption.use_lld,
+            .zig_lib_dir = nodeOption.zig_lib_dir,
+            .win32_manifest = nodeOption.win32_manifest,
+        });
+        wasm.entry = .disabled;
+        wasm.import_symbols = true;
+        wasm.import_memory = true;
+        wasm.export_table = true;
+        wasm.shared_memory = true;
+        wasm.initial_memory = 4000 * 65536;
+        wasm.max_memory = 65536 * 65536;
+        break :compile wasm;
+    } else build.addLibrary(nodeOption);
     const build_options_module = addon_build_options.createModule();
     addConfiguredNapiImport(build, compile.root_module, option.napi_module, build_options_module, true);
     compile.linker_allow_shlib_undefined = true;
+    if (is_wasi) {
+        compile.rdynamic = true;
+        compile.root_module.link_libc = true;
+        linkWasiEmnapi(compile);
+    }
     if (target.result.os.tag == .windows) {
         if (option.node_import_lib) |node_import_lib| {
             compile.root_module.addObjectFile(node_import_lib);

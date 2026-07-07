@@ -1,19 +1,19 @@
 {
   "name": "zig-napi-node-example-linux-x64-musl",
   "version": "0.1.0",
-  "cpu": [
-    "x64"
-  ],
-  "main": "hello.linux-x64-musl.node",
+  "description": "Node.js addon example built with zig-napi.",
+  "license": "MIT",
   "files": [
     "hello.linux-x64-musl.node"
   ],
-  "description": "Node.js addon example built with zig-napi.",
-  "license": "MIT",
   "os": [
     "linux"
   ],
+  "cpu": [
+    "x64"
+  ],
   "libc": [
     "musl"
-  ]
+  ],
+  "main": "hello.linux-x64-musl.node"
 }

@@ -118,7 +118,11 @@ pub fn NODE_API_MODULE_WITH_INIT(
 
     comptime {
         if (build_options.node_addon) {
-            @export(&ModuleImpl.node_init, .{ .linkage = .strong, .name = "napi_register_module_v1" });
+            if (options.isWasmNodeAddon()) {
+                @export(&ModuleImpl.node_init, .{ .linkage = .strong, .name = "napi_register_wasm_v1" });
+            } else {
+                @export(&ModuleImpl.node_init, .{ .linkage = .strong, .name = "napi_register_module_v1" });
+            }
             @export(&ModuleImpl.node_api_version, .{ .linkage = .strong, .name = "node_api_module_get_api_version_v1" });
         } else if (builtin.object_format == .elf) {
             const InitFnPtr = *const fn () callconv(.c) void;

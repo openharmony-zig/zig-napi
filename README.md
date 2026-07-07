@@ -146,7 +146,7 @@ pnpm build
 pnpm test
 ```
 
-It installs the addon as `zig-out/node/hello.<platform-arch-abi>.node`, for example `hello.darwin-arm64.node`, `hello.linux-x64-gnu.node`, or `hello.win32-x64-msvc.node`.
+It installs the addon as `zig-out/node/hello.<platform-arch-abi>.node`, for example `hello.darwin-arm64.node`, `hello.linux-x64-gnu.node`, or `hello.win32-x64-msvc.node`. For WASI threads, use `zig-napi build --target wasm32-wasip1-threads`; the CLI maps that to Zig's `wasm32-wasi` target with atomics/shared-memory features, and the output follows napi-rs naming as `hello.wasm32-wasi.wasm`.
 
 The package also provides a `zig-napi` CLI for Node.js addons. Zig-specific commands such as `new` and `build` are implemented by this project. Packaging commands reuse the community `@napi-rs/cli` API for npm package directory creation, artifact collection, and pre-publish processing.
 
@@ -179,7 +179,7 @@ pnpm run node-example:package
 pnpm --filter zig-napi-node-example run test
 ```
 
-`zig-napi create-npm-dirs` calls `@napi-rs/cli`'s `createNpmDirs` API and creates `npm/<platform-arch-abi>` packages from the `napi` field in `package.json`. `zig-napi artifacts --output-dir zig-out/node` calls the community `artifacts` API and copies Zig's `<binary>.<platform-arch-abi>.node` outputs into those packages and into the root package. `zig-napi pre-publish` calls the community `prePublish` API to update optional dependencies and handle publish preparation.
+`zig-napi create-npm-dirs` calls `@napi-rs/cli`'s `createNpmDirs` API and creates `npm/<platform-arch-abi>` packages from the `napi` field in `package.json`. `zig-napi artifacts --output-dir zig-out/node` calls the community `artifacts` API and copies Zig's `<binary>.<platform-arch-abi>.node` or `<binary>.wasm32-wasi.wasm` outputs into those packages and into the root package. When `wasm32-wasip1-threads` is configured, `zig-napi build`, `artifacts`, and `package` also generate the napi-rs compatible `.wasi.cjs` and worker files used by `@napi-rs/wasm-runtime`. `zig-napi pre-publish` calls the community `prePublish` API to update optional dependencies and handle publish preparation.
 
 Upstream `napi build` and `napi new` are not used directly for Zig addons because they currently expect Cargo projects and napi-rs' Rust templates.
 
@@ -188,7 +188,7 @@ Node.js matrix tests live in `node-test`. It mirrors the NAPI-RS example split w
 - `node-test/napi-compat-mode` covers compat-mode style APIs and runtime-gated N-API v4/v5/v6/v7/v8 scenarios.
 - `node-test/napi` covers the non compat-mode example surface such as values, strict validation, async, ThreadSafeFunction, and worker-thread loading.
 
-The Node addon CI runs those tests on Linux, macOS, and Windows for Node.js 12, 14, 16, 18, 20, and 22.
+The Node addon CI runs those tests on Linux, macOS, and Windows for Node.js 12, 14, 16, 18, 20, 22, and 24. It also builds `wasm32-wasip1-threads` addons and runs `node-test` with `NAPI_RS_FORCE_WASI=error` to verify the napi-rs compatible wasm runtime path.
 
 ## Website
 

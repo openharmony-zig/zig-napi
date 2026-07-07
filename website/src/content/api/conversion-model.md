@@ -21,29 +21,29 @@ All other parameters are read from JavaScript arguments in order. Missing argume
 
 ## Supported Input Shapes
 
-| Zig type | JavaScript input |
-| --- | --- |
-| `bool` | boolean |
-| integer and float types | number |
-| `napi.BigInt` | bigint |
-| `[]u8`, `[]const u8`, `[N]u8` | UTF-8 string input |
-| `[]u16`, `[]const u16`, `[N]u16` | UTF-16 string input |
-| `?T` | `T`, `null`, or `undefined` |
-| struct | object with matching fields |
-| tuple struct | array with positional entries |
-| array, slice, `std.ArrayList(T)` | JavaScript Array, or numeric TypedArray when `T` is supported |
-| enum | numeric enum value |
-| enum with `pub const napi_string_enum = true` | string enum name |
-| union(enum) | first matching union field |
-| `napi.NapiValue` | raw JavaScript value |
-| `napi.Function`, `*napi.Function`, `napi.FunctionRef` | JavaScript function |
-| `napi.ThreadSafeFunction` pointer | JavaScript function promoted to a TSFN |
-| `napi.Buffer` | Node Buffer |
-| `napi.ArrayBuffer` | ArrayBuffer |
-| `napi.TypedArray(T)` and aliases | matching TypedArray |
-| `napi.DataView` | DataView |
-| `napi.External(T)` | zig-napi external value tagged with `T` |
-| `napi.AbortSignal` | AbortSignal-like object |
+| Zig type                                              | JavaScript input                                              |
+| ----------------------------------------------------- | ------------------------------------------------------------- |
+| `bool`                                                | boolean                                                       |
+| integer and float types                               | number                                                        |
+| `napi.BigInt`                                         | bigint                                                        |
+| `[]u8`, `[]const u8`, `[N]u8`                         | UTF-8 string input                                            |
+| `[]u16`, `[]const u16`, `[N]u16`                      | UTF-16 string input                                           |
+| `?T`                                                  | `T`, `null`, or `undefined`                                   |
+| struct                                                | object with matching fields                                   |
+| tuple struct                                          | array with positional entries                                 |
+| array, slice, `std.ArrayList(T)`                      | JavaScript Array, or numeric TypedArray when `T` is supported |
+| enum                                                  | numeric enum value                                            |
+| enum with `pub const napi_string_enum = true`         | string enum name                                              |
+| union(enum)                                           | first matching union field                                    |
+| `napi.NapiValue`                                      | raw JavaScript value                                          |
+| `napi.Function`, `*napi.Function`, `napi.FunctionRef` | JavaScript function                                           |
+| `napi.ThreadSafeFunction` pointer                     | JavaScript function promoted to a TSFN                        |
+| `napi.Buffer`                                         | Node Buffer                                                   |
+| `napi.ArrayBuffer`                                    | ArrayBuffer                                                   |
+| `napi.TypedArray(T)` and aliases                      | matching TypedArray                                           |
+| `napi.DataView`                                       | DataView                                                      |
+| `napi.External(T)`                                    | zig-napi external value tagged with `T`                       |
+| `napi.AbortSignal`                                    | AbortSignal-like object                                       |
 
 Use `napi.Buffer` or `napi.ArrayBuffer` when the JavaScript input should be
 treated as binary data instead of a string.
@@ -63,24 +63,24 @@ stay in the generated conversion layer.
 
 The return conversion supports ordinary Zig values and wrapper values.
 
-| Zig return | JavaScript output |
-| --- | --- |
-| `void` | `undefined` |
-| `bool`, numbers, strings | primitive JavaScript values |
-| `i128` / `u128` | bigint |
-| `?T` | `T` or `undefined` |
-| struct | object |
-| tuple, array, slice, `std.ArrayList(T)` | array |
-| enum | numeric or string enum value |
-| union(enum) | payload of the active field |
-| `napi.Result(T)` | payload or thrown JavaScript error |
-| Zig error union `!T` | payload or thrown JavaScript error |
-| `napi.Async(T, runtime)` | `Promise<T>` |
-| `napi.AsyncWithEvents(T, Event, runtime)` | `Promise<T>` plus optional event callback |
-| `napi.Promise` | Promise |
-| `napi.Function` | JavaScript function |
-| `napi.Class(T)` / `napi.ClassWithoutInit(T)` | JavaScript class constructor |
-| `napi.External(T)` | branded external object |
+| Zig return                                   | JavaScript output                         |
+| -------------------------------------------- | ----------------------------------------- |
+| `void`                                       | `undefined`                               |
+| `bool`, numbers, strings                     | primitive JavaScript values               |
+| `i128` / `u128`                              | bigint                                    |
+| `?T`                                         | `T` or `undefined`                        |
+| struct                                       | object                                    |
+| tuple, array, slice, `std.ArrayList(T)`      | array                                     |
+| enum                                         | numeric or string enum value              |
+| union(enum)                                  | payload of the active field               |
+| `napi.Result(T)`                             | payload or thrown JavaScript error        |
+| Zig error union `!T`                         | payload or thrown JavaScript error        |
+| `napi.Async(T, runtime)`                     | `Promise<T>`                              |
+| `napi.AsyncWithEvents(T, Event, runtime)`    | `Promise<T>` plus optional event callback |
+| `napi.Promise`                               | Promise                                   |
+| `napi.Function`                              | JavaScript function                       |
+| `napi.Class(T)` / `napi.ClassWithoutInit(T)` | JavaScript class constructor              |
+| `napi.External(T)`                           | branded external object                   |
 
 ## Allocation And Cleanup
 

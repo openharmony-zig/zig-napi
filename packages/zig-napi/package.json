@@ -3,14 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "description": "CLI tools for building Node.js addons with zig-napi.",
+  "license": "MIT",
   "bin": {
     "zig-napi": "bin/zig-napi.js"
-  },
-  "engines": {
-    "node": ">=20.17"
-  },
-  "scripts": {
-    "cli": "node bin/zig-napi.js"
   },
   "files": [
     "bin",
@@ -18,10 +13,15 @@
     "README.md",
     "LICENSE"
   ],
+  "scripts": {
+    "cli": "node bin/zig-napi.js"
+  },
   "dependencies": {
     "@inquirer/prompts": "^8.5.2",
     "@napi-rs/cli": "^3.7.2",
     "commander": "^9.5.0"
   },
-  "license": "MIT"
+  "engines": {
+    "node": ">=20.17"
+  }
 }

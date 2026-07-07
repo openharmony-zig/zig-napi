@@ -59,7 +59,8 @@
   },
   "devDependencies": {
     "@j178/prek": "^0.4.5",
-    "@ohos-rs/oxk": "^0.6.0",
+    "@ohos-rs/oxk": "^0.7.2",
+    "emnapi": "^1.11.1",
     "oxlint": "^1.71.0"
   },
   "license": "MIT"

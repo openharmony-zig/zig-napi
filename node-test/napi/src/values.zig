@@ -473,16 +473,18 @@ pub fn createExternalTypedArray(env: napi.Env) !napi.Uint32Array {
     return try napi.Uint32Array.copy(env, &[_]u32{ 1, 2, 3 });
 }
 
-pub fn mutateTypedArray(input: napi.Uint8Array) void {
+pub fn mutateTypedArray(input: napi.Uint8Array) !void {
     for (input.asSlice()) |*value| {
         value.* +%= 1;
     }
+    try input.flush();
 }
 
-pub fn mutateArraybuffer(input: napi.ArrayBuffer) void {
+pub fn mutateArraybuffer(input: napi.ArrayBuffer) !void {
     for (input.asSlice()) |*value| {
         value.* +%= 1;
     }
+    try input.flush();
 }
 
 pub fn createUint8ClampedArrayFromData(env: napi.Env) !napi.Uint8ClampedArray {
@@ -528,6 +530,7 @@ pub fn readDataView(input: napi.DataView) !i32 {
 
 pub fn mutateDataView(input: napi.DataView) !void {
     try input.setUint16(0, 0x1234, true);
+    try input.flush();
 }
 
 pub fn asyncPlus100(value: i32) napi.Async(i32, .single) {

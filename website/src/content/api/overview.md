@@ -6,10 +6,10 @@ title: API Overview
 
 `zig-napi` exposes two public import surfaces:
 
-| Import | Use |
-| --- | --- |
-| `@import("napi")` | Runtime wrappers, module registration, conversion helpers, async descriptors, and TypeScript override wrappers. |
-| `@import("zig-napi").napi_build` | `build.zig` helpers for OpenHarmony shared libraries, Node.js `.node` addons, and generated declaration files. |
+| Import                           | Use                                                                                                             |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `@import("napi")`                | Runtime wrappers, module registration, conversion helpers, async descriptors, and TypeScript override wrappers. |
+| `@import("zig-napi").napi_build` | `build.zig` helpers for OpenHarmony shared libraries, Node.js `.node` addons, and generated declaration files.  |
 
 The normal flow is:
 
@@ -44,41 +44,41 @@ Use this when the Zig type is useful internally but the public TypeScript contra
 
 The `napi` module re-exports the runtime-facing API:
 
-| Category | Exports |
-| --- | --- |
-| Environment and raw values | `Env`, `NapiValue`, `napi_sys` raw Node-API bindings |
-| Primitive values | `Number`, `String`, `Bool`, `BigInt`, `Null`, `Undefined` |
-| Object values | `Object`, `Array`, `Promise` |
-| Binary values | `Buffer`, `ArrayBuffer`, `TypedArray`, typed array aliases, `DataView` |
-| Functions | `Function`, `FunctionRef`, `CallbackInfo`, `ThreadSafeFunction` |
-| Async | `AsyncRuntime`, `Async`, `AsyncWithEvents`, `AsyncContext`, `CancelToken`, `AbortSignal`, `Worker` |
-| Native state | `Class`, `ClassWithoutInit`, `Reference`, `Ref`, `ObjectRef`, `External`, `NativeWrap` |
-| Errors | `Error`, `Status`, `Result`, `JsError`, `JsTypeError`, `JsRangeError` |
-| Build-time behavior | `NapiVersion`, `selectedNapiVersion`, `experimentalEnabled`, `resolveRequestedRuntime` |
-| TypeScript overrides | `dts`, `Dts` |
-| Allocators | `globalAllocator`, `setOperationAllocator`, `resetOperationAllocator` |
-| Registration | `NODE_API_MODULE`, `NODE_API_MODULE_WITH_INIT` |
+| Category                   | Exports                                                                                            |
+| -------------------------- | -------------------------------------------------------------------------------------------------- |
+| Environment and raw values | `Env`, `NapiValue`, `napi_sys` raw Node-API bindings                                               |
+| Primitive values           | `Number`, `String`, `Bool`, `BigInt`, `Null`, `Undefined`                                          |
+| Object values              | `Object`, `Array`, `Promise`                                                                       |
+| Binary values              | `Buffer`, `ArrayBuffer`, `TypedArray`, typed array aliases, `DataView`                             |
+| Functions                  | `Function`, `FunctionRef`, `CallbackInfo`, `ThreadSafeFunction`                                    |
+| Async                      | `AsyncRuntime`, `Async`, `AsyncWithEvents`, `AsyncContext`, `CancelToken`, `AbortSignal`, `Worker` |
+| Native state               | `Class`, `ClassWithoutInit`, `Reference`, `Ref`, `ObjectRef`, `External`, `NativeWrap`             |
+| Errors                     | `Error`, `Status`, `Result`, `JsError`, `JsTypeError`, `JsRangeError`                              |
+| Build-time behavior        | `NapiVersion`, `selectedNapiVersion`, `experimentalEnabled`, `resolveRequestedRuntime`             |
+| TypeScript overrides       | `dts`, `Dts`                                                                                       |
+| Allocators                 | `globalAllocator`, `setOperationAllocator`, `resetOperationAllocator`                              |
+| Registration               | `NODE_API_MODULE`, `NODE_API_MODULE_WITH_INIT`                                                     |
 
 ## Build Surface
 
 `@import("zig-napi").napi_build` exports the build helpers:
 
-| Export | Use |
-| --- | --- |
-| `nativeAddonBuild` | Build OpenHarmony shared libraries. |
-| `nodeAddonBuild` | Build platform-specific Node.js `.node` addons. |
-| `generateTypeDefinition` | Generate `index.d.ts` from the addon root. |
-| `NativeAddonBuildOptionsWithModule` | Options for OpenHarmony output. |
-| `NodeAddonBuildOptionsWithModule` | Options for Node addon output. |
-| `TypeDefinitionBuildOptions` | Options for declaration generation. |
-| `NativeAddonBuildResult` | Compile steps for `arm64`, `arm`, and `x64`. |
-| `NodeAddonBuildResult` | Node addon compile step. |
-| `NodeApiOptions` | Node-API version and experimental mode. |
-| `NapiVersion` | Build-time Node-API enum. |
-| `resolveNdkPath` | Resolve the OpenHarmony native SDK path. |
-| `cloneLibraryOptions` | Clone root module build options for another target. |
-| `nodePlatformArchAbi` | Format Node platform/arch/ABI suffix. |
-| `nodeAddonFilename` | Format the installed `.node` filename. |
+| Export                              | Use                                                 |
+| ----------------------------------- | --------------------------------------------------- |
+| `nativeAddonBuild`                  | Build OpenHarmony shared libraries.                 |
+| `nodeAddonBuild`                    | Build platform-specific Node.js `.node` addons.     |
+| `generateTypeDefinition`            | Generate `index.d.ts` from the addon root.          |
+| `NativeAddonBuildOptionsWithModule` | Options for OpenHarmony output.                     |
+| `NodeAddonBuildOptionsWithModule`   | Options for Node addon output.                      |
+| `TypeDefinitionBuildOptions`        | Options for declaration generation.                 |
+| `NativeAddonBuildResult`            | Compile steps for `arm64`, `arm`, and `x64`.        |
+| `NodeAddonBuildResult`              | Node addon compile step.                            |
+| `NodeApiOptions`                    | Node-API version and experimental mode.             |
+| `NapiVersion`                       | Build-time Node-API enum.                           |
+| `resolveNdkPath`                    | Resolve the OpenHarmony native SDK path.            |
+| `cloneLibraryOptions`               | Clone root module build options for another target. |
+| `nodePlatformArchAbi`               | Format Node platform/arch/ABI suffix.               |
+| `nodeAddonFilename`                 | Format the installed `.node` filename.              |
 
 ## Read Order
 

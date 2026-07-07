@@ -44,17 +44,17 @@ When `.experimental = true`, the addon requests the experimental Node-API versio
 
 ## Version-Gated Wrappers
 
-| Wrapper | Minimum |
-| --- | --- |
-| `Async` | Node-API v4 |
-| `AsyncWithEvents` | Node-API v4 |
-| `ThreadSafeFunction` | Node-API v4 |
-| `Env.createDate` | Node-API v5 |
-| `Object.isDate` / `Object.dateValue` | Node-API v5 |
-| `BigInt` | Node-API v6 |
-| `BigInt64Array` / `BigUint64Array` | Node-API v6 |
+| Wrapper                                         | Minimum     |
+| ----------------------------------------------- | ----------- |
+| `Async`                                         | Node-API v4 |
+| `AsyncWithEvents`                               | Node-API v4 |
+| `ThreadSafeFunction`                            | Node-API v4 |
+| `Env.createDate`                                | Node-API v5 |
+| `Object.isDate` / `Object.dateValue`            | Node-API v5 |
+| `BigInt`                                        | Node-API v6 |
+| `BigInt64Array` / `BigUint64Array`              | Node-API v6 |
 | `ArrayBuffer.detach` / `ArrayBuffer.isDetached` | Node-API v7 |
-| `Object.freeze` / `Object.seal` | Node-API v8 |
+| `Object.freeze` / `Object.seal`                 | Node-API v8 |
 
 If the selected version is too low, wrappers fail at compile time with a message that points back to `.node_api.version`.
 

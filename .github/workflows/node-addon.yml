@@ -78,3 +78,47 @@ jobs:
         shell: pwsh
         working-directory: node-test
         run: npm run test:run
+
+  wasm-addon-tests:
+    runs-on: ubuntu-latest
+    name: Node.js wasm32-wasip1-threads tests
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+          cache-key: node-wasm
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.24.0
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build wasm Node example
+        run: node packages/zig-napi/bin/zig-napi.js build --cwd examples/node --target wasm32-wasip1-threads -- --summary all
+
+      - name: Test wasm Node example
+        env:
+          NAPI_RS_FORCE_WASI: 'error'
+        run: node examples/node/test.js
+
+      - name: Build wasm node-test matrix
+        run: node packages/zig-napi/bin/zig-napi.js build --cwd node-test --target wasm32-wasip1-threads -- --summary all
+
+      - name: Test wasm node-test matrix
+        working-directory: node-test
+        env:
+          NAPI_RS_FORCE_WASI: 'error'
+        run: npm run test:run

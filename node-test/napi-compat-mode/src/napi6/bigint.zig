@@ -19,8 +19,9 @@ pub fn bigintAdd(env: napi.Env, left: napi.BigInt, right: napi.BigInt) napi.BigI
     return napi.BigInt.New(env, @as(i128, left_value + right_value));
 }
 
-pub fn mutateI64Array(values: napi.BigInt64Array) void {
+pub fn mutateI64Array(values: napi.BigInt64Array) !void {
     if (values.length() > 0) {
         values.asSlice()[0] = std.math.maxInt(i64);
     }
+    try values.flush();
 }

@@ -199,12 +199,14 @@ pub const ArrayBuffer = struct {
             @memcpy(dest[0..data.len], data);
         }
 
-        return ArrayBuffer{
+        const result_buffer = ArrayBuffer{
             .env = env.raw,
             .raw = create_status.result,
             .data = if (data.len == 0 or create_status.data == null) &[_]u8{} else @ptrCast(create_status.data),
             .len = data.len,
         };
+        try result_buffer.flush();
+        return result_buffer;
     }
 
     /// Create a new uninitialized ArrayBuffer with the specified length
@@ -244,6 +246,17 @@ pub const ArrayBuffer = struct {
     /// Get the length of the ArrayBuffer
     pub fn length(self: ArrayBuffer) usize {
         return self.len;
+    }
+
+    /// Sync wasm-side mutations back to the JavaScript ArrayBuffer when running on emnapi.
+    pub fn flush(self: ArrayBuffer) !void {
+        if (comptime !options.isWasmNodeAddon()) return;
+        if (self.len == 0) return;
+        var raw = self.raw;
+        const status = napi.emnapi_sync_memory(self.env, false, &raw, 0, self.len);
+        if (status != napi.napi_ok) {
+            return NapiError.Error.fromStatus(NapiError.Status.New(status));
+        }
     }
 
     /// Detach the ArrayBuffer.
