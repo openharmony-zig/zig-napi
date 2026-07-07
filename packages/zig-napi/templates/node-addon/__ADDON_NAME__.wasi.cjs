@@ -30,12 +30,16 @@ const __sharedMemory = new WebAssembly.Memory({
   shared: true,
 });
 
-let __wasmFilePath = __nodePath.join(__dirname, "__ADDON_NAME__.wasm32-wasi.wasm");
-const __wasmDebugFilePath = __nodePath.join(__dirname, "__ADDON_NAME__.wasm32-wasi.debug.wasm");
+const __wasmCandidates = [
+  __nodePath.join(__dirname, "__ADDON_NAME__.wasm32-wasi.debug.wasm"),
+  __nodePath.join(__dirname, "__ADDON_NAME__.wasm32-wasi.wasm"),
+  __nodePath.join(__dirname, "zig-out", "node", "__ADDON_NAME__.wasm32-wasi.debug.wasm"),
+  __nodePath.join(__dirname, "zig-out", "node", "__ADDON_NAME__.wasm32-wasi.wasm"),
+];
 
-if (__nodeFs.existsSync(__wasmDebugFilePath)) {
-  __wasmFilePath = __wasmDebugFilePath;
-} else if (!__nodeFs.existsSync(__wasmFilePath)) {
+let __wasmFilePath = __wasmCandidates.find((candidate) => __nodeFs.existsSync(candidate));
+
+if (!__wasmFilePath) {
   try {
     __wasmFilePath =
       require.resolve("__PACKAGE_NAME__-wasm32-wasi/__ADDON_NAME__.wasm32-wasi.wasm");
@@ -67,7 +71,24 @@ const {
     worker.onmessage = ({ data }) => {
       __wasmCreateOnMessageForFsProxy(__nodeFs)(data);
     };
-    worker.unref();
+
+    {
+      const kPublicPort = Object.getOwnPropertySymbols(worker).find((symbol) =>
+        symbol.toString().includes("kPublicPort"),
+      );
+      if (kPublicPort) {
+        worker[kPublicPort].ref = () => {};
+      }
+
+      const kHandle = Object.getOwnPropertySymbols(worker).find((symbol) =>
+        symbol.toString().includes("kHandle"),
+      );
+      if (kHandle) {
+        worker[kHandle].ref = () => {};
+      }
+
+      worker.unref();
+    }
     return worker;
   },
   overwriteImports(importObject) {
