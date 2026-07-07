@@ -12,7 +12,7 @@ jobs:
   publish:
     name: Publish zig-napi CLI
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'chore(npm): publish')
+    if: "github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'chore(npm): publish')"
 
     steps:
       - name: Checkout
