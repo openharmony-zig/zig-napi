@@ -1,6 +1,6 @@
 const builtin = @import("builtin");
 
-const node = @import("node.zig");
+const node = @import("types.zig");
 
 const is_enabled = builtin.cpu.arch == .wasm32 and builtin.os.tag == .wasi;
 

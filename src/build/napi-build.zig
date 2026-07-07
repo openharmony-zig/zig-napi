@@ -210,8 +210,8 @@ fn isWasiNodeAddonTarget(target: std.Target) bool {
     return target.cpu.arch == .wasm32 and target.os.tag == .wasi;
 }
 
-fn linkWasiEmnapi(compile: *std.Build.Step.Compile, napi_module: *std.Build.Module) void {
-    const package = napi_module.owner;
+fn linkWasiEmnapi(compile: *std.Build.Step.Compile) void {
+    const package = compile.root_module.owner;
     const lib_path = package.path("node_modules/emnapi/lib/wasm32-wasip1-threads/libemnapi-basic-napi-rs-mt.a");
 
     compile.root_module.addObjectFile(lib_path);
@@ -416,7 +416,7 @@ pub fn nodeAddonBuild(build: *std.Build, option: NodeAddonBuildOptionsWithModule
     if (is_wasi) {
         compile.rdynamic = true;
         compile.root_module.link_libc = true;
-        linkWasiEmnapi(compile, option.napi_module);
+        linkWasiEmnapi(compile);
     }
     if (target.result.os.tag == .windows) {
         if (option.node_import_lib) |node_import_lib| {

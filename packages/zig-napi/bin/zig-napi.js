@@ -309,7 +309,7 @@ function writeJson(file, value) {
 }
 
 function createBrowserEntry(packageName) {
-  return `export * from '${packageName}-wasm32-wasi'\n`;
+  return `export { default } from '${packageName}-wasm32-wasi'\nexport * from '${packageName}-wasm32-wasi'\n`;
 }
 
 function readDtsExportIdents(cwd) {
