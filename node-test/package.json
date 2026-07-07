@@ -4,7 +4,10 @@
   "private": true,
   "scripts": {
     "build": "zig build --summary all",
-    "test": "ava --serial",
+    "test": "npm run build:test && npm run test:run",
+    "build:test": "npm run build",
+    "build:test:windows": "zig build -Dtarget=x86_64-windows-msvc --summary all",
+    "test:run": "ava --serial",
     "test:compat": "ava --serial \"napi-compat-mode/__tests__/**/*.spec.js\"",
     "test:napi": "ava --serial \"napi/__tests__/**/*.spec.js\""
   },

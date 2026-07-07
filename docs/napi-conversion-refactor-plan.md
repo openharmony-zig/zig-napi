@@ -54,7 +54,7 @@ Goal: make failed conversion impossible to accidentally use by changing conversi
 - Run:
   - `zig build --summary failures`
   - `zig build --summary failures` in `node-test`
-  - `just test-node-matrix`
+  - `pnpm run test:node-matrix`
   - `git diff --check`
 
 ### Estimate
