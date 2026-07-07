@@ -53,7 +53,7 @@ The generator maps the public export surface into TypeScript:
 | object-like structs                         | `export interface`                                                   |
 | tuples                                      | tuple types                                                          |
 | arrays, slices, and `std.ArrayList(T)`      | `Array<T>`                                                           |
-| optionals                                   | `T                                                                   | undefined | null` |
+| optionals                                   | <code>T &#124; undefined &#124; null</code>                          |
 | enums                                       | `export declare const enum`                                          |
 | string enums with `napi_string_enum = true` | string-valued `const enum`                                           |
 | `union(enum)`                               | union of payload types                                               |

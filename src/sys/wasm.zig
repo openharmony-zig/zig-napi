@@ -254,9 +254,10 @@ fn setImmediate(callback: AsyncCleanupDone, data: ?*anyopaque) void {
 }
 
 fn finishAsyncCleanupHook(arg: ?*anyopaque) callconv(.c) void {
-    _ = arg;
+    const info: *AsyncCleanupHookInfo = @ptrCast(@alignCast(arg.?));
     runtimeKeepalivePop();
     ctxDecreaseWaitingRequestCounter();
+    free(info);
 }
 
 fn runAsyncCleanupHook(arg: ?*anyopaque) callconv(.c) void {
@@ -320,7 +321,7 @@ fn achHandleEnvUnref(arg: ?*anyopaque) callconv(.c) void {
 fn achHandleDelete(handle: *AsyncCleanupHookHandle) void {
     if (handle.handle) |info| {
         removeAsyncEnvironmentCleanupHook(info);
-        free(info);
+        if (!info.started) free(info);
     }
     if (handle.done_cb) |done_cb| done_cb(handle.done_data);
 
