@@ -1,7 +1,6 @@
 {
   "name": "zig-napi",
   "version": "0.1.0",
-  "private": true,
   "description": "CLI tools for building Node.js addons with zig-napi.",
   "license": "MIT",
   "bin": {
@@ -13,6 +12,10 @@
     "README.md",
     "LICENSE"
   ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "scripts": {
     "cli": "node bin/zig-napi.js"
   },
