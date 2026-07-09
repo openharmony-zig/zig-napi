@@ -1,0 +1,88 @@
+name: Publish Node CLI
+
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: Publish zig-napi CLI
+    runs-on: ubuntu-latest
+    if: "github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'chore(npm): publish')"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify publish commit
+        shell: bash
+        env:
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+          subject="$(printf '%s' "${COMMIT_MESSAGE}" | sed -n '1p')"
+          if [ "${subject}" != "chore(npm): publish" ]; then
+            echo "Refusing to publish from commit subject: ${subject}"
+            exit 1
+          fi
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+          cache-key: npm-publish
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.24.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: https://registry.npmjs.org/
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build root package
+        run: pnpm run build
+
+      - name: Lint
+        run: pnpm run lint
+
+      - name: Format
+        run: pnpm run format
+
+      - name: Build wasm Node example
+        run: node packages/zig-napi/bin/zig-napi.js build --cwd examples/node --target wasm32-wasip1-threads -- --summary all
+
+      - name: Test wasm Node example
+        env:
+          NAPI_RS_FORCE_WASI: 'error'
+        run: node examples/node/test.js
+
+      - name: Build wasm node-test matrix
+        run: node packages/zig-napi/bin/zig-napi.js build --cwd node-test --target wasm32-wasip1-threads -- --summary all
+
+      - name: Test wasm node-test matrix
+        working-directory: node-test
+        env:
+          NAPI_RS_FORCE_WASI: 'error'
+        run: npm run test:run
+
+      - name: Check package contents
+        working-directory: packages/zig-napi
+        run: npm pack --dry-run
+
+      - name: Publish to npm
+        working-directory: packages/zig-napi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --provenance --access public
