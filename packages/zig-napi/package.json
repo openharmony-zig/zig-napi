@@ -2,7 +2,15 @@
   "name": "@ohos-rs/zig-cli",
   "version": "0.0.1-beta.0",
   "description": "CLI tools for building Node.js addons with zig-napi.",
+  "homepage": "https://github.com/openharmony-zig/zig-napi#readme",
+  "bugs": {
+    "url": "https://github.com/openharmony-zig/zig-napi/issues"
+  },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/openharmony-zig/zig-napi.git"
+  },
   "bin": {
     "zig-napi": "bin/zig-napi.js"
   },
