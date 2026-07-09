@@ -7,6 +7,10 @@
     "url": "https://github.com/openharmony-zig/zig-napi/issues"
   },
   "license": "MIT",
+  "author": "richerfu <southorange0929@foxmail.com>",
+  "maintainers": [
+    "richerfu <southorange0929@foxmail.com>"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/openharmony-zig/zig-napi.git"
