@@ -1,6 +1,6 @@
 {
-  "name": "zig-napi",
-  "version": "0.1.0",
+  "name": "@ohos-rs/zig-cli",
+  "version": "0.0.1-beta.0",
   "description": "CLI tools for building Node.js addons with zig-napi.",
   "license": "MIT",
   "bin": {
