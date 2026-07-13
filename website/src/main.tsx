@@ -6,6 +6,7 @@ import InstallSnippet from "./content/snippets/install.md";
 import NodeSnippet from "./content/snippets/node.md";
 import OpenHarmonySnippet from "./content/snippets/openharmony.md";
 import TypesSnippet from "./content/snippets/types.md";
+import { siteHref, siteRelativePath } from "./site-paths";
 import "./styles.css";
 
 type Snippet = {
@@ -140,9 +141,8 @@ function App() {
 }
 
 function resolveRoute(): SiteRoute {
-  return window.location.pathname === "/api" || window.location.pathname.startsWith("/api/")
-    ? "api"
-    : "home";
+  const path = siteRelativePath();
+  return path === "api" || path.startsWith("api/") ? "api" : "home";
 }
 
 function HomePage({ route }: { route: SiteRoute }) {
@@ -197,9 +197,9 @@ function SiteHeader({ route }: { route: SiteRoute }) {
       <div className="container-page flex h-14 items-center justify-between gap-4">
         <a
           className="flex shrink-0 items-center gap-2.5 text-sm font-semibold text-(--color-fg)"
-          href="/"
+          href={siteHref()}
         >
-          <img className="size-7 rounded-md" src="/logo/icon-256.png" alt="" />
+          <img className="size-7 rounded-md" src={siteHref("logo/icon-256.png")} alt="" />
           zig-napi
         </a>
         <div className="ml-auto flex items-center justify-end gap-5">
@@ -207,7 +207,7 @@ function SiteHeader({ route }: { route: SiteRoute }) {
             className="flex items-center gap-5 text-sm text-(--color-muted)"
             aria-label="Primary navigation"
           >
-            <a className={apiClass} href="/api/">
+            <a className={apiClass} href={siteHref("api/")}>
               API
             </a>
           </nav>
@@ -233,7 +233,7 @@ function Hero() {
         <div className="reveal is-visible">
           <img
             className="mb-7 size-16 rounded-2xl border border-(--color-border-strong)"
-            src="/logo/icon-512.png"
+            src={siteHref("logo/icon-512.png")}
             alt=""
           />
           <p className="eyebrow">OpenHarmony and Node.js native addons</p>
@@ -248,7 +248,7 @@ function Hero() {
             <a className="btn-primary" href="#install">
               Start with ZON
             </a>
-            <a className="btn-secondary" href="/api/">
+            <a className="btn-secondary" href={siteHref("api/")}>
               API Reference
             </a>
           </div>
@@ -256,7 +256,7 @@ function Hero() {
         <figure className="reveal is-visible overflow-hidden rounded-lg border border-(--color-border-strong) bg-(--color-surface-1)/80 shadow-2xl shadow-black/30">
           <img
             className="block w-full"
-            src="/zig-napi-pipeline.svg"
+            src={siteHref("zig-napi-pipeline.svg")}
             alt="Zig source flowing through zig-napi into OpenHarmony libraries, Node addons, and TypeScript definitions"
           />
         </figure>
@@ -439,7 +439,7 @@ function ApiOverviewSection() {
             Use the API page when you need exact Zig signatures and wrapper behavior instead of the
             overview flow.
           </p>
-          <a className="btn-primary mt-5 w-full" href="/api/">
+          <a className="btn-primary mt-5 w-full" href={siteHref("api/")}>
             Open API Reference
           </a>
         </div>

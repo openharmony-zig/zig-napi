@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { statSync } from "node:fs";
+import { copyFileSync, mkdirSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vite";
@@ -8,6 +8,7 @@ import { voidReact } from "@void/react/plugin";
 import tailwindcss from "@tailwindcss/vite";
 
 const rootDir = dirname(fileURLToPath(import.meta.url));
+const siteBasePath = normalizeBasePath(process.env.SITE_BASE_PATH);
 const API_LAST_UPDATED_ID = "virtual:api-last-updated";
 const RESOLVED_API_LAST_UPDATED_ID = `\0${API_LAST_UPDATED_ID}`;
 const apiMarkdownFiles = [
@@ -68,6 +69,29 @@ function apiLastUpdated(): Plugin {
   };
 }
 
+function apiStaticRoutes(): Plugin {
+  return {
+    name: "api-static-routes",
+    apply: "build",
+    closeBundle() {
+      const apiEntry = resolve(rootDir, "dist/api/index.html");
+
+      for (const [sectionId] of apiMarkdownFiles) {
+        if (sectionId === "overview") continue;
+
+        const routeDir = resolve(rootDir, "dist/api", sectionId);
+        mkdirSync(routeDir, { recursive: true });
+        copyFileSync(apiEntry, resolve(routeDir, "index.html"));
+      }
+    },
+  };
+}
+
+function normalizeBasePath(value: string | undefined) {
+  const path = value?.trim().replace(/^\/+|\/+$/g, "");
+  return path ? `/${path}/` : "/";
+}
+
 function lastUpdatedIso(filePath: string) {
   try {
     const committed = execFileSync("git", ["log", "-1", "--format=%cI", "--", filePath], {
@@ -84,6 +108,7 @@ function lastUpdatedIso(filePath: string) {
 }
 
 export default defineConfig({
+  base: siteBasePath,
   plugins: [
     voidReact(),
     voidMarkdown({
@@ -96,6 +121,7 @@ export default defineConfig({
     }),
     apiFallback(),
     apiLastUpdated(),
+    apiStaticRoutes(),
     tailwindcss(),
   ],
   build: {
