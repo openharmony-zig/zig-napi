@@ -1,5 +1,6 @@
 import { lastUpdatedByApiSection } from "virtual:api-last-updated";
 import { apiMarkdownGroups, apiMarkdownSections, getApiSection } from "./content/api";
+import { siteHref, siteRelativePath } from "./site-paths";
 
 export function ApiDocsPage() {
   const activeId = resolveActiveApiSectionId();
@@ -110,12 +111,12 @@ export function ApiDocsPage() {
 }
 
 function resolveActiveApiSectionId() {
-  const parts = window.location.pathname.split("/").filter(Boolean);
+  const parts = siteRelativePath().split("/").filter(Boolean);
   return parts[0] === "api" && parts[1] ? parts[1] : "overview";
 }
 
 function apiHref(id: string) {
-  return id === "overview" ? "/api/" : `/api/${id}/`;
+  return siteHref(id === "overview" ? "api/" : `api/${id}/`);
 }
 
 function apiNavLinkClass(active: boolean, mode: "desktop" | "mobile" = "desktop") {

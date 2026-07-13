@@ -1,0 +1,54 @@
+name: Build website preview
+
+on:
+  pull_request:
+    types: [ opened, reopened, synchronize ]
+    paths:
+      - "website/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/website-preview-build.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: website-preview-build-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build PR preview
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.24.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build preview
+        env:
+          SITE_BASE_PATH: /${{ github.event.repository.name }}/pr-preview/pr-${{ github.event.pull_request.number }}/
+        run: pnpm run website:build
+
+      - name: Upload preview artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: website-preview
+          path: website/dist
+          if-no-files-found: error
+          retention-days: 1
