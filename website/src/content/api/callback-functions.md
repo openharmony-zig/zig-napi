@@ -89,6 +89,26 @@ Use `ThreadSafeFunction` to call a JavaScript function from native threads. It r
 
 `ThreadSafeFunctionCalleeHandled = true` makes the JavaScript callback receive an error-first argument: `(err, ...args) => void`.
 
+The error-first convention is strict: a successful call passes `null` in the
+error slot followed by the queued arguments, and a failed call passes the error
+**alone**. The error call has a single argument, so a callback written as
+`(err, value) => void` sees `value === undefined` for a failure; the remaining
+argument slots are omitted rather than filled with placeholder values.
+
+Without `ThreadSafeFunctionCalleeHandled` there is no error slot. `Err()` still
+runs the callback, with the argument slots passed as `undefined`; the error
+itself cannot be delivered to JavaScript.
+
+```js
+const callback = (err, first, second) => {
+  if (err) {
+    // The failure call passed exactly one argument.
+    return;
+  }
+  // A success passes the queued arguments after `null`.
+};
+```
+
 | Method               | Use                                       |
 | -------------------- | ----------------------------------------- |
 | `from_raw(env, raw)` | Create a TSFN from a JavaScript function. |
@@ -99,6 +119,38 @@ Use `ThreadSafeFunction` to call a JavaScript function from native threads. It r
 | `Ok(args, mode)`     | Send a successful call.                   |
 | `Err(error, mode)`   | Send an error call.                       |
 | `deinit()`           | Destroy the wrapper allocation.           |
+
+### Queueing and payload ownership
+
+`Ok(args, mode)` and `Err(error, mode)` take ownership of their payload on every
+path, including a full queue, a closing TSFN and a failed allocation: a returned
+error means "not queued", never "you still own the payload". Both report
+allocation failure as a Zig error instead of aborting the process.
+
+`Err` copies the message and code of the error it is given. The text of a
+`napi.Error` is borrowed, so the caller's buffer may be reused as soon as the
+call returns; what JavaScript finally sees is the copy. The copy is released
+when the call is delivered, when it is rejected, and when the queue is drained
+during environment shutdown. If the copy itself cannot be allocated, the
+delivered error degrades to a fixed native error instead of falling back to the
+borrowed bytes. If the error object cannot be built at all, the failure call is
+not dispatched (the payload is still released) - a failure is never delivered as
+a successful call.
+
+Queued calls keep working while the callback throws: the pending JavaScript
+exception is left to the runtime, and later calls are still dispatched. Whether
+that exception reaches `uncaughtException` depends on Node's
+`--force-node-api-uncaught-exceptions-policy` option, not on this wrapper.
+
+### TSFN parameters and conversion rollback
+
+A `*napi.ThreadSafeFunction(...)` parameter promotes the JavaScript function it
+received. The promotion is part of the argument conversion, so a call that is
+rejected before the native body runs - for example because a later argument has
+the wrong type - releases it again. Once the body runs, the TSFN belongs to the
+body: it is usually handed to another thread, and nothing aborts it when the
+exported function returns. The body remains responsible for the final
+`release()`/`abort()`.
 
 ## TSFN Modes
 

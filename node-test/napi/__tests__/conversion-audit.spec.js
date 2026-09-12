@@ -4,6 +4,58 @@ const path = require("path");
 
 const bindings = require(path.join(__dirname, "..", "..", "load-addon"))("conversion_audit");
 
+const loaderPath = path.join(__dirname, "..", "..", "load-addon.js");
+
+// `require("node:...")` prefixes are not available on every Node version this
+// suite supports, so the built-in module is required lazily.
+function childProcess() {
+  return require("child_process");
+}
+
+const isWasi =
+  process.env.NAPI_RS_FORCE_WASI === "true" || process.env.NAPI_RS_FORCE_WASI === "error";
+// Tests that need a child process, native threads or a forced GC are not part
+// of the WASI runtime and are skipped there instead of pretending to cover it.
+const nativeOnlyTest = isWasi ? test.skip : test;
+
+function runIsolated(script, extraArgs = []) {
+  return childProcess().spawnSync(
+    process.execPath,
+    [
+      ...extraArgs,
+      "-e",
+      `const b=require(${JSON.stringify(loaderPath)})("conversion_audit");${script}`,
+    ],
+    { encoding: "utf8", timeout: 20000 },
+  );
+}
+
+// Wait for the native counters to stop changing: released thread-safe functions
+// are destroyed by the runtime on a later loop turn (their finalizer releases
+// the wrapper), so a baseline measured too early would still move.
+async function stableCounters() {
+  let last = [bindings.activeBytes(), bindings.activeAllocations()];
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const now = [bindings.activeBytes(), bindings.activeAllocations()];
+    if (now[0] === last[0] && now[1] === last[1]) return now;
+    last = now;
+  }
+  return last;
+}
+
+// Wait until a counter stopped growing past its baseline. Anything the test
+// released must be reclaimed; earlier tests releasing their own wrappers may
+// pull the counter below the baseline, which is not a failure.
+async function settlesToBaseline(read, baseline, timeoutMs = 4000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (read() <= baseline) return true;
+    if (Date.now() > deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
 test("rejects wrong argument types without running the native function", (t) => {
   bindings.resetNativeCallCount();
 
@@ -345,4 +397,357 @@ test("detached binary inputs are rejected before the native body runs", (t) => {
 
 test("utf16 strings survive the round trip", (t) => {
   t.is(bindings.concatUtf16("héllo 🌳"), "héllo 🌳");
+});
+
+// --------------------------------------------- H03/H04/H07: callback ownership
+
+test("a queued failure owns the error text it delivers", async (t) => {
+  const messages = [];
+  await new Promise((resolve, reject) => {
+    try {
+      bindings.tsfnErrorBorrowedText(
+        (err) => {
+          messages.push(err && err.message);
+          if (messages.length === 3) resolve();
+        },
+        "queued",
+        3,
+      );
+    } catch (error) {
+      reject(error);
+    }
+  });
+
+  // The native side overwrites its stack buffer right after queueing each call,
+  // so a shallow copy of the borrowed message would deliver "xxxxxxxx" here.
+  t.deepEqual(messages, ["queued-0", "queued-1", "queued-2"]);
+});
+
+test("the error branch of an error-first TSFN passes exactly one argument", async (t) => {
+  const calls = [];
+  await new Promise((resolve, reject) => {
+    try {
+      bindings.tsfnErrorWithArgs(function (err) {
+        calls.push({ argc: arguments.length, message: err && err.message, rest: arguments[1] });
+        if (calls.length === 2) resolve();
+      }, 2);
+    } catch (error) {
+      reject(error);
+    }
+  });
+
+  // Two argument slots are declared, but the failure call passes the error
+  // alone: the remaining slots must be omitted, not passed as native null
+  // handles (which are not JavaScript `undefined`).
+  t.deepEqual(calls, [
+    { argc: 1, message: "pair-error", rest: undefined },
+    { argc: 1, message: "pair-error", rest: undefined },
+  ]);
+});
+
+test("an error-first TSFN without argument slots passes the error alone", async (t) => {
+  const calls = [];
+  await new Promise((resolve, reject) => {
+    try {
+      bindings.tsfnErrorWithoutArgs(function (err) {
+        calls.push({ argc: arguments.length, message: err && err.message });
+        if (calls.length === 1) resolve();
+      }, 1);
+    } catch (error) {
+      reject(error);
+    }
+  });
+
+  t.deepEqual(calls, [{ argc: 1, message: "noargs-error" }]);
+});
+
+test("a TSFN without an error slot delivers undefined arguments for a failure", async (t) => {
+  const failures = [];
+  await new Promise((resolve, reject) => {
+    try {
+      bindings.tsfnPlainError(function (value) {
+        failures.push({ argc: arguments.length, value });
+        if (failures.length === 1) resolve();
+      }, 1);
+    } catch (error) {
+      reject(error);
+    }
+  });
+
+  // There is no error slot to report the failure through, so the callback runs
+  // with the (absent) argument slots as `undefined` - never as null handles.
+  t.deepEqual(failures, [{ argc: 1, value: undefined }]);
+
+  const values = [];
+  await new Promise((resolve, reject) => {
+    try {
+      bindings.tsfnPlainSuccess(
+        (value) => {
+          values.push(value);
+          if (values.length === 2) resolve();
+        },
+        5,
+        2,
+      );
+    } catch (error) {
+      reject(error);
+    }
+  });
+  t.deepEqual(values, [5, 6]);
+});
+
+nativeOnlyTest("a converted TSFN stays alive after the call that produced it", async (t) => {
+  const calls = [];
+  await new Promise((resolve, reject) => {
+    try {
+      bindings.tsfnQueueFromThread(function (err, first, second) {
+        calls.push([err, first, second]);
+        if (calls.length === 3) resolve();
+      }, 3);
+    } catch (error) {
+      reject(error);
+    }
+  });
+
+  // The body hands the TSFN to a worker thread, so the conversion transaction
+  // is committed when the body runs; aborting it afterwards would drop these
+  // calls.
+  t.deepEqual(calls, [
+    [null, 0, 1],
+    [null, 1, 2],
+    [null, 2, 3],
+  ]);
+});
+
+nativeOnlyTest("a rejected call releases the TSFN it promoted", (t) => {
+  bindings.resetNativeCallCount();
+  t.throws(() => bindings.tsfnThenRejected(() => {}, "bad"), { name: "TypeError" });
+  t.is(bindings.nativeCallCount(), 0, "the native body must not run for a rejected argument");
+
+  // A promoted TSFN that survived the failed call would keep the environment -
+  // and therefore the process - alive forever. Running it in a child process
+  // turns that leak into an observable failure: the child is killed on timeout
+  // instead of exiting on its own.
+  const result = runIsolated(
+    `
+    b.resetNativeCallCount();
+    let thrown = null;
+    try { b.tsfnThenRejected(() => {}, "bad"); } catch (error) { thrown = error.name; }
+    console.log(JSON.stringify({ thrown, calls: b.nativeCallCount() }));
+    `,
+  );
+  t.is(result.signal, null, result.stderr);
+  t.is(result.status, 0, result.stderr);
+  t.deepEqual(JSON.parse(result.stdout.trim()), { thrown: "TypeError", calls: 0 });
+});
+
+nativeOnlyTest("a rejected call releases the references it created", (t) => {
+  const result = runIsolated(
+    `
+    const collect = async () => {
+      for (let index = 0; index < 10; index += 1) {
+        global.gc();
+        await new Promise((resolve) => setTimeout(resolve, 2));
+      }
+    };
+    (async () => {
+      // Each attempt runs in its own call frame: a loop-local binding is still
+      // rooted by the engine's stack scan when the collection runs, which would
+      // report one surviving object per loop without anything having leaked.
+      const attempt = (create, invoke) => {
+        const object = create();
+        const ref = new WeakRef(object);
+        try {
+          invoke(object);
+        } catch (error) {
+          if (!error) throw error;
+        }
+        return ref;
+      };
+
+      const control = [];
+      for (let index = 0; index < 100; index += 1) {
+        control.push(attempt(() => ({ index }), () => {}));
+      }
+
+      const plain = [];
+      for (let index = 0; index < 100; index += 1) {
+        plain.push(attempt(() => ({ index }), (object) => b.referenceThenRejected(object, "bad")));
+      }
+
+      const nested = [];
+      for (let index = 0; index < 100; index += 1) {
+        nested.push(attempt(() => ({ index }), (object) => b.nestedReferenceThenRejected({ reference: object, count: "bad" }, 0)));
+      }
+
+      const inArray = [];
+      for (let index = 0; index < 100; index += 1) {
+        // The element that cannot be referenced fails the whole array
+        // conversion; the references created for the earlier elements must be
+        // released with it.
+        inArray.push(attempt(() => ({ index }), (object) => b.arrayReferenceThenRejected([object, 5], 0)));
+      }
+
+      await collect();
+      const alive = (refs) => refs.filter((ref) => ref.deref() !== undefined).length;
+      console.log(JSON.stringify({
+        control: alive(control), plain: alive(plain), nested: alive(nested), inArray: alive(inArray),
+        calls: b.nativeCallCount(),
+      }));
+    })();
+    `,
+    ["--expose-gc"],
+  );
+
+  t.is(result.signal, null, result.stderr);
+  t.is(result.status, 0, result.stderr);
+  // Every object whose reference conversion was rolled back is collectible
+  // again; the control group proves the child would have reported retained
+  // objects if they were still referenced.
+  t.deepEqual(JSON.parse(result.stdout.trim()), {
+    control: 0,
+    plain: 0,
+    nested: 0,
+    inArray: 0,
+    calls: 0,
+  });
+});
+
+nativeOnlyTest("a successful conversion transfers the reference to the body", (t) => {
+  const result = runIsolated(
+    `
+    const collect = async () => {
+      for (let index = 0; index < 10; index += 1) {
+        global.gc();
+        await new Promise((resolve) => setTimeout(resolve, 2));
+      }
+    };
+    (async () => {
+      let weak;
+      (() => {
+        const object = { kept: true };
+        weak = new WeakRef(object);
+        b.storeReference(object);
+      })();
+
+      await collect();
+      const stored = weak.deref() !== undefined;
+      const released = b.releaseStoredReference();
+      const storedAfterRelease = b.storedReferenceIsSet();
+      await collect();
+      console.log(JSON.stringify({ stored, released, storedAfterRelease, alive: weak.deref() !== undefined }));
+    })();
+    `,
+    ["--expose-gc"],
+  );
+
+  t.is(result.signal, null, result.stderr);
+  t.is(result.status, 0, result.stderr);
+  // A committed conversion hands the strong reference to the body: the object
+  // stays alive until the body releases it, and the rollback never touches it.
+  t.deepEqual(JSON.parse(result.stdout.trim()), {
+    stored: true,
+    released: true,
+    storedAfterRelease: false,
+    alive: false,
+  });
+});
+
+nativeOnlyTest("a full queue releases the payload it rejects", async (t) => {
+  const baseline = await stableCounters();
+  const delivered = [];
+  let onDelivered;
+  const delivery = new Promise((resolve) => {
+    onDelivered = resolve;
+  });
+
+  const rejected = bindings.tsfnQueueOverflow(function (value) {
+    delivered.push(value);
+    onDelivered();
+  }, 3);
+
+  // The bounded queue holds one item; the worker's remaining calls are refused
+  // and their payloads must be released instead of leaking.
+  t.is(rejected, 2);
+  await delivery;
+  t.deepEqual(delivered, [0]);
+  t.true(await settlesToBaseline(() => bindings.activeBytes(), baseline[0]));
+  t.true(await settlesToBaseline(() => bindings.activeAllocations(), baseline[1]));
+});
+
+nativeOnlyTest("a closing TSFN releases the payload it rejects", async (t) => {
+  const baseline = await stableCounters();
+  const rejected = bindings.tsfnAbortProbe(function () {
+    t.fail("an aborted TSFN must not deliver a queued call");
+  }, 3);
+
+  t.is(rejected, 3);
+  t.true(await settlesToBaseline(() => bindings.activeBytes(), baseline[0]));
+  t.true(await settlesToBaseline(() => bindings.activeAllocations(), baseline[1]));
+});
+
+test("a payload that cannot be converted is reported instead of dispatched", async (t) => {
+  const calls = [];
+  await new Promise((resolve, reject) => {
+    try {
+      bindings.tsfnBadOutput(function (err, value) {
+        calls.push({
+          argc: arguments.length,
+          code: err && err.code,
+          isError: err instanceof Error,
+          value,
+        });
+        if (calls.length === 1) resolve();
+      }, 1);
+    } catch (error) {
+      reject(error);
+    }
+  });
+
+  // The queued reference was already released, so the value cannot become a
+  // JavaScript handle: the callback is called with the failure in the error
+  // slot and `undefined` for the value, never with an invalid handle.
+  t.deepEqual(calls, [
+    {
+      argc: 2,
+      code: "Ref value has been deleted",
+      isError: true,
+      value: undefined,
+    },
+  ]);
+});
+
+nativeOnlyTest("a throwing callback does not break later deliveries", (t) => {
+  // Without this runtime option Node swallows exceptions thrown by a Node-API
+  // callback and only prints a deprecation warning; the option itself is not
+  // available on every Node version this suite supports.
+  const strict = process.allowedNodeEnvironmentFlags.has(
+    "--force-node-api-uncaught-exceptions-policy",
+  );
+  const script = `
+    const thrown = [];
+    const delivered = [];
+    process.on("uncaughtException", (error) => { thrown.push(error.message); });
+    b.tsfnPlainSuccess(function (value) {
+      delivered.push(value);
+      if (value === 0) throw new Error("callback boom");
+    }, 0, 3);
+    setTimeout(() => {
+      console.log(JSON.stringify({ thrown, delivered }));
+    }, 50);
+  `;
+  const result = strict
+    ? runIsolated(script, ["--force-node-api-uncaught-exceptions-policy"])
+    : runIsolated(script);
+
+  t.is(result.signal, null, result.stderr);
+  t.is(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout.trim());
+  // A callback that throws must not poison the dispatch: the remaining queued
+  // calls are still delivered, and the pending exception stays a runtime
+  // concern instead of being replaced by a fresh error.
+  t.deepEqual(output.delivered, [0, 1, 2]);
+  if (strict) {
+    t.deepEqual(output.thrown, ["callback boom"]);
+  }
 });

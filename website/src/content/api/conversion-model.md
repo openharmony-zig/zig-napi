@@ -100,6 +100,23 @@ Async captures clone native inputs and dispose owned results explicitly. A custo
 `deinit` must release the allocations its value actually owns; it must not free
 borrowed literals or instance-retained constructor arguments. See [Ownership](./classes-ownership).
 
+## Conversion Transactions
+
+Argument conversion is a transaction. Some conversions do not copy data, they
+*create* JavaScript resources: `napi.Reference(T)`, `napi.ObjectRef` and
+`napi.FunctionRef` create a strong reference, and a
+`*napi.ThreadSafeFunction(...)` parameter creates an active thread-safe
+function. Those resources are recorded while the arguments are converted and
+released again when the call is rejected, including a failure inside a nested
+struct or array, before the native body runs.
+
+The transaction is committed at the moment the native body is entered. From
+then on the converted values belong to the body, so a successful call never
+releases a reference the body stored or aborts a TSFN another thread is using.
+Releasing them is the body's job: `Unref()`/`Delete()` for a reference, the
+final `release()`/`abort()` for a TSFN. See [Ownership](./classes-ownership) and
+[Functions](./callback-functions).
+
 ## TypeScript Output
 
 `generateTypeDefinition` follows the same conversion model. It emits interfaces for object-like structs, tuples for tuple structs, `const enum` for Zig enums, union types for `union(enum)`, `ExternalObject<T>` for `napi.External(T)`, and an `AbortSignal` interface when an API references `napi.AbortSignal`.

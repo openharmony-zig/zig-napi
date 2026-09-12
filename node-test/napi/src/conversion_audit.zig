@@ -7,8 +7,14 @@
 //! spec can assert that successful *and* failing conversions return to the
 //! allocation baseline.
 const std = @import("std");
+const builtin = @import("builtin");
 const napi = @import("napi");
 const counting = @import("counting");
+
+/// The WASI runtime has no native threads an addon may spawn, so the two probes
+/// that need a *second* thread compile their body out there. Both of their
+/// JavaScript tests are native-only for the same reason.
+const use_wasm_async_work = builtin.cpu.arch == .wasm32 and builtin.os.tag == .wasi;
 
 var counter = counting.CountingAllocator.init(std.heap.page_allocator);
 pub const napi_allocator = counter.allocator();
@@ -215,6 +221,227 @@ const OwnedPair = struct {
     text: napi.Owned([]u8),
     count: i32,
 };
+
+// ------------------------------------- callback conversion ownership H03/H07
+
+/// Error-first TSFN with two declared argument slots. The error path must call
+/// the JavaScript callback with the error *alone*: a native null handle in the
+/// remaining slots is not JavaScript `undefined` and crashes the engine.
+const PairArgs = struct { u32, u32 };
+const PairTsfn = napi.ThreadSafeFunction(PairArgs, void, true, 0);
+
+/// Error-first TSFN without argument slots.
+const NoArgsTsfn = napi.ThreadSafeFunction(std.meta.Tuple(&.{}), void, true, 0);
+
+/// TSFN whose callback does not receive an error slot, with a bounded queue.
+const PlainArgs = struct { u32 };
+const PlainTsfn = napi.ThreadSafeFunction(PlainArgs, void, false, 0);
+const LimitedTsfn = napi.ThreadSafeFunction(PlainArgs, void, false, 1);
+
+/// Queue `count` failures whose message text is borrowed from a stack buffer
+/// that is overwritten immediately after queueing. The queued call must own the
+/// text it delivers.
+pub fn tsfnErrorBorrowedText(tsfn: *NoArgsTsfn, prefix: []const u8, count: u32) !void {
+    var index: u32 = 0;
+    while (index < count) : (index += 1) {
+        var buffer: [64]u8 = undefined;
+        const text = std.fmt.bufPrint(&buffer, "{s}-{d}", .{ prefix, index }) catch unreachable;
+        try tsfn.Err(napi.Error.withReason(text), .NonBlocking);
+        // The caller reuses (and clobbers) its buffer right after queueing.
+        @memset(&buffer, 'x');
+    }
+    try tsfn.release(.Release);
+}
+
+/// Queue failures on an error-first TSFN that declares two argument slots.
+/// Regression for the crash: the error branch must pass one argument, never a
+/// native null in the argument slots.
+pub fn tsfnErrorWithArgs(tsfn: *PairTsfn, count: u32) !void {
+    var index: u32 = 0;
+    while (index < count) : (index += 1) {
+        try tsfn.Err(napi.Error.withReason("pair-error"), .NonBlocking);
+    }
+    try tsfn.release(.Release);
+}
+
+/// Same for a TSFN without argument slots: the callback must still receive
+/// exactly one argument.
+pub fn tsfnErrorWithoutArgs(tsfn: *NoArgsTsfn, count: u32) !void {
+    var index: u32 = 0;
+    while (index < count) : (index += 1) {
+        try tsfn.Err(napi.Error.withReason("noargs-error"), .NonBlocking);
+    }
+    try tsfn.release(.Release);
+}
+
+/// `ThreadSafeFunctionCalleeHandled = false` has no error slot: an `Err` call
+/// still runs the callback, with the argument slots left as `undefined`.
+pub fn tsfnPlainError(tsfn: *PlainTsfn, count: u32) !void {
+    var index: u32 = 0;
+    while (index < count) : (index += 1) {
+        try tsfn.Err(napi.Error.withReason("undeliverable"), .NonBlocking);
+    }
+    try tsfn.release(.Release);
+}
+
+pub fn tsfnPlainSuccess(tsfn: *PlainTsfn, base: u32, count: u32) !void {
+    var index: u32 = 0;
+    while (index < count) : (index += 1) {
+        try tsfn.Ok(.{base + index}, .NonBlocking);
+    }
+    try tsfn.release(.Release);
+}
+
+/// A queued payload whose own conversion to JavaScript fails at delivery time
+/// (the reference was already released). The dispatch must report that failure
+/// through the error slot instead of passing an invalid handle to the callback.
+const BadOutputArgs = struct { reference: napi.ObjectRef };
+const BadOutputTsfn = napi.ThreadSafeFunction(BadOutputArgs, void, true, 0);
+
+pub fn tsfnBadOutput(tsfn: *BadOutputTsfn, count: u32) !void {
+    var index: u32 = 0;
+    while (index < count) : (index += 1) {
+        try tsfn.Ok(.{ .reference = .{ .raw_ref = null, .taken = true } }, .NonBlocking);
+    }
+    try tsfn.release(.Release);
+}
+
+/// Hands the converted TSFN to a native worker thread that keeps queueing after
+/// this body returned. The conversion transaction is committed when the body
+/// runs, so the TSFN must not be aborted by the call that produced it.
+pub fn tsfnQueueFromThread(tsfn: *PairTsfn, count: u32) !void {
+    if (comptime use_wasm_async_work) {
+        // Nothing is queued: the caller's test is skipped in this runtime.
+        _ = .{ tsfn, count };
+        return;
+    }
+
+    const ThreadBody = struct {
+        fn run(inner: *PairTsfn, total: u32) void {
+            defer inner.release(.Release) catch {};
+            var index: u32 = 0;
+            while (index < total) : (index += 1) {
+                inner.Ok(.{ index, index + 1 }, .NonBlocking) catch {};
+            }
+        }
+    };
+
+    // Keep the creator reference held by this call: the worker releases its own.
+    try tsfn.acquire();
+    const worker = try std.Thread.spawn(.{}, ThreadBody.run, .{ tsfn, count });
+    worker.detach();
+    try tsfn.release(.Release);
+}
+
+/// Queues one call too many from a worker thread while the main thread is busy
+/// inside this body, so the bounded queue really is full when the second call
+/// arrives. A rejected call must release its payload instead of leaking it.
+pub fn tsfnQueueOverflow(tsfn: *LimitedTsfn, queued: u32) !u32 {
+    if (comptime use_wasm_async_work) {
+        // A bounded queue can only be observed as full while the main thread is
+        // blocked in this body, which needs a thread the runtime does not give
+        // the addon here.
+        _ = .{ tsfn, queued };
+        return 0;
+    }
+
+    const ThreadBody = struct {
+        fn run(inner: *LimitedTsfn, total: u32, rejected: *u32) void {
+            defer inner.release(.Release) catch {};
+            var index: u32 = 0;
+            while (index < total) : (index += 1) {
+                inner.Ok(.{index}, .NonBlocking) catch {
+                    rejected.* += 1;
+                };
+            }
+        }
+    };
+
+    try tsfn.acquire();
+    var rejected: u32 = 0;
+    const worker = try std.Thread.spawn(.{}, ThreadBody.run, .{ tsfn, queued, &rejected });
+    worker.join();
+    try tsfn.release(.Release);
+    return rejected;
+}
+
+/// Aborts the TSFN while keeping the wrapper alive, then queues `count` calls:
+/// a closing TSFN must reject them and release every payload it was handed.
+/// The abort hands the TSFN to the runtime: Node destroys it - running the
+/// wrapper's finalizer - on a later loop turn, so there is no second release to
+/// make here (and the wrapper must not be used after this body returned).
+pub fn tsfnAbortProbe(tsfn: *PlainTsfn, count: u32) !u32 {
+    try tsfn.abort();
+
+    var rejected: u32 = 0;
+    var index: u32 = 0;
+    while (index < count) : (index += 1) {
+        tsfn.Ok(.{index}, .NonBlocking) catch {
+            rejected += 1;
+        };
+    }
+
+    return rejected;
+}
+
+/// Promotes the first parameter to a strong reference and then fails on the
+/// second one. The reference the conversion created must be deleted again, or
+/// the JavaScript object stays alive forever.
+pub fn referenceThenRejected(reference: napi.ObjectRef, tail: i32) i32 {
+    _ = reference;
+    native_calls += 1;
+    return tail;
+}
+
+/// Same, but the reference is nested inside a struct whose *second* field fails
+/// to convert: the struct prefix rollback must not leak the reference.
+const ReferenceHolder = struct {
+    reference: napi.ObjectRef,
+    count: i32,
+};
+
+pub fn nestedReferenceThenRejected(holder: ReferenceHolder, tail: i32) i32 {
+    _ = holder;
+    native_calls += 1;
+    return tail;
+}
+
+/// And inside an array, where a failure on a later element must release the
+/// references created for the earlier ones.
+pub fn arrayReferenceThenRejected(references: []const napi.ObjectRef, tail: i32) i32 {
+    _ = references;
+    native_calls += 1;
+    return tail;
+}
+
+/// Promotes the first parameter to a TSFN and then fails: the promoted TSFN
+/// must be aborted by the conversion, otherwise it keeps the environment (and
+/// the process) alive after a call that never reached its body.
+pub fn tsfnThenRejected(tsfn: *PairTsfn, tail: i32) i32 {
+    _ = tsfn;
+    native_calls += 1;
+    return tail;
+}
+
+// A successful conversion hands the reference to the body. Storing it here is
+// what keeps the JavaScript object alive; only `releaseStoredReference` drops
+// the strong reference again.
+var stored_reference: ?napi.ObjectRef = null;
+
+pub fn storeReference(reference: napi.ObjectRef) void {
+    stored_reference = reference;
+}
+
+pub fn storedReferenceIsSet() bool {
+    return stored_reference != null;
+}
+
+pub fn releaseStoredReference(env: napi.Env) bool {
+    const held = if (stored_reference) |*value| value else return false;
+    held.Unref(env) catch return false;
+    stored_reference = null;
+    return true;
+}
 
 pub fn ownedPairReturn() OwnedPair {
     const allocator = napi.globalAllocator();

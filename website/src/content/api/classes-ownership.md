@@ -31,6 +31,40 @@ not a new `Owned` wrapper around memory the instance still owns. Constructors
 and factories must return a fully initialized `T`; `undefined` fields are not
 valid data and are not repaired by the wrapper.
 
+## JavaScript Resources Created By Conversion
+
+Two parameter shapes do not copy data - they *create* a JavaScript resource:
+
+| Parameter                     | Created resource                     | Release with              |
+| ----------------------------- | ------------------------------------ | ------------------------- |
+| `napi.Reference(T)`, `napi.ObjectRef`, `napi.FunctionRef` | strong reference (`napi_create_reference`) | `Unref(env)` or `Delete(env)` |
+| `*napi.ThreadSafeFunction(...)` | active thread-safe function       | `release(mode)` / `abort()` |
+
+Both are tracked by the argument-conversion transaction
+([Conversion Model](./conversion-model)). When the call is rejected before the
+native body runs - a wrong type in a later argument, a failure inside a nested
+struct or array - the resources the conversion already created are released, so
+the referenced JavaScript value becomes collectible again and a rejected call
+cannot keep the environment (or the process) alive.
+
+When the call reaches its body the resources belong to the body:
+
+```zig
+pub fn remember(reference: napi.ObjectRef) void {
+    // `reference` is a strong reference this call now owns. Store it, hand it
+    // on, or release it with `Unref`/`Delete` when it is no longer needed;
+    // dropping the value without releasing it keeps the JavaScript object
+    // alive forever.
+}
+```
+
+`napi.Reference(T)` is a value type that holds the reference *handle*, not the
+ownership. Copying one copies the handle: releasing through one copy
+(`Unref`/`Delete`) deletes the reference for all of them, and the other copies
+only fail safely if they were marked taken themselves. Keep exactly one owner
+per created reference and share borrowed values read through `GetValue(env)`
+instead of the handle.
+
 ## `Class`
 
 ```zig
@@ -156,6 +190,19 @@ References keep JavaScript values alive across calls. `Ref` is an alias for `Ref
 | `Ref(env)`                         | Increase the reference count and return the count. |
 | `Unref(env)`                       | Unref and delete the reference.                    |
 | `Delete(env)`                      | Alias for `Unref`.                                 |
+| `isTaken()`                        | True once this copy released the handle.           |
+
+`New`/`from_napi_value` create a strong reference on an object, function or
+symbol; the underlying `napi_create_reference` rejects primitives, so
+referencing a string or number fails instead of producing a handle that can
+never be read back. Every read goes through `napi_get_reference_value`, so a
+released (or externally collected) reference fails with `Ref value has been
+deleted` instead of returning an invalid handle.
+
+The ownership rules of a created reference are described under
+[JavaScript Resources Created By Conversion](#javascript-resources-created-by-conversion):
+the exporting wrapper releases a reference whose conversion was rejected, and
+the native body owns it once it runs.
 
 ## `FunctionRef` And `ObjectRef`
 
