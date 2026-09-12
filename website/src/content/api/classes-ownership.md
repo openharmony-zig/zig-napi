@@ -68,10 +68,11 @@ pub const CounterClass = napi.Class(Counter);
 ### Calls, receivers and factories
 
 - A method whose first parameter is `*T` or `T` is an instance method. The
-  receiver is validated: calling it on an object that is not wrapped with this
-  class (or that belongs to another class) throws a `TypeError` instead of
-  reinterpreting foreign memory. A `self: T` receiver works on a copy of the
-  native state, so field writes through the copy are not visible afterwards.
+  receiver is validated against the registry of payloads this class created:
+  calling it on an object that is not wrapped with this class (or that belongs
+  to another class or addon) throws a `TypeError`, and a wrapped pointer of
+  another party is never dereferenced. A `self: T` receiver works on a copy of
+  the native state, so field writes through the copy are not visible afterwards.
 - Every other method is a static method. Its `this` is the class constructor and
   is never unwrapped, so `Class.twice(3)` behaves like a plain function.
 - A static method returning `T` or `*T` is a factory. The returned value is moved
@@ -80,22 +81,37 @@ pub const CounterClass = napi.Class(Counter);
   allocation holding it stays owned by the factory.
 - Each `napi_env` owns its own constructor reference, so the main thread and
   worker threads can construct instances and call factories concurrently. The
-  references are released through environment cleanup hooks.
+  reference is weak and the definition is released through an environment
+  cleanup hook, with a constructor finalizer as the fallback for environments
+  older than Node-API v3; a failing hook registration is reported instead of
+  leaking.
 
 ### Ownership
 
 - Field construction (`Class(T)` without `init`) transfers ownership of the
   converted constructor arguments to the fields; a failure releases the
   arguments that were converted before the failing one.
-- Construction through `init` or a factory *borrows* its converted inputs: the
-  wrapper keeps them alive until the instance is finalized and releases them
-  exactly once. Clone them when the native code has to own them.
-- A setter converts the new value first. The previous value is released only
-  after the new one has been installed, and only when the wrapper installed it,
-  so static literals and values handed over by `init` are never freed.
-- When `T` declares `deinit`, it owns the buffers reachable from its fields; the
-  wrapper only releases inputs the finalized value no longer references.
-  `deinit` runs exactly once per instance.
+- Construction through `init` or a factory *borrows* its converted inputs. The
+  wrapper owns them, keeps them alive for the lifetime of the instance and
+  releases them exactly once **after** `deinit` has run:
+  - storing one of them in a field is supported;
+  - freeing one of them (in `deinit` or anywhere else) is a double free;
+  - a type that has to own a resource clones it explicitly
+    (`Napi.clone_napi_value`, `allocator.dupe`, ...) or stores it in an
+    explicitly owned field (`napi.Owned(T)`), whose `deinit` the wrapper calls.
+- A setter converts the new value first, and only then installs it. Ownership is
+  never inferred from a pointer value:
+  - a value the wrapper installed is released when it is replaced;
+  - a field type that declares `deinit` (for example `napi.Owned(T)`) owns
+    itself, so the previous value is released through its own `deinit`;
+  - when `T` declares `deinit` and the field carries native memory the wrapper
+    did not install, the assignment is refused with a `TypeError` rather than
+    orphaning or double freeing the previous value. Replace such a field through
+    a method of `T`, or use an explicitly owned field type;
+  - plain data fields and instances where the wrapper installed the value stay
+    assignable.
+- `deinit` runs exactly once per instance and is the only owner of the fields it
+  declares. Nothing is read from the value after `deinit` returned.
 
 ### Construction from JavaScript
 

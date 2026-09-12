@@ -97,18 +97,13 @@ pub const ArrayBuffer = struct {
 
     /// Convert from napi_value to the specified type ([]u8 or [N]u8).
     ///
-    /// The infallible signature is kept for source compatibility: the N-API
-    /// status is validated, a value that is not an ArrayBuffer throws a
-    /// JavaScript `TypeError`, and the returned value is empty (slices) or zero
-    /// filled (fixed arrays) in that case. Use `tryFromRaw` plus `tryAsSlice`
-    /// when the failure has to be observable.
-    pub fn from_napi_value(env: napi.napi_env, raw: napi.napi_value, comptime T: type) T {
+    /// Fails when the value is not an ArrayBuffer. A value that cannot be read
+    /// is never reported as zero filled data: silently returning zeros made an
+    /// invalid input look like a successful conversion.
+    pub fn from_napi_value(env: napi.napi_env, raw: napi.napi_value, comptime T: type) !T {
         const infos = @typeInfo(T);
 
-        const buffer = ArrayBuffer.tryFromRaw(env, raw) catch |err| {
-            recordBinaryFailure("ArrayBuffer expected", err);
-            return std.mem.zeroes(T);
-        };
+        const buffer = try ArrayBuffer.tryFromRaw(env, raw);
         const source = buffer.data[0..buffer.len];
 
         switch (infos) {
@@ -389,15 +384,20 @@ pub const ArrayBuffer = struct {
 /// The fallible `tryFromRaw` / `tryAsSlice` API is the primary contract and is
 /// what the ownership rework of the conversion layer consumes.
 pub fn recordBinaryFailure(comptime expected: []const u8, err: anyerror) void {
-    if (comptime @hasDecl(NapiError, "last_error")) {
-        NapiError.clearLastError();
-        NapiError.last_error = switch (err) {
-            BinaryError.InvalidBinaryValue => NapiError.Error.withTypeError(expected),
-            BinaryError.InvalidatedBackingStore => NapiError.Error.withRangeError("binary view backing store was detached or resized"),
-            error.PendingException => NapiError.Error.withStatus(NapiError.Status.PendingException),
-            else => NapiError.mapAnyError(err),
-        };
-    }
+    const reported = switch (err) {
+        BinaryError.InvalidBinaryValue => NapiError.Error.withTypeError(expected),
+        BinaryError.InvalidatedBackingStore => NapiError.Error.withRangeError("binary view backing store was detached or resized"),
+        // A pending JavaScript exception is the error to report; creating a
+        // second one would abort N-API.
+        error.PendingException => NapiError.Error.withStatus(NapiError.Status.PendingException),
+        else => NapiError.Error.withStatus(NapiError.Status.GenericFailure),
+    };
+
+    NapiError.last_error = reported;
+    NapiError.last_error_status = switch (err) {
+        error.PendingException => .PendingException,
+        else => .GenericFailure,
+    };
 }
 
 const ArrayBufferCreateStatus = struct {

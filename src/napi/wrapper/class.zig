@@ -5,6 +5,9 @@ const Napi = @import("../util/napi.zig").Napi;
 const helper = @import("../util/helper.zig");
 const NapiError = @import("./error.zig");
 const GlobalAllocator = @import("../util/allocator.zig");
+const PayloadRegistry = @import("../util/payload_registry.zig").PayloadRegistry;
+const Buffer = @import("./buffer.zig").Buffer;
+const ArrayBuffer = @import("./arraybuffer.zig").ArrayBuffer;
 const options = @import("../options.zig");
 
 pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
@@ -31,120 +34,32 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
         raw: napi.napi_value,
         const Self = @This();
 
-        // Identity tags. `napi_wrap` payloads and callback data are only
-        // interpreted when they carry the tag that belongs to this exact
-        // generic instantiation, which keeps a receiver of another class (or
-        // another addon) from being reinterpreted as `InstanceData`.
-        // Truncated to `usize` so the value also fits the 32 bit OHOS targets.
-        const instance_tag: usize = @truncate(std.hash.Wyhash.hash(0, @typeName(Self) ++ "\x00instance"));
-        const context_tag: usize = @truncate(std.hash.Wyhash.hash(0, @typeName(Self) ++ "\x00context"));
+        // Provenance registries. `napi_unwrap` data and callback data are only
+        // interpreted after the pointer has been proven to belong to this exact
+        // generic instantiation. A magic value stored inside the payload is not
+        // such a proof: another addon may have wrapped a one-byte allocation or
+        // an opaque sentinel such as pointer 1, and reading it would already be
+        // the bug. `PayloadRegistry` only stores addresses, never dereferences
+        // them, and is instantiated per type, so an entry can only come from
+        // this class.
+        const InstanceRegistry = PayloadRegistry(InstanceData);
+        const ContextRegistry = PayloadRegistry(ClassContext);
 
-        /// Type-erased owner for converted inputs which user code may alias.
+        /// Type-erased owner for the converted inputs of one instance.
+        ///
+        /// The wrapper owns **every** converted input, without exception: it
+        /// does not guess ownership from buffer addresses, and it never inspects
+        /// the instance value after user `deinit` has run.
         const KeepAlive = struct {
             ptr: *anyopaque,
-            destroyFn: *const fn (*anyopaque, ?*InstanceData, std.mem.Allocator) void,
+            destroyFn: *const fn (*anyopaque, std.mem.Allocator) void,
 
-            fn destroy(self: KeepAlive, instance: *InstanceData, allocator: std.mem.Allocator) void {
-                self.destroyFn(self.ptr, instance, allocator);
-            }
-
-            /// Releases the record and every input it owns. Used on the failure
-            /// paths that never produced an instance to check against.
-            fn release(self: KeepAlive, allocator: std.mem.Allocator) void {
-                self.destroyFn(self.ptr, null, allocator);
+            fn destroy(self: KeepAlive, allocator: std.mem.Allocator) void {
+                self.destroyFn(self.ptr, allocator);
             }
         };
-
-        const BufferRange = struct {
-            start: usize,
-            len: usize,
-        };
-
-        /// Address range of the native memory an input value points at, when it
-        /// has a statically known shape. Values without native memory (JS
-        /// handles, numbers, structs of handles) report null and are always
-        /// released by the wrapper.
-        fn inputBufferRange(comptime V: type, value: V) ?BufferRange {
-            switch (@typeInfo(V)) {
-                .pointer => |pointer| switch (pointer.size) {
-                    .slice => {
-                        if (value.len == 0) return null;
-                        const len = std.math.mul(usize, value.len, @sizeOf(pointer.child)) catch return null;
-                        return .{ .start = @intFromPtr(value.ptr), .len = len };
-                    },
-                    .one, .many => return .{ .start = @intFromPtr(value), .len = @sizeOf(pointer.child) },
-                    else => return null,
-                },
-                else => return null,
-            }
-        }
-
-        /// Whether a value of this type can hold a native pointer, directly or
-        /// through inline aggregates. Lets the alias scan skip subtrees that
-        /// cannot alias anything (numbers, enums, plain byte arrays).
-        fn typeCanReference(comptime V: type) bool {
-            return switch (@typeInfo(V)) {
-                .pointer => true,
-                .optional => |optional| typeCanReference(optional.child),
-                .array => |array| typeCanReference(array.child),
-                .@"struct" => |structure| {
-                    inline for (structure.fields) |field| {
-                        if (comptime typeCanReference(field.type)) return true;
-                    }
-                    return false;
-                },
-                .@"union" => |union_info| {
-                    inline for (union_info.fields) |field| {
-                        if (comptime typeCanReference(field.type)) return true;
-                    }
-                    return false;
-                },
-                else => false,
-            };
-        }
-
-        /// Whether `value` still references (a sub-range of) the buffer
-        /// `range`. Used to decide which converted inputs a type with a custom
-        /// `deinit` is expected to release itself.
-        fn valueReferencesBuffer(comptime V: type, value: V, range: BufferRange) bool {
-            const other_end = std.math.add(usize, range.start, range.len) catch return false;
-
-            switch (@typeInfo(V)) {
-                .pointer => {
-                    const own = inputBufferRange(V, value) orelse return false;
-                    const own_end = std.math.add(usize, own.start, own.len) catch return false;
-                    return own.start < other_end and range.start < own_end;
-                },
-                .array => |array| {
-                    if (comptime !typeCanReference(array.child)) return false;
-                    for (value) |item| {
-                        if (valueReferencesBuffer(array.child, item, range)) return true;
-                    }
-                    return false;
-                },
-                .optional => |optional| {
-                    if (value) |payload| return valueReferencesBuffer(optional.child, payload, range);
-                    return false;
-                },
-                .@"struct" => |structure| {
-                    inline for (structure.fields) |field| {
-                        if (comptime !typeCanReference(field.type)) continue;
-                        if (valueReferencesBuffer(field.type, @field(value, field.name), range)) return true;
-                    }
-                    return false;
-                },
-                .@"union" => |union_info| {
-                    if (union_info.tag_type == null) return false;
-                    switch (value) {
-                        inline else => |payload| return valueReferencesBuffer(@TypeOf(payload), payload, range),
-                    }
-                },
-                else => return false,
-            }
-        }
 
         const InstanceData = struct {
-            tag: usize,
             allocator: std.mem.Allocator,
             value: T,
             /// `owned_fields[i]` records that the *current* value of field `i`
@@ -156,17 +71,24 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
 
             fn create(allocator: std.mem.Allocator) !*InstanceData {
                 const instance = try allocator.create(InstanceData);
+                errdefer allocator.destroy(instance);
                 instance.* = .{
-                    .tag = instance_tag,
                     .allocator = allocator,
-                    .value = undefined,
+                    // Deterministic starting point: a user `init` that omits a
+                    // field leaves a zeroed value instead of undefined memory,
+                    // which keeps `deinit` and the field accessors predictable.
+                    .value = std.mem.zeroes(T),
                     .owned_fields = [_]bool{false} ** fields.len,
                     .borrowed_inputs = null,
                 };
+                // Registration is what makes `unwrapInstance` a provenance
+                // check instead of a memory read of an untrusted pointer.
+                try InstanceRegistry.add(instance);
                 return instance;
             }
 
             fn destroyUninitialized(self: *InstanceData) void {
+                InstanceRegistry.remove(self);
                 self.allocator.destroy(self);
             }
 
@@ -174,7 +96,9 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                 const allocator = self.allocator;
 
                 if (comptime has_custom_deinit) {
-                    // The type declares ownership of its own memory.
+                    // The type declares ownership of its own fields. Nothing
+                    // may be read from `value` after this call: `deinit` is
+                    // allowed to clear or release everything it owns.
                     deinitValue(T, self.value, allocator);
                 } else {
                     inline for (fields, 0..) |field, i| {
@@ -184,10 +108,14 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                     }
                 }
 
+                // The converted inputs are released last so that a `deinit`
+                // which still reads a borrowed field sees live memory. They are
+                // owned by the wrapper, never by the type.
                 if (self.borrowed_inputs) |keep_alive| {
-                    keep_alive.destroy(self, allocator);
+                    keep_alive.destroy(allocator);
                 }
 
+                InstanceRegistry.remove(self);
                 allocator.destroy(self);
             }
         };
@@ -202,11 +130,21 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
         /// One context is created per `define_class` call and handed to every
         /// callback of that definition through callback data, so a callback can
         /// only ever observe a context that belongs to the environment that
-        /// invoked it. The context owns the constructor reference and is
-        /// released by an environment cleanup hook, which removes the need for
-        /// a process wide registry (and for locking).
+        /// invoked it.
+        ///
+        /// Exactly one mechanism releases it, chosen at compile time so that no
+        /// context is ever released twice:
+        ///
+        /// * `napi_add_env_cleanup_hook` (N-API v3 and newer) releases it
+        ///   before the environment is torn down, which is the deterministic
+        ///   path. A failed registration is reported instead of being ignored.
+        /// * on older N-API versions a finalizer attached with `napi_wrap` to
+        ///   the class constructor releases it when the class object is
+        ///   collected - at the latest during environment teardown - so those
+        ///   environments do not silently retain the context forever. The
+        ///   constructor reference is weak (refcount 0) so that the class object
+        ///   can actually be collected.
         const ClassContext = struct {
-            tag: usize,
             env: napi.napi_env,
             allocator: std.mem.Allocator,
             constructor_ref: ?napi.napi_ref = null,
@@ -218,16 +156,22 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
         fn createContext(env: napi.napi_env) !*ClassContext {
             const allocator = GlobalAllocator.globalAllocator();
             const context = try allocator.create(ClassContext);
+            errdefer allocator.destroy(context);
             context.* = .{
-                .tag = context_tag,
                 .env = env,
                 .allocator = allocator,
             };
+            try ContextRegistry.add(context);
 
-            // `napi_add_env_cleanup_hook` exists since N-API v3. Environments
-            // below that keep the class definition until process exit.
+            // A failure to register the deterministic release path has to be
+            // reported: silently continuing would leak the context until the
+            // constructor is collected.
             if (comptime options.selectedNapiVersion().isAtLeast(.v3)) {
-                _ = napi.napi_add_env_cleanup_hook(env, contextCleanupHook, context);
+                const status = napi.napi_add_env_cleanup_hook(env, contextCleanupHook, context);
+                if (status != napi.napi_ok) {
+                    ContextRegistry.remove(context);
+                    return NapiError.failStatus(status);
+                }
             }
 
             return context;
@@ -235,12 +179,25 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
 
         fn contextCleanupHook(data: ?*anyopaque) callconv(.c) void {
             const raw = data orelse return;
+            releaseContextRaw(raw);
+        }
+
+        /// Finalizer for the class constructor object; see `ClassContext`.
+        fn contextFinalizer(_: napi.napi_env, data: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
+            const raw = data orelse return;
+            releaseContextRaw(raw);
+        }
+
+        fn releaseContextRaw(raw: *anyopaque) void {
+            // Provenance first: neither callback owns the pointer it receives.
+            if (!ContextRegistry.contains(raw)) return;
             const context: *ClassContext = @ptrCast(@alignCast(raw));
-            if (context.tag != context_tag) return;
             releaseContext(context);
         }
 
         fn releaseContext(context: *ClassContext) void {
+            ContextRegistry.remove(context);
+
             if (context.constructor_ref) |reference| {
                 _ = napi.napi_delete_reference(context.env, reference);
                 context.constructor_ref = null;
@@ -280,10 +237,8 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
         /// getter, a Proxy trap, a revoked proxy) is left untouched so that the
         /// original exception object reaches JavaScript unchanged.
         fn reportConversionFailure(env: napi.napi_env, err: anyerror) void {
-            switch (err) {
-                error.ConversionFailure, error.PendingException => return,
-                else => throwError(env, NapiError.mapAnyError(err)),
-            }
+            if (err == error.PendingException) return;
+            throwError(env, NapiError.mapAnyError(err));
         }
 
         fn throwAnyAndNull(env: napi.napi_env, err: anyerror) napi.napi_value {
@@ -291,41 +246,59 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
             return null;
         }
 
-        /// Bridge between the legacy `T` returning converters and the `!T`
-        /// converters of the ownership rework. Both signatures are accepted so
-        /// that this file compiles before and after the conversion layer lands;
-        /// the legacy branch only exists for the transition and can be deleted
-        /// once every converter returns an error union.
-        fn convertFromJs(env: napi.napi_env, raw: napi.napi_value, comptime V: type) anyerror!V {
-            NapiError.clearLastError();
-            const converted = Napi.from_napi_value_auto(env, raw, V);
-            if (comptime @TypeOf(converted) == V) {
-                if (NapiError.last_error) |last_error| {
-                    NapiError.clearLastError();
-                    throwError(env, last_error);
-                    return error.ConversionFailure;
-                }
-                return converted;
-            } else {
-                return converted;
-            }
+        /// Releases a converted value with the allocator that produced it.
+        fn deinitValue(comptime V: type, value: V, allocator: std.mem.Allocator) void {
+            Napi.deinit_napi_value_with_allocator(V, value, allocator);
         }
 
-        /// Releases a converted value with the allocator that produced it.
-        ///
-        /// The allocator aware entry point is used as soon as it exists; the
-        /// fallback keeps the previous global allocator convention for the
-        /// transition period and can be removed with the legacy converter
-        /// branch above.
-        fn deinitValue(comptime V: type, value: V, allocator: std.mem.Allocator) void {
-            if (comptime @hasDecl(Napi, "deinit_napi_value_with_allocator")) {
-                Napi.deinit_napi_value_with_allocator(V, value, allocator);
-            } else {
-                const previous = GlobalAllocator.globalAllocator();
-                GlobalAllocator.global_manager.set(allocator);
-                defer GlobalAllocator.global_manager.set(previous);
-                Napi.deinit_napi_value(V, value);
-            }
+        /// Whether a field type can hold native memory that somebody has to
+        /// release. This is a property of the *type*, decided at compile time;
+        /// no runtime pointer or address range is ever inspected to decide
+        /// ownership.
+        fn typeCarriesNativeMemory(comptime F: type) bool {
+            return switch (@typeInfo(F)) {
+                .pointer => true,
+                .optional => |optional| typeCarriesNativeMemory(optional.child),
+                .array => |array| typeCarriesNativeMemory(array.child),
+                .@"struct" => |structure| blk: {
+                    // JavaScript handles (Buffer, TypedArray, Function, ...)
+                    // reference memory the runtime owns, never native memory of
+                    // this instance.
+                    if (comptime fieldOwnsItself(F)) break :blk true;
+                    if (comptime helper.isNapiFunction(F) or
+                        helper.isTypedArray(F) or
+                        helper.isDataView(F) or
+                        helper.isReference(F) or
+                        helper.isExternal(F) or
+                        helper.isAbortSignal(F) or
+                        F == Buffer or
+                        F == ArrayBuffer)
+                    {
+                        break :blk false;
+                    }
+                    inline for (structure.fields) |field| {
+                        if (comptime typeCarriesNativeMemory(field.type)) break :blk true;
+                    }
+                    break :blk false;
+                },
+                .@"union" => |union_info| {
+                    inline for (union_info.fields) |field| {
+                        if (comptime typeCarriesNativeMemory(field.type)) return true;
+                    }
+                    return false;
+                },
+                else => false,
+            };
+        }
+
+        /// Whether replacing the current value of a field requires an explicit
+        /// owner. A type that declares `deinit` claims its fields, so an
+        /// implicit JavaScript assignment cannot release the previous value
+        /// safely and is rejected instead of leaking it. Plain data and naive
+        /// value fields (numbers, flags, structs of them) are always assignable.
+        fn replacementNeedsOwner(comptime type_has_deinit: bool, comptime F: type) bool {
+            if (!type_has_deinit) return false;
+            return typeCarriesNativeMemory(F);
         }
 
         /// A field type that owns itself (for example `napi.Owned`, a native
@@ -351,46 +324,34 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
 
         /// Releases the record of converted inputs held by an instance.
         ///
-        /// An input is released here unless the finalized value still
-        /// references it *and* the type declares `deinit`: in that case the
-        /// buffer is reachable from the instance, so `T.deinit` is the owner
-        /// and releasing it here as well would double free it. This is the
-        /// shape of a value that keeps a converted string in a field and frees
-        /// it later, which is what the memory example does.
-        fn destroyKeepAlive(comptime V: type) *const fn (*anyopaque, ?*InstanceData, std.mem.Allocator) void {
+        /// Every input is released here, unconditionally. Ownership is not
+        /// inferred from addresses and not delegated to user `deinit`: the
+        /// inputs are memory the conversion allocated, so they are memory the
+        /// wrapper releases, exactly once.
+        fn destroyKeepAlive(comptime V: type) *const fn (*anyopaque, std.mem.Allocator) void {
             return struct {
-                fn destroy(raw: *anyopaque, instance: ?*InstanceData, allocator: std.mem.Allocator) void {
+                fn destroy(raw: *anyopaque, allocator: std.mem.Allocator) void {
                     const typed: *V = @ptrCast(@alignCast(raw));
                     inline for (@typeInfo(V).@"struct".fields) |field| {
-                        const input = @field(typed.*, field.name);
-                        const release = if (comptime has_custom_deinit) blk: {
-                            if (instance) |live| {
-                                if (inputBufferRange(field.type, input)) |range| {
-                                    break :blk !valueReferencesBuffer(T, live.value, range);
-                                }
-                            }
-                            break :blk true;
-                        } else true;
-
-                        if (release) {
-                            deinitValue(field.type, input, allocator);
-                        }
+                        deinitValue(field.type, @field(typed.*, field.name), allocator);
                     }
                     allocator.destroy(typed);
                 }
             }.destroy;
         }
 
-        /// Inputs converted for a user supplied `init` or factory are borrowed:
-        /// the user function must clone anything it wants to outlive the
-        /// instance. Because the returned value may legitimately store one of
-        /// those borrows in a field (the documented pattern for `init`), the
-        /// wrapper keeps the converted inputs alive for as long as the instance
-        /// and releases them exactly once when the instance is finalized.
+        /// Inputs converted for a user supplied `init` or factory are borrowed
+        /// by user code for the lifetime of the instance:
         ///
-        /// `destroyKeepAlive` decides per input whether the type's own `deinit`
-        /// is the owner instead: an input the finalized value still references
-        /// is reachable from the instance and must not be released twice.
+        /// * storing one of them in a field is supported and safe - the wrapper
+        ///   keeps the converted inputs alive until the instance is finalized
+        ///   and releases them exactly once after `deinit` has run;
+        /// * freeing one of them, in `deinit` or anywhere else, is a double
+        ///   free: they are not `self`'s memory;
+        /// * a type that has to *own* a resource must clone it explicitly
+        ///   (`Napi.clone_napi_value`, `allocator.dupe`, ...) or store it in an
+        ///   explicitly owned field (`napi.Owned(T)`), whose `deinit` the
+        ///   wrapper calls.
         fn retainBorrowedInputs(comptime V: type, instance: *InstanceData, value: V) !void {
             const allocator = instance.allocator;
             const stored = try allocator.create(V);
@@ -457,9 +418,13 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                 }
             }
 
+            // Callback data comes from this addon's own property descriptors,
+            // but the pointer is validated before it is dereferenced: a
+            // callback invoked through foreign data must not read or write
+            // through it.
             const context: ?*ClassContext = if (data) |raw| blk: {
+                if (!ContextRegistry.contains(raw)) break :blk null;
                 const candidate: *ClassContext = @ptrCast(@alignCast(raw));
-                if (candidate.tag != context_tag) break :blk null;
                 if (candidate.env != env) break :blk null;
                 break :blk candidate;
             } else null;
@@ -471,14 +436,21 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
             };
         }
 
+        /// Resolves the native instance wrapped into `this_obj`.
+        ///
+        /// The pointer that `napi_unwrap` reports is a value of another party
+        /// until it has been proven to belong to this class: it may be a
+        /// sentinel such as `@ptrFromInt(1)`, a one-byte allocation or the
+        /// payload of a completely different addon. It is therefore never cast
+        /// or dereferenced before `InstanceRegistry` confirms it, and an
+        /// unregistered pointer is reported as a receiver mismatch.
         fn unwrapInstance(env: napi.napi_env, this_obj: napi.napi_value) ?*InstanceData {
             var data: ?*anyopaque = null;
             const status = napi.napi_unwrap(env, this_obj, &data);
             if (status != napi.napi_ok) return null;
             const raw = data orelse return null;
-            const instance: *InstanceData = @ptrCast(@alignCast(raw));
-            if (instance.tag != instance_tag) return null;
-            return instance;
+            if (!InstanceRegistry.contains(raw)) return null;
+            return @ptrCast(@alignCast(raw));
         }
 
         /// Returns the instance or throws a TypeError when `this` is not an
@@ -572,7 +544,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
             var initialized: usize = 0;
 
             inline for (init_params, 0..) |param, i| {
-                tuple_args[i] = convertFromJs(env, args[i], param.type.?) catch |err| {
+                tuple_args[i] = Napi.from_napi_value_auto(env, args[i], param.type.?) catch |err| {
                     releaseConvertedArgs(ArgsTuple, &tuple_args, initialized, allocator);
                     reportConversionFailure(env, err);
                     return false;
@@ -613,7 +585,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
             // back before the shell is destroyed.
             instance.value = std.mem.zeroes(T);
             inline for (fields, 0..) |field, i| {
-                const converted = convertFromJs(env, args[i], field.type) catch |err| {
+                const converted = Napi.from_napi_value_auto(env, args[i], field.type) catch |err| {
                     rollbackFields(instance, i);
                     reportConversionFailure(env, err);
                     return false;
@@ -741,8 +713,11 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
             _ = hint;
 
             const raw = data orelse return;
+            // Provenance before the cast, like every other unwrap path: the
+            // finalizer must be harmless if it is ever invoked with data that
+            // this class did not register.
+            if (!InstanceRegistry.contains(raw)) return;
             const instance: *InstanceData = @ptrCast(@alignCast(raw));
-            if (instance.tag != instance_tag) return;
             instance.destroy();
         }
 
@@ -785,7 +760,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                         var initialized: usize = 0;
 
                         inline for (params, 0..) |param, i| {
-                            tuple_args[i] = convertFromJs(env, args_raw[i], param.type.?) catch |err| {
+                            tuple_args[i] = Napi.from_napi_value_auto(env, args_raw[i], param.type.?) catch |err| {
                                 releaseConvertedArgs(ArgsTuple, &tuple_args, initialized, allocator);
                                 reportConversionFailure(env, err);
                                 return null;
@@ -816,7 +791,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
 
                     const instance = InstanceData.create(allocator) catch {
                         deinitValue(T, value, allocator);
-                        if (keep_alive) |keep| keep.release(allocator);
+                        if (keep_alive) |keep| keep.destroy(allocator);
                         throwError(env, NapiError.Error.withStatus(NapiError.Status.GenericFailure));
                         return null;
                     };
@@ -934,17 +909,53 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
 
                         // The new value is converted first. A failed conversion
                         // leaves the previous field value untouched, and the
-                        // previous value is only released after it has been
-                        // replaced by a value this wrapper owns.
-                        const new_value = convertFromJs(setter_env, args_raw[0], field.type) catch |err| {
+                        // previous value is only released when this wrapper is
+                        // provably its owner. Ownership is never inferred from
+                        // the pointer value.
+                        //
+                        // The current value is only read on the branch where
+                        // the wrapper installed it (and therefore initialized
+                        // it); on every other branch the field is overwritten
+                        // without touching the old contents, so a field a user
+                        // `init` never initialized cannot be read here.
+                        if (comptime replacementNeedsOwner(has_custom_deinit, field.type)) {
+                            // A self owning field type is an explicit owner
+                            // contract and may replace itself; anything else
+                            // that the type's `deinit` owns cannot.
+                            if (comptime !fieldOwnsItself(field.type)) {
+                                if (!instance.owned_fields[field_index]) {
+                                    // The type owns this field through
+                                    // `deinit` and the wrapper cannot know who
+                                    // released the previous value: releasing it
+                                    // here could free a static literal, and
+                                    // keeping it silently would orphan native
+                                    // memory.
+                                    throwTypeError(
+                                        setter_env,
+                                        class_name ++ "." ++ field.name ++ " is owned by " ++ @typeName(T) ++ ".deinit: replace it through a method of the type or declare the field as napi.Owned(...)",
+                                    );
+                                    return null;
+                                }
+                            }
+                        }
+
+                        const new_value = Napi.from_napi_value_auto(setter_env, args_raw[0], field.type) catch |err| {
                             reportConversionFailure(setter_env, err);
                             return null;
                         };
 
-                        const previous = @field(instance.value, field.name);
-                        @field(instance.value, field.name) = new_value;
-                        if (instance.owned_fields[field_index]) {
+                        if (instance.owned_fields[field_index] or comptime fieldOwnsItself(field.type)) {
+                            // The wrapper installed the current value, or the
+                            // field type is explicitly self owning: both are an
+                            // owner contract that lets the replaced value be
+                            // released.
+                            const previous = @field(instance.value, field.name);
+                            @field(instance.value, field.name) = new_value;
                             deinitValue(field.type, previous, instance.allocator);
+                        } else {
+                            // Borrowed or plain data: nothing to release. The
+                            // wrapper now owns the value it just installed.
+                            @field(instance.value, field.name) = new_value;
                         }
                         instance.owned_fields[field_index] = true;
                         return null;
@@ -1062,7 +1073,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                                     // Convert and pass the JavaScript arguments.
                                     inline for (0..method_arg_count) |k| {
                                         const param_type = method_info.@"fn".params[method_args_offset + k].type.?;
-                                        tuple_args[method_args_offset + k] = convertFromJs(method_env, args_raw[k], param_type) catch |err| {
+                                        tuple_args[method_args_offset + k] = Napi.from_napi_value_auto(method_env, args_raw[k], param_type) catch |err| {
                                             reportConversionFailure(method_env, err);
                                             return null;
                                         };
@@ -1099,19 +1110,32 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
             var constructor: napi.napi_value = undefined;
             const define_status = napi.napi_define_class(env, class_name.ptr, class_name.len, constructor_callback, context, prop_idx, &properties, &constructor);
             if (define_status != napi.napi_ok) {
-                return NapiError.Error.fromStatus(NapiError.Status.New(define_status));
+                releaseContext(context);
+                return NapiError.failStatus(define_status);
             }
 
+            // Weak reference: the class object stays collectible and factories
+            // resolve the constructor through it, failing cleanly if the class
+            // is already gone.
             var new_constructor_ref: napi.napi_ref = undefined;
-            const ref_status = napi.napi_create_reference(env, constructor, 1, &new_constructor_ref);
+            const ref_status = napi.napi_create_reference(env, constructor, 0, &new_constructor_ref);
             if (ref_status != napi.napi_ok) {
-                return NapiError.Error.fromStatus(NapiError.Status.New(ref_status));
-            }
-
-            if (context.constructor_ref) |previous| {
-                _ = napi.napi_delete_reference(env, previous);
+                releaseContext(context);
+                return NapiError.failStatus(ref_status);
             }
             context.constructor_ref = new_constructor_ref;
+
+            // Environments without cleanup hooks release the context from the
+            // constructor finalizer instead (see `ClassContext`). Only one of
+            // the two mechanisms is ever active, so a context is released once.
+            if (comptime !options.selectedNapiVersion().isAtLeast(.v3)) {
+                const wrap_status = napi.napi_wrap(env, constructor, context, contextFinalizer, null, null);
+                if (wrap_status != napi.napi_ok) {
+                    releaseContext(context);
+                    return NapiError.failStatus(wrap_status);
+                }
+            }
+
             return constructor;
         }
 
@@ -1123,6 +1147,45 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
             return constructor;
         }
     };
+}
+
+test "field ownership policy is decided by type shape, not by addresses" {
+    // Add `_ = @import("napi/wrapper/class.zig");` to src/unit_tests.zig to run
+    // this with `zig build test`.
+    const Wrapper = ClassWrapper(struct {
+        text: []const u8,
+        count: i32,
+    }, true);
+
+    // A type that declares `deinit` owns its fields; a field that can carry
+    // native memory therefore needs an explicit owner before it can be
+    // replaced, while plain data stays assignable.
+    try std.testing.expect(Wrapper.replacementNeedsOwner(true, []const u8));
+    try std.testing.expect(Wrapper.replacementNeedsOwner(true, struct { inner: []u8 }));
+    try std.testing.expect(!Wrapper.replacementNeedsOwner(true, i32));
+    try std.testing.expect(!Wrapper.replacementNeedsOwner(true, bool));
+    try std.testing.expect(!Wrapper.replacementNeedsOwner(true, [4]u8));
+
+    // Without `deinit` the type does not own anything, so no replacement is
+    // rejected.
+    try std.testing.expect(!Wrapper.replacementNeedsOwner(false, []const u8));
+
+    // JavaScript handles reference runtime memory, never native memory of the
+    // instance.
+    try std.testing.expect(Wrapper.typeCarriesNativeMemory([]u8));
+    try std.testing.expect(Wrapper.typeCarriesNativeMemory(?[]const u8));
+    try std.testing.expect(Wrapper.typeCarriesNativeMemory(struct { inner: [2]f32, name: []const u8 }));
+    try std.testing.expect(!Wrapper.typeCarriesNativeMemory(i32));
+    try std.testing.expect(!Wrapper.typeCarriesNativeMemory([8]u8));
+    // JavaScript handles reference runtime memory, not native instance memory.
+    try std.testing.expect(!Wrapper.typeCarriesNativeMemory(Buffer));
+    try std.testing.expect(!Wrapper.typeCarriesNativeMemory(ArrayBuffer));
+    try std.testing.expect(!Wrapper.typeCarriesNativeMemory(@import("./typedarray.zig").Uint8Array));
+
+    // A field type with `deinit` owns itself.
+    try std.testing.expect(Wrapper.fieldOwnsItself(struct {
+        pub fn deinit(_: @This()) void {}
+    }));
 }
 
 pub fn Class(comptime T: type) type {

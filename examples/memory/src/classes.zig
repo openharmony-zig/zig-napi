@@ -23,6 +23,10 @@ const MemoryClassData = struct {
 
     const Self = @This();
 
+    /// The converted constructor arguments are borrowed: the class wrapper owns
+    /// them and releases them right after `deinit` has run. A type that has to
+    /// own a resource must clone it explicitly (`napi.clone_napi_value`) or
+    /// store it in an explicitly owned field (`napi.Owned`).
     pub fn init(name: []u8, values: []f32) Self {
         return .{ .name = name, .values = values };
     }
@@ -36,13 +40,11 @@ const MemoryClassData = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        const allocator = napi.globalAllocator();
-        if (self.name.len > 0) {
-            allocator.free(self.name);
-        }
-        if (self.values.len > 0) {
-            allocator.free(self.values);
-        }
+        // Never free a borrowed input here: it is not this instance's memory.
+        // Clearing the fields also documents that nothing may be read from the
+        // value after `deinit` returned.
+        self.name = &[_]u8{};
+        self.values = &[_]f32{};
         onClassFinalized();
     }
 };
@@ -73,6 +75,8 @@ const MemoryFactoryData = struct {
 
     const Self = @This();
 
+    /// Factory arguments are borrowed exactly like constructor arguments; the
+    /// wrapper releases them when the instance is finalized.
     pub fn initWithFactory(name: []u8, values: []f32) Self {
         return .{ .name = name, .values = values };
     }
@@ -86,13 +90,8 @@ const MemoryFactoryData = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        const allocator = napi.globalAllocator();
-        if (self.name.len > 0) {
-            allocator.free(self.name);
-        }
-        if (self.values.len > 0) {
-            allocator.free(self.values);
-        }
+        self.name = &[_]u8{};
+        self.values = &[_]f32{};
         onClassFinalized();
     }
 };

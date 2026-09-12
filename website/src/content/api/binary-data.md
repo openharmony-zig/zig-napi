@@ -15,13 +15,18 @@ store. Every accessor therefore re-queries the runtime instead of trusting the
 pointer that was cached when the wrapper was created, and every wrapper offers a
 fallible variant:
 
-| Method                                     | Behavior                                                                                        |
-| ------------------------------------------ | ----------------------------------------------------------------------------------------------- |
-| `tryAsSlice()` / `tryAsConstSlice()`       | Revalidate and return the view; fails with `error.InvalidatedBackingStore` after a detach.      |
-| `asSlice()` / `asConstSlice()`             | Same view, but an invalid backing store yields an empty slice instead of a dangling pointer.     |
-| `refresh()`                                | Re-query the view and update the cached pointer and length.                                     |
-| `isValid()`                                | Whether the wrapper refers to a value of the expected JavaScript type.                          |
-| `tryFromRaw(env, raw)`                     | Fallible wrapper construction; `from_raw` keeps the infallible signature for compatibility.      |
+| Method                               | Behavior                                                                                     |
+| ------------------------------------ | -------------------------------------------------------------------------------------------- |
+| `tryAsSlice()` / `tryAsConstSlice()` | Revalidate and return the view; fails with `error.InvalidatedBackingStore` after a detach.    |
+| `asSlice()` / `asConstSlice()`       | Same view, but an invalid backing store yields an empty slice instead of a dangling pointer.  |
+| `refresh()`                          | Re-query the view and update the cached pointer and length.                                   |
+| `isValid()`                          | Whether the wrapper refers to a value of the expected JavaScript type.                        |
+| `tryFromRaw(env, raw)`               | Fallible wrapper construction; `from_raw` keeps the infallible signature for compatibility.   |
+| `from_napi_value(env, raw, T)`       | Fallible byte/element copy into `[]u8` or `[N]u8`; invalid input fails instead of zero filling. |
+
+The conversion layer of an exported function uses `tryFromRaw`, so a view that
+was detached, transferred or resized before the call is rejected while the
+arguments are converted: the native function never runs with an unusable view.
 
 Reads through `napi.DataView` (`getUint8`, `readInt`, ...) and the element
 accessors revalidate the same way. Buffers and views are never copied

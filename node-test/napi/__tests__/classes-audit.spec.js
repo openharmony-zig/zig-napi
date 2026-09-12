@@ -8,7 +8,7 @@
 //   F07 constructor rollback and setter replacement ownership
 //   F12 detached / invalidated backing stores
 const path = require("path");
-const { spawnSync } = require("node:child_process");
+const { spawnSync } = require("child_process");
 const { Worker } = require("worker_threads");
 const test = require("ava");
 
@@ -109,6 +109,105 @@ test("a setter releases the value it replaces", (t) => {
   t.is(value.count, 1, "a rejected value must not replace the current one");
 });
 
+test("borrowed init inputs stay alive and are released once", (t) => {
+  const nested = new audit.NestedClass({ text: "nested", count: 4 });
+  t.is(nested.describe(), "nested");
+  t.is(nested.total(), 4);
+
+  // A sub-slice alias of a converted input: the wrapper owns the whole input
+  // and must not release the alias separately.
+  const aliased = new audit.AliasedClass("abcdef");
+  t.is(aliased.view(), "bcdef");
+
+  // An argument the type never stores is still released by the wrapper.
+  const unused = new audit.UnusedArgClass(7, "discarded");
+  t.is(unused.read(), 7);
+
+  const before = audit.activeBytes();
+  for (let i = 0; i < 200; i++) {
+    new audit.TrackedClass("payload");
+  }
+  // The instances are alive, so their inputs are still allocated.
+  t.true(audit.activeBytes() > before);
+});
+
+test("a type with deinit refuses to replace a field it owns", (t) => {
+  const owned = new audit.DeinitOwnedClass("name", 2);
+  t.is(owned.describe(), "name");
+
+  // `name` carries native memory the type releases in `deinit`: releasing the
+  // previous value here is impossible, so the replacement is refused instead of
+  // leaking or freeing memory the wrapper does not own.
+  t.throws(
+    () => {
+      owned.name = "other";
+    },
+    { instanceOf: TypeError },
+  );
+  t.is(owned.describe(), "name");
+
+  // Plain data stays assignable.
+  owned.count = 5;
+  t.is(owned.count, 5);
+
+  // Field construction installs the value, so the wrapper owns it and may
+  // replace it.
+  const built = new audit.FieldBuiltClass("label");
+  t.is(built.label, "label");
+  built.label = "other";
+  t.is(built.label, "other");
+
+  // Explicit owner contract: the field type owns itself through `deinit`.
+  const explicit = new audit.ExplicitOwnerClass();
+  t.is(explicit.size(), 0);
+  explicit.payload = { text: "owned-by-field" };
+  t.is(explicit.size(), "owned-by-field".length);
+  explicit.payload = { text: "replaced" };
+  t.is(explicit.size(), 8);
+});
+
+test("foreign wrapped payloads are rejected without touching their memory", (t) => {
+  const binding = Object.keys(require.cache).find((key) => key.includes("classes_audit."));
+  t.truthy(binding, "the audit addon must be loaded before this test");
+  // Runs in a child process: a provenance bug aborts the process here instead
+  // of taking the test runner down with it.
+  const result = spawnSync(
+    process.execPath,
+    [
+      "-e",
+      `
+      const assert = require("assert");
+      const audit = require(${JSON.stringify(binding)});
+      const foreign = audit.foreignObject();
+      assert.throws(() => audit.WidgetClass.prototype.read.call(foreign), TypeError);
+      assert.throws(() => audit.WidgetClass.prototype.bump.call(foreign, 1), TypeError);
+      assert.throws(() => Object.getOwnPropertyDescriptor(audit.TextClass.prototype, "text").get.call(foreign), TypeError);
+      assert.throws(() => audit.WidgetClass.prototype.read.call({}), TypeError);
+      console.log("ok");
+      `,
+    ],
+    { encoding: "utf8", timeout: 30000 },
+  );
+  t.is(result.signal, null, result.stderr);
+  t.is(result.status, 0, result.stderr);
+  t.is(result.stdout.trim(), "ok");
+});
+
+test("an invalidated argument never reaches the native body", (t) => {
+  const buffer = new ArrayBuffer(16);
+  const view = new Uint8Array(buffer);
+  view[0] = 42;
+  t.is(audit.firstByte(view), 42);
+
+  audit.resetTypedArrayCalls();
+  structuredClone(buffer, { transfer: [buffer] });
+
+  // The conversion of the detached view fails, so the exported function is not
+  // called at all.
+  t.throws(() => audit.firstByte(view));
+  t.is(audit.typedArrayCalls(), 0, "the native body must not run for a rejected argument");
+});
+
 test("instances are finalized exactly once", (t) => {
   const binding = Object.keys(require.cache).find((key) => key.includes("classes_audit."));
   t.truthy(binding, "the audit addon must be loaded before this test");
@@ -126,6 +225,9 @@ test("instances are finalized exactly once", (t) => {
           audit.LabeledClass.make("hello", i);
           new audit.TrackedClass("payload");
           audit.OwnedClass.make("owned");
+          new audit.NestedClass({ text: "nested", count: i });
+          new audit.AliasedClass("abcdef");
+          new audit.UnusedArgClass(i, "discarded");
         }
       }
       const settle = async () => {
@@ -191,6 +293,39 @@ function detachedView() {
   return { buffer, view };
 }
 
+test("a worker exit releases every class reference", async (t) => {
+  const binding = Object.keys(require.cache).find((key) => key.includes("classes_audit."));
+  const workerSource = `
+    const { parentPort, workerData } = require("worker_threads");
+    const audit = require(workerData.binding);
+    const keep = [];
+    for (let i = 0; i < 20; i++) {
+      keep.push(new audit.WidgetClass(i));
+      keep.push(audit.LabeledClass.make("hello", i));
+      keep.push(new audit.TrackedClass("payload"));
+    }
+    parentPort.postMessage(keep.length);
+  `;
+
+  const base = audit.activeBytes();
+  for (let round = 0; round < 2; round++) {
+    const worker = new Worker(workerSource, { eval: true, workerData: { binding } });
+    await new Promise((resolve, reject) => {
+      worker.once("message", resolve);
+      worker.once("error", reject);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    t.is(audit.activeBytes() - base, 0, `clean worker exit round ${round}`);
+
+    // Terminating a worker must release the class contexts as well.
+    const terminating = new Worker(workerSource, { eval: true, workerData: { binding } });
+    await new Promise((resolve) => terminating.once("message", resolve));
+    await terminating.terminate();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    t.is(audit.activeBytes() - base, 0, `terminated worker round ${round}`);
+  }
+});
+
 test("typed array reads revalidate the backing store", (t) => {
   t.is(audit.firstByte(new Uint8Array([123, 1])), 123);
 
@@ -222,12 +357,15 @@ test("typed array reads revalidate the backing store", (t) => {
     0,
   );
 
-  // Converting an already detached view again is rejected up front.
+  // Converting an already detached view again is rejected up front, by the
+  // conversion layer, before the exported function runs.
   const rejected = detachedView();
   structuredClone(rejected.buffer, { transfer: [rejected.buffer] });
+  audit.resetTypedArrayCalls();
   t.throws(() => audit.firstByte(rejected.view), {
     code: "InvalidatedBackingStore",
   });
+  t.is(audit.typedArrayCalls(), 0);
 });
 
 test("data view reads revalidate the backing store", (t) => {

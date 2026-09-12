@@ -69,18 +69,13 @@ pub const Buffer = struct {
 
     /// Convert from napi_value to the specified type ([]u8 or [N]u8).
     ///
-    /// The infallible signature is kept for source compatibility: the N-API
-    /// status is validated, a value that is not a Buffer throws a JavaScript
-    /// `TypeError`, and the returned value is empty (slices) or zero filled
-    /// (fixed arrays) in that case. Use `tryFromRaw` plus `tryAsSlice` when the
-    /// failure has to be observable.
-    pub fn from_napi_value(env: napi.napi_env, raw: napi.napi_value, comptime T: type) T {
+    /// Fails when the value is not a Buffer. A value that cannot be read is
+    /// never reported as zero filled data: silently returning zeros made an
+    /// invalid input look like a successful conversion.
+    pub fn from_napi_value(env: napi.napi_env, raw: napi.napi_value, comptime T: type) !T {
         const infos = @typeInfo(T);
 
-        const buffer = Buffer.tryFromRaw(env, raw) catch |err| {
-            arraybuffer_mod.recordBinaryFailure("Buffer expected", err);
-            return std.mem.zeroes(T);
-        };
+        const buffer = try Buffer.tryFromRaw(env, raw);
         const source = buffer.data[0..buffer.len];
 
         switch (infos) {
