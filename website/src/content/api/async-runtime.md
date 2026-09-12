@@ -80,15 +80,15 @@ When an exported function returns `AsyncWithEvents`, declaration generation adds
 
 Async descriptors expose:
 
-| Method                                                 | Use                                                        |
-| ------------------------------------------------------ | ---------------------------------------------------------- |
-| `from(input, run_fn)`                                  | Create a descriptor from input data and a runner function. |
+| Method                                                 | Use                                                              |
+| ------------------------------------------------------ | ---------------------------------------------------------------- |
+| `from(input, run_fn)`                                  | Create a descriptor from input data and a runner function.       |
 | `tryFrom(input, run_fn)`                               | Fallible creation; propagate allocation/clone errors with `try`. |
-| `schedule(env)`                                        | Schedule without listener or abort signal.                 |
-| `scheduleWithListener(env, listener)`                  | Schedule with a JavaScript event listener.                 |
-| `scheduleWithSignal(env, signal)`                      | Schedule with cancellation.                                |
-| `scheduleWithListenerAndSignal(env, listener, signal)` | Schedule with both.                                        |
-| `deinit()`                                             | Destroy an unscheduled descriptor.                         |
+| `schedule(env)`                                        | Schedule without listener or abort signal.                       |
+| `scheduleWithListener(env, listener)`                  | Schedule with a JavaScript event listener.                       |
+| `scheduleWithSignal(env, signal)`                      | Schedule with cancellation.                                      |
+| `scheduleWithListenerAndSignal(env, listener, signal)` | Schedule with both.                                              |
+| `deinit()`                                             | Destroy an unscheduled descriptor.                               |
 
 Exported functions usually return the descriptor instead of calling `schedule` manually. The function wrapper schedules it and returns the Promise.
 

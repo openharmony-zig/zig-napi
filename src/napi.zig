@@ -35,6 +35,7 @@ pub const BigInt = value.BigInt;
 pub const Null = value.Null;
 pub const Undefined = value.Undefined;
 pub const Promise = value.Promise;
+pub const PromiseValue = value.PromiseValue;
 pub const Bool = value.Bool;
 pub const Array = value.Array;
 

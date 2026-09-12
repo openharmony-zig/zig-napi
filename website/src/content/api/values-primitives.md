@@ -17,7 +17,7 @@ napi.NapiValue
 Use it when the public API needs to pass a value through without committing to a narrower wrapper.
 
 ```zig
-pub fn read(value: napi.NapiValue) i32 {
+pub fn read(value: napi.NapiValue) !i32 {
     return value.As(i32);
 }
 ```
@@ -39,6 +39,10 @@ pub fn read(value: napi.NapiValue) i32 {
 
 Use `BigInt` for `i128`, `u128`, and values that should not be represented as JavaScript numbers.
 
+Integer inputs reject fractions, non-finite numbers and out-of-range values with
+JavaScript errors. `u64`/`usize` outputs use a double, without narrowing to `i64`;
+use BigInt when exact values above `2^53 - 1` matter.
+
 ## `String`
 
 `String.New(env, bytes)` creates a UTF-8 JavaScript string.
@@ -52,9 +56,14 @@ Use `BigInt` for `i128`, `u128`, and values that should not be represented as Ja
 
 Automatic conversion supports UTF-8 and UTF-16 string-like Zig targets.
 
+The length/copy methods are fallible (`try value.copyUtf8()`, for example).
+Manual copies must be released with the allocator that created them.
+
 ## `BigInt`
 
-`BigInt.from_napi_value(env, raw, T)` supports `i64` and `u64` extraction. `BigInt.New` is used by the conversion layer for `i128` and `u128` returns. Manual BigInt construction should pass an `i128` or `u128` value.
+`BigInt.from_napi_value(env, raw, T)` is fallible and supports `i64` and `u64`
+extraction. The conversion layer uses checked `BigInt.create` for `i128` and
+`u128` returns. `create` also accepts integer widths up to 64 bits.
 
 ## Null And Undefined
 
@@ -75,3 +84,8 @@ const undefined_value = napi.Undefined.New(env);
 ```
 
 For regular exported functions, returning ordinary Zig values is usually clearer than constructing wrappers manually.
+
+For recoverable failures, prefer `try Number.create`, `try Bool.create`,
+`try BigInt.create`, `try String.createUtf8`/`createUtf16`, `try Null.create`
+and `try Undefined.create`. Their legacy `New` forms keep their signatures and
+panic if construction fails; generated conversions use the fallible forms.

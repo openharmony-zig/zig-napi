@@ -8,7 +8,8 @@ const { parentPort, workerData } = require("worker_threads");
 
 // `workerData.loader` lets the spec run this file from a child process whose
 // working directory is not the repository; the default keeps direct use simple.
-const loader = (workerData && workerData.loader) || path.join(__dirname, "..", "..", "load-addon.js");
+const loader =
+  (workerData && workerData.loader) || path.join(__dirname, "..", "..", "load-addon.js");
 const native = require(loader)("async_audit");
 
 async function main() {

@@ -214,7 +214,7 @@ fn valueMatchesType(env: napi.napi_env, raw: napi.napi_value, comptime T: type) 
         },
         NapiValue.Bool => return (try napiTypeOf(env, raw)) == napi.napi_boolean,
         NapiValue.Object => return isPlainObjectValue(env, raw),
-        NapiValue.Promise => return isPromiseValue(env, raw),
+        NapiValue.Promise, NapiValue.PromiseValue => return isPromiseValue(env, raw),
         NapiValue.Array => return (try isArrayValue(env, raw)) or (try isTypedArrayValue(env, raw)),
         NapiValue.Undefined => return (try napiTypeOf(env, raw)) == napi.napi_undefined,
         NapiValue.Null => return (try napiTypeOf(env, raw)) == napi.napi_null,
@@ -975,7 +975,7 @@ pub const Napi = struct {
         }
 
         switch (T) {
-            NapiValue.NapiValue, NapiValue.BigInt, NapiValue.Number, NapiValue.String, NapiValue.Object, NapiValue.Promise, NapiValue.Array, NapiValue.Undefined, NapiValue.Null, Buffer, ArrayBuffer, DataView => {
+            NapiValue.NapiValue, NapiValue.BigInt, NapiValue.Number, NapiValue.String, NapiValue.Object, NapiValue.Promise, NapiValue.PromiseValue, NapiValue.Array, NapiValue.Undefined, NapiValue.Null, Buffer, ArrayBuffer, DataView => {
                 return wrapperFromNapiValue(T, env, raw);
             },
             else => {
@@ -1167,7 +1167,7 @@ pub const Napi = struct {
         }
 
         switch (value_type) {
-            NapiValue.NapiValue, NapiValue.BigInt, NapiValue.Bool, NapiValue.Number, NapiValue.String, NapiValue.Object, NapiValue.Promise, NapiValue.Array, NapiValue.Undefined, NapiValue.Null, Buffer, ArrayBuffer, DataView => {
+            NapiValue.NapiValue, NapiValue.BigInt, NapiValue.Bool, NapiValue.Number, NapiValue.String, NapiValue.Object, NapiValue.Promise, NapiValue.PromiseValue, NapiValue.Array, NapiValue.Undefined, NapiValue.Null, Buffer, ArrayBuffer, DataView => {
                 return value.raw;
             },
             // If value is already a napi_value, return it directly

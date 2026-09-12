@@ -26,6 +26,11 @@ allocator, but Zig does not enforce move-only types: copying a wrapper does not
 create a second owner. Do not release or transfer the same allocation twice.
 An owned aggregate must not contain overlapping owning slices.
 
+The same rule applies to class methods: return a borrow of an instance field,
+not a new `Owned` wrapper around memory the instance still owns. Constructors
+and factories must return a fully initialized `T`; `undefined` fields are not
+valid data and are not repaired by the wrapper.
+
 ## `Class`
 
 ```zig
@@ -77,7 +82,7 @@ pub const CounterClass = napi.Class(Counter);
   is never unwrapped, so `Class.twice(3)` behaves like a plain function.
 - A static method returning `T` or `*T` is a factory. The returned value is moved
   into a real instance of the class (correct prototype, wrapped exactly once)
-  and user `init` is *not* executed again. `*T` moves the pointee; the
+  and user `init` is _not_ executed again. `*T` moves the pointee; the
   allocation holding it stays owned by the factory.
 - Each `napi_env` owns its own constructor reference, so the main thread and
   worker threads can construct instances and call factories concurrently. The
@@ -91,7 +96,7 @@ pub const CounterClass = napi.Class(Counter);
 - Field construction (`Class(T)` without `init`) transfers ownership of the
   converted constructor arguments to the fields; a failure releases the
   arguments that were converted before the failing one.
-- Construction through `init` or a factory *borrows* its converted inputs. The
+- Construction through `init` or a factory _borrows_ its converted inputs. The
   wrapper owns them, keeps them alive for the lifetime of the instance and
   releases them exactly once **after** `deinit` has run:
   - storing one of them in a field is supported;

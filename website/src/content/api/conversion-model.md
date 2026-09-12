@@ -59,34 +59,46 @@ Regular addon code usually only needs `from_raw` for low-level N-API interop.
 Prefer typed function parameters for normal exports so cleanup and error mapping
 stay in the generated conversion layer.
 
+`Napi.from_napi_value*`, `NapiValue.As`, `Object.Get`/`GetNamed`/`Has`,
+`Array.Get` and string copy/length APIs now return error unions. Migrate manual
+callers with `try` or explicit `catch`. Binary wrappers expose `tryFromRaw` and
+`tryAsSlice` for checked construction/access; generated inputs use checked paths.
+
 ## Supported Return Shapes
 
 The return conversion supports ordinary Zig values and wrapper values.
 
-| Zig return                                   | JavaScript output                         |
-| -------------------------------------------- | ----------------------------------------- |
-| `void`                                       | `undefined`                               |
-| `bool`, numbers, strings                     | primitive JavaScript values               |
-| `i128` / `u128`                              | bigint                                    |
-| `?T`                                         | `T` or `undefined`                        |
-| struct                                       | object                                    |
-| tuple, array, slice, `std.ArrayList(T)`      | array                                     |
-| enum                                         | numeric or string enum value              |
-| union(enum)                                  | payload of the active field               |
-| `napi.Result(T)`                             | payload or thrown JavaScript error        |
-| Zig error union `!T`                         | payload or thrown JavaScript error        |
-| `napi.Async(T, runtime)`                     | `Promise<T>`                              |
-| `napi.AsyncWithEvents(T, Event, runtime)`    | `Promise<T>` plus optional event callback |
-| `napi.Promise`                               | Promise                                   |
-| `napi.Function`                              | JavaScript function                       |
-| `napi.Class(T)` / `napi.ClassWithoutInit(T)` | JavaScript class constructor              |
-| `napi.External(T)`                           | branded external object                   |
+| Zig return                                   | JavaScript output                                      |
+| -------------------------------------------- | ------------------------------------------------------ |
+| `void`                                       | `undefined`                                            |
+| `napi.Owned(T)`                              | same as `T`; release native ownership after conversion |
+| `bool`, numbers, strings                     | primitive JavaScript values                            |
+| `i128` / `u128`                              | bigint                                                 |
+| `?T`                                         | `T` or `undefined`                                     |
+| struct                                       | object                                                 |
+| tuple, array, slice, `std.ArrayList(T)`      | array                                                  |
+| enum                                         | numeric or string enum value                           |
+| union(enum)                                  | payload of the active field                            |
+| `napi.Result(T)`                             | payload or thrown JavaScript error                     |
+| Zig error union `!T`                         | payload or thrown JavaScript error                     |
+| `napi.Async(T, runtime)`                     | `Promise<T>`                                           |
+| `napi.AsyncWithEvents(T, Event, runtime)`    | `Promise<T>` plus optional event callback              |
+| `napi.Promise`                               | Promise                                                |
+| `napi.Function`                              | JavaScript function                                    |
+| `napi.Class(T)` / `napi.ClassWithoutInit(T)` | JavaScript class constructor                           |
+| `napi.External(T)`                           | branded external object                                |
 
 ## Allocation And Cleanup
 
 Conversions that allocate Zig memory use `napi.globalAllocator()`. String, array, slice, object, function, external, and async conversions are cleaned up by the conversion layer when the wrapper owns the temporary value.
 
 For addon-wide allocator control, export `pub const napi_allocator` from the addon root. For narrow tests or scoped operations, use `setOperationAllocator` and `resetOperationAllocator`.
+
+Converted arguments are call-scoped owned copies. Plain return values are
+borrowed and are not freed; return native heap allocations in `napi.Owned(T)`.
+Async captures clone native inputs and dispose owned results explicitly. A custom
+`deinit` must release the allocations its value actually owns; it must not free
+borrowed literals or instance-retained constructor arguments. See [Ownership](./classes-ownership).
 
 ## TypeScript Output
 

@@ -1,3 +1,4 @@
+const detachArrayBuffer = require("../../transfer-arraybuffer");
 const test = require("ava");
 const path = require("path");
 
@@ -336,7 +337,7 @@ test("detached binary inputs are rejected before the native body runs", (t) => {
   t.is(bindings.firstByte(view), 123);
 
   // Detach the backing store through a structured clone transfer.
-  structuredClone(buffer, { transfer: [buffer] });
+  detachArrayBuffer(buffer);
 
   t.throws(() => bindings.firstByte(view));
   t.is(bindings.nativeCallCount(), 1);

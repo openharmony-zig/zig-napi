@@ -1,3 +1,4 @@
+const detachArrayBuffer = require("../../transfer-arraybuffer");
 // Regression coverage for the class wrapper and the binary wrappers.
 //
 // The addon is built from `napi/src/classes_audit.zig` with a counting
@@ -200,7 +201,7 @@ test("an invalidated argument never reaches the native body", (t) => {
   t.is(audit.firstByte(view), 42);
 
   audit.resetTypedArrayCalls();
-  structuredClone(buffer, { transfer: [buffer] });
+  detachArrayBuffer(buffer);
 
   // The conversion of the detached view fails, so the exported function is not
   // called at all.
@@ -340,7 +341,7 @@ test("typed array reads revalidate the backing store", (t) => {
   t.throws(
     () =>
       audit.firstByteAfterCallback(detached.view, () => {
-        structuredClone(detached.buffer, { transfer: [detached.buffer] });
+        detachArrayBuffer(detached.buffer);
         return 0;
       }),
     { message: /InvalidatedBackingStore/ },
@@ -351,7 +352,7 @@ test("typed array reads revalidate the backing store", (t) => {
   const unchecked = detachedView();
   t.is(
     audit.firstByteUncheckedAfterCallback(unchecked.view, () => {
-      structuredClone(unchecked.buffer, { transfer: [unchecked.buffer] });
+      detachArrayBuffer(unchecked.buffer);
       return 0;
     }),
     0,
@@ -360,7 +361,7 @@ test("typed array reads revalidate the backing store", (t) => {
   // Converting an already detached view again is rejected up front, by the
   // conversion layer, before the exported function runs.
   const rejected = detachedView();
-  structuredClone(rejected.buffer, { transfer: [rejected.buffer] });
+  detachArrayBuffer(rejected.buffer);
   audit.resetTypedArrayCalls();
   t.throws(() => audit.firstByte(rejected.view), {
     code: "InvalidatedBackingStore",
@@ -380,7 +381,7 @@ test("data view reads revalidate the backing store", (t) => {
   t.throws(
     () =>
       audit.dataViewByteAfterCallback(view, () => {
-        structuredClone(buffer, { transfer: [buffer] });
+        detachArrayBuffer(buffer);
         return 0;
       }),
     { message: /InvalidatedBackingStore/ },
@@ -400,7 +401,7 @@ test("buffer and array buffer reads revalidate the backing store", (t) => {
   t.throws(
     () =>
       audit.bufferFirstByteAfterCallback(sharedBuffer, () => {
-        structuredClone(shared, { transfer: [shared] });
+        detachArrayBuffer(shared);
         return 0;
       }),
     { message: /InvalidatedBackingStore/ },
@@ -415,7 +416,7 @@ test("buffer and array buffer reads revalidate the backing store", (t) => {
   t.throws(
     () =>
       audit.arrayBufferFirstByteAfterCallback(arrayBuffer, () => {
-        structuredClone(arrayBuffer, { transfer: [arrayBuffer] });
+        detachArrayBuffer(arrayBuffer);
         return 0;
       }),
     { message: /InvalidatedBackingStore/ },

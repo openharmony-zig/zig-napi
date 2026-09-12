@@ -15,13 +15,13 @@ store. Every accessor therefore re-queries the runtime instead of trusting the
 pointer that was cached when the wrapper was created, and every wrapper offers a
 fallible variant:
 
-| Method                               | Behavior                                                                                     |
-| ------------------------------------ | -------------------------------------------------------------------------------------------- |
-| `tryAsSlice()` / `tryAsConstSlice()` | Revalidate and return the view; fails with `error.InvalidatedBackingStore` after a detach.    |
-| `asSlice()` / `asConstSlice()`       | Same view, but an invalid backing store yields an empty slice instead of a dangling pointer.  |
-| `refresh()`                          | Re-query the view and update the cached pointer and length.                                   |
-| `isValid()`                          | Whether the wrapper refers to a value of the expected JavaScript type.                        |
-| `tryFromRaw(env, raw)`               | Fallible wrapper construction; `from_raw` keeps the infallible signature for compatibility.   |
+| Method                               | Behavior                                                                                        |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| `tryAsSlice()` / `tryAsConstSlice()` | Revalidate and return the view; fails with `error.InvalidatedBackingStore` after a detach.      |
+| `asSlice()` / `asConstSlice()`       | Same view, but an invalid backing store yields an empty slice instead of a dangling pointer.    |
+| `refresh()`                          | Re-query the view and update the cached pointer and length.                                     |
+| `isValid()`                          | Whether the wrapper refers to a value of the expected JavaScript type.                          |
+| `tryFromRaw(env, raw)`               | Fallible wrapper construction; `from_raw` keeps the infallible signature for compatibility.     |
 | `from_napi_value(env, raw, T)`       | Fallible byte/element copy into `[]u8` or `[N]u8`; invalid input fails instead of zero filling. |
 
 The conversion layer of an exported function uses `tryFromRaw`, so a view that
@@ -99,12 +99,12 @@ Typed arrays can be created from new memory, copied memory, external memory, or 
 | `TypedArray(T).fromArrayBuffer(env, arraybuffer, len, byte_offset)` | Create a view over an existing ArrayBuffer.                |
 | `TypedArray(T).from_raw(env, raw)`                                  | Wrap an existing TypedArray.                               |
 
-| Method                         | Use                                                     |
-| ------------------------------ | ------------------------------------------------------- |
-| `asSlice()` / `asConstSlice()` | Access typed elements.                                  |
-| `tryAsSlice()`                 | Fail instead of returning an invalidated view.           |
-| `length()`                     | Element length.                                          |
-| `tryByteLength()` / `byteLength()` | Byte length, with checked arithmetic.               |
+| Method                             | Use                                            |
+| ---------------------------------- | ---------------------------------------------- |
+| `asSlice()` / `asConstSlice()`     | Access typed elements.                         |
+| `tryAsSlice()`                     | Fail instead of returning an invalidated view. |
+| `length()`                         | Element length.                                |
+| `tryByteLength()` / `byteLength()` | Byte length, with checked arithmetic.          |
 
 Aliases are exported for common element types:
 
@@ -136,18 +136,18 @@ napi.DataView
 | `DataView.fromArrayBuffer(env, arraybuffer, byte_offset, byte_length)` | Create a view over an existing ArrayBuffer.         |
 | `DataView.from_raw(env, raw)`                                          | Wrap an existing DataView.                          |
 
-| Method                                                                                | Use                            |
-| ------------------------------------------------------------------------------------- | ------------------------------ |
-| `asSlice()` / `asConstSlice()`                                                        | Access bytes.                  |
+| Method                                                                                | Use                                            |
+| ------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| `asSlice()` / `asConstSlice()`                                                        | Access bytes.                                  |
 | `tryAsSlice()`                                                                        | Fail instead of returning an invalidated view. |
-| `byteLength()`                                                                        | View byte length.              |
-| `readInt(T, offset, little_endian)` / `writeInt(T, offset, value, little_endian)`     | Generic integer access.        |
-| `readFloat(T, offset, little_endian)` / `writeFloat(T, offset, value, little_endian)` | Generic floating-point access. |
-| `getInt8` / `getUint8`                                                                | 8-bit reads.                   |
-| `getInt16` / `getUint16` / `getInt32` / `getUint32`                                   | Endian-aware integer reads.    |
-| `getBigInt64` / `getBigUint64`                                                        | 64-bit integer reads.          |
-| `getFloat32` / `getFloat64`                                                           | Endian-aware float reads.      |
-| `setInt8` / `setUint8`                                                                | 8-bit writes.                  |
-| `setInt16` / `setUint16` / `setInt32` / `setUint32`                                   | Endian-aware integer writes.   |
-| `setBigInt64` / `setBigUint64`                                                        | 64-bit integer writes.         |
-| `setFloat32` / `setFloat64`                                                           | Endian-aware float writes.     |
+| `byteLength()`                                                                        | View byte length.                              |
+| `readInt(T, offset, little_endian)` / `writeInt(T, offset, value, little_endian)`     | Generic integer access.                        |
+| `readFloat(T, offset, little_endian)` / `writeFloat(T, offset, value, little_endian)` | Generic floating-point access.                 |
+| `getInt8` / `getUint8`                                                                | 8-bit reads.                                   |
+| `getInt16` / `getUint16` / `getInt32` / `getUint32`                                   | Endian-aware integer reads.                    |
+| `getBigInt64` / `getBigUint64`                                                        | 64-bit integer reads.                          |
+| `getFloat32` / `getFloat64`                                                           | Endian-aware float reads.                      |
+| `setInt8` / `setUint8`                                                                | 8-bit writes.                                  |
+| `setInt16` / `setUint16` / `setInt32` / `setUint32`                                   | Endian-aware integer writes.                   |
+| `setBigInt64` / `setBigUint64`                                                        | 64-bit integer writes.                         |
+| `setFloat32` / `setFloat64`                                                           | Endian-aware float writes.                     |

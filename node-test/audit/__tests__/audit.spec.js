@@ -4,6 +4,8 @@ const { spawnSync } = require("child_process");
 const loadPath = path.join(__dirname, "..", "..", "load-addon.js");
 const a = require(loadPath)("audit");
 const existing = require(loadPath)("example");
+const detachArrayBuffer = require("../../transfer-arraybuffer");
+const nativeOnlyTest = process.env.NAPI_RS_FORCE_WASI ? test.skip : test;
 
 function child(body, flags = []) {
   const prelude = `const a=require(${JSON.stringify(loadPath)})("audit");`;
@@ -17,6 +19,11 @@ function child(body, flags = []) {
 test("ordinary string and callback return types are checked", (t) => {
   t.throws(() => a.string(123));
   t.throws(() => a.string());
+  t.throws(() => a.genericNumber("bad"));
+  t.is(a.genericNumber(42), 42);
+  const promise = Promise.resolve(7);
+  t.is(a.borrowedPromise(promise), promise);
+  t.throws(() => a.borrowedPromise({}));
   t.throws(() => existing.call0(() => "oops"));
   t.is(a.string("ok"), "ok");
   t.is(
@@ -28,30 +35,44 @@ test("ordinary string and callback return types are checked", (t) => {
 test("foreign native payloads are rejected before dereference", (t) => {
   const result = child(`const assert=require('assert');const foreign=a.foreignObject();
     assert.throws(()=>a.unwrapForeign(foreign));
+    assert.throws(()=>a.acceptExternal(a.foreignExternal()));
     assert.throws(()=>a.Class.prototype.read.call(foreign));`);
   t.is(result.signal, null, result.stderr);
   t.is(result.status, 0, result.stderr);
 });
 
+nativeOnlyTest("last threaded environment can retire and restart its runtime repeatedly", (t) => {
+  const result = child(`const {Worker}=require('worker_threads');
+    const source=${JSON.stringify(`const {parentPort}=require('worker_threads');
+      const a=require(${JSON.stringify(loadPath)})('audit');
+      a.asyncError().catch(()=>parentPort.postMessage('ready'));`)};
+    (async()=>{for(let i=0;i<20;i++){
+      const worker=new Worker(source,{eval:true});
+      await new Promise((resolve,reject)=>{worker.once('error',reject);worker.once('message',resolve)});
+      await worker.terminate();
+    }})().catch(e=>{console.error(e);process.exitCode=1});`);
+  t.is(result.signal, null, result.stderr);
+  t.is(result.status, 0, result.stderr);
+});
+
 test("binary views revalidate their backing store after JavaScript reentry", (t) => {
-  if (typeof structuredClone !== "function") return t.pass();
-  const array = new Uint8Array([42]);
-  t.throws(() =>
-    a.typedAfterCallback(array, () => structuredClone(array.buffer, { transfer: [array.buffer] })),
+  t.false(a.emptyBufferIsDetached());
+  t.is(
+    a.typedAfterCallback(new Uint8Array(0), () => {}),
+    0,
   );
+  const array = new Uint8Array([42]);
+  t.throws(() => a.typedAfterCallback(array, () => detachArrayBuffer(array.buffer)));
   const view = new DataView(new ArrayBuffer(1));
   const backing = view.buffer;
-  t.throws(() =>
-    a.dataAfterCallback(view, () => structuredClone(backing, { transfer: [backing] })),
-  );
+  t.throws(() => a.dataAfterCallback(view, () => detachArrayBuffer(backing)));
   t.is(
     a.typedAfterCallback(new Uint8Array([7]), () => {}),
     7,
   );
 });
 
-test("example async heap results and parallel reads release owned allocations", (t) => {
-  if (process.env.NAPI_RS_FORCE_WASI) return t.pass();
+nativeOnlyTest("example async heap results and parallel reads release owned allocations", (t) => {
   const result = child(
     `
     const fs=require('fs'),path=require('path'),os=require('os'),assert=require('assert');
@@ -139,11 +160,48 @@ test("owned synchronous return allocations are reclaimed", (t) => {
 });
 
 test("class factories, static methods and value receivers preserve values", (t) => {
+  t.throws(() => a.Class.call({}, 1), { instanceOf: TypeError });
   t.is(a.Class.twice(3), 6);
   t.is(a.Class.make(42).value, 42);
   t.is(a.NoInit.make(42).value, 42);
   t.is(new a.Class(7).read(), 7);
   t.throws(() => new a.NoInit());
+});
+
+test("class returns and setters preserve explicit ownership and allocator origin", (t) => {
+  const state = new a.Class(1);
+  const text = new a.TextClass("abc", 1);
+  const before = a.activeBytes();
+  for (let i = 0; i < 100; i++) t.is(state.allocatedText(), "class-owned");
+  t.is(a.activeBytes(), before);
+  const alternateBefore = a.alternateBytes();
+  a.useAlternateAllocator(true);
+  try {
+    text.text = "def";
+  } finally {
+    a.useAlternateAllocator(false);
+  }
+  t.is(a.alternateBytes(), alternateBefore);
+  t.is(a.activeBytes(), before);
+  t.is(text.text, "def");
+});
+
+test("class constructor and factory allocation failures roll back borrowed inputs once", (t) => {
+  if (process.env.NAPI_RS_FORCE_WASI) return t.pass();
+  const result = child(
+    `const assert=require('assert');
+    const collect=async()=>{for(let i=0;i<5;i++){global.gc();await new Promise(r=>setImmediate(r));}};
+    (async()=>{await collect();const before=a.activeBytes();
+      for(let cycle=0;cycle<20;cycle++)for(let i=0;i<5;i++){
+        a.setAllocationFailure(i);try{new a.BorrowedClass('abc');}catch{}finally{a.useAlternateAllocator(false);}
+        a.setAllocationFailure(i);try{a.BorrowedClass.make('abc');}catch{}finally{a.useAlternateAllocator(false);}
+      }
+      await collect();assert.strictEqual(a.activeBytes(),before);
+    })().catch(e=>{console.error(e);process.exitCode=1});`,
+    ["--expose-gc"],
+  );
+  t.is(result.signal, null, result.stderr);
+  t.is(result.status, 0, result.stderr);
 });
 
 test("class setter and failed constructor do not retain replaced fields", (t) => {

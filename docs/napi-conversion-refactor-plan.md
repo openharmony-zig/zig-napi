@@ -1,5 +1,9 @@
 # N-API Value Conversion Refactor Plan
 
+Historical plan. The conversion and ownership migration was implemented on
+2026-09-12; see [repair acceptance and migration notes](audit-repair-2026-09-12.md).
+The background below describes the pre-repair implementation.
+
 ## Background
 
 Current conversion APIs such as `Napi.from_napi_value_auto(...)` return `T` directly and use `NapiError.last_error` as an out-of-band error channel. This can produce unsafe behavior: a failed conversion may still return a placeholder/default value, and callers must remember to check `last_error` before storing or cleaning up the converted value.

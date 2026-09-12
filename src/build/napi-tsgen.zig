@@ -1030,6 +1030,7 @@ fn isIdentifierChar(ch: u8) bool {
 }
 
 fn emitType(state: *State, comptime T: type) ![]const u8 {
+    if (T == napi.PromiseValue) return "Promise<unknown>";
     if (comptime @typeInfo(T) == .@"struct" and @hasDecl(T, "is_napi_owned")) {
         return emitType(state, T.owned_payload_type);
     }
@@ -1833,6 +1834,7 @@ fn emitSourceTypeExpr(state: *State, file_path: []const u8, type_expr: []const u
     }
 
     if (std.mem.eql(u8, trimmed, "napi.Promise")) return "Promise<void>";
+    if (std.mem.eql(u8, trimmed, "napi.PromiseValue")) return "Promise<unknown>";
     if (std.mem.eql(u8, trimmed, "napi.Buffer")) return "Buffer";
     if (std.mem.eql(u8, trimmed, "napi.ArrayBuffer")) return "ArrayBuffer";
     if (std.mem.eql(u8, trimmed, "napi.DataView")) return "DataView";

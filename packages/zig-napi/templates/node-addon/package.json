@@ -45,8 +45,8 @@
     "emnapi": "^1.11.1"
   },
   "devDependencies": {
-    "ava": "^8.0.0",
-    "@ohos-rs/zig-cli": "__CLI_VERSION__"
+    "@ohos-rs/zig-cli": "__CLI_VERSION__",
+    "ava": "^8.0.0"
   },
   "napi": {
     "binaryName": "__ADDON_NAME__",

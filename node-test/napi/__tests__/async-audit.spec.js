@@ -23,8 +23,10 @@ function workerThreads() {
   return require("worker_threads");
 }
 
-const isWasi = process.env.NAPI_RS_FORCE_WASI === "true" || process.env.NAPI_RS_FORCE_WASI === "error";
+const isWasi =
+  process.env.NAPI_RS_FORCE_WASI === "true" || process.env.NAPI_RS_FORCE_WASI === "error";
 const nativeOnlyTest = isWasi ? test.skip : test;
+const abortTest = typeof AbortController === "undefined" ? test.skip : test;
 
 function runIsolated(body, extraArgs = []) {
   return childProcess().spawnSync(
@@ -56,7 +58,11 @@ async function settlesWithin(promise, ms) {
     },
     (error) => {
       settled = true;
-      return { state: "rejected", message: error && error.message ? error.message : String(error), error };
+      return {
+        state: "rejected",
+        message: error && error.message ? error.message : String(error),
+        error,
+      };
     },
   );
   const timeout = delay(ms).then(() => (settled ? null : { state: "timeout" }));
@@ -104,7 +110,10 @@ test("borrowed results stay owned by the runner until it releases them", async (
   t.true(native.activeBytes() > before, "borrowed result stays alive");
   native.releaseBorrowedResult();
   const leaked = native.activeBytes() - before;
-  t.true(leaked <= settlementStateSize(), `borrowed result was not released by its owner: ${leaked} bytes`);
+  t.true(
+    leaked <= settlementStateSize(),
+    `borrowed result was not released by its owner: ${leaked} bytes`,
+  );
 });
 
 test("async error Result rejects with its own error", async (t) => {
@@ -221,15 +230,21 @@ nativeOnlyTest("the former crashes stay controlled in a fresh process", (t) => {
   t.is(resolved.status, 0);
   t.true(resolved.stdout.includes("caught:"));
 
-  const rejected = runIsolated("try{a.rejectAfterResolve()}catch(e){console.log('caught:'+e.message)}");
+  const rejected = runIsolated(
+    "try{a.rejectAfterResolve()}catch(e){console.log('caught:'+e.message)}",
+  );
   t.is(rejected.status, 0);
   t.true(rejected.stdout.includes("caught:"));
 
-  const foreign = runIsolated("try{a.resolveForeign(Promise.resolve(1))}catch(e){console.log('caught:'+e.message)}");
+  const foreign = runIsolated(
+    "try{a.resolveForeign(Promise.resolve(1))}catch(e){console.log('caught:'+e.message)}",
+  );
   t.is(foreign.status, 0);
   t.true(foreign.stdout.includes("caught:"));
 
-  const wrapped = runIsolated("try{a.bindAndHold({})}catch(e){console.log('caught:'+e.name+':'+e.message)}");
+  const wrapped = runIsolated(
+    "try{a.bindAndHold({})}catch(e){console.log('caught:'+e.name+':'+e.message)}",
+  );
   t.is(wrapped.status, 0);
   t.true(wrapped.stdout.includes("caught:TypeError"));
 });
@@ -251,7 +266,7 @@ test("worker promise resolves with its result", async (t) => {
   t.is(await native.workerValue(41), 42);
 });
 
-test("AbortSignal keeps foreign onabort handlers and other listeners", async (t) => {
+abortTest("AbortSignal keeps foreign onabort handlers and other listeners", async (t) => {
   native.resetAbortCallbackCount();
   const controller = new AbortController();
   let foreign = 0;
@@ -273,7 +288,7 @@ test("AbortSignal keeps foreign onabort handlers and other listeners", async (t)
   t.is(native.abortCallbackCount(), 1);
 });
 
-test("multiple native registrations on one signal all fire", async (t) => {
+abortTest("multiple native registrations on one signal all fire", async (t) => {
   native.resetAbortCallbackCount();
   const controller = new AbortController();
   await native.bindAndHold(controller.signal);
@@ -335,6 +350,7 @@ test("signal-like objects without listener methods are rolled back", async (t) =
   }
   native.releaseHeldSignal();
 
+  if (typeof AbortController === "undefined") return;
   const before = native.activeBytes();
   const controller = new AbortController();
   for (let index = 0; index < 200; index += 1) {
@@ -347,7 +363,7 @@ test("signal-like objects without listener methods are rolled back", async (t) =
   t.true(leaked < 200 * 1024, `bind/release cycle grew by ${leaked} bytes`);
 });
 
-test("pre-aborted and mid-flight async aborts reject with AbortError", async (t) => {
+abortTest("pre-aborted and mid-flight async aborts reject with AbortError", async (t) => {
   const preAborted = new AbortController();
   preAborted.abort();
   const pre = await settlesWithin(native.asyncAbortable(4096, preAborted.signal), 3000);
@@ -363,7 +379,7 @@ test("pre-aborted and mid-flight async aborts reject with AbortError", async (t)
   t.true(String(mid.message).includes("AbortError"));
 });
 
-test("one signal can drive several tasks without cross-talk", async (t) => {
+abortTest("one signal can drive several tasks without cross-talk", async (t) => {
   const controller = new AbortController();
   const first = native.asyncMultiSignalTask(200000000, controller.signal);
   const second = native.asyncMultiSignalTask(200000000, controller.signal);

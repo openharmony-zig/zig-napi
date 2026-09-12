@@ -1,4 +1,7 @@
 test {
+    _ = @import("napi/wrapper/class.zig");
+    _ = @import("napi/util/async_ownership.zig");
+    _ = @import("napi/value/promise.zig");
     _ = @import("napi/util/allocator.zig");
     _ = @import("napi/wrapper/error.zig");
     _ = @import("napi/util/payload_registry.zig");

@@ -33,12 +33,18 @@ const RuntimeEnv = struct {
 };
 
 var runtime_mutex: std.atomic.Mutex = .unlocked;
+// Threaded workers retain a pointer to their runtime. Never move that runtime
+// after the first task has started; retirement only moves this owning pointer.
+const RuntimeStorage = struct {
+    runtime: std.Io.Threaded,
+    next: ?*RuntimeStorage = null,
+};
 /// Live runtime. `null` while a retired runtime is being released or before the
 /// first environment acquires one.
-var runtime_active: ?std.Io.Threaded = null;
+var runtime_active: ?*RuntimeStorage = null;
 /// Runtime whose last owner is gone; released by the reaper thread (never by a
 /// worker of the runtime itself, which would have to join itself).
-var runtime_retiring: ?std.Io.Threaded = null;
+var runtime_retiring: ?*RuntimeStorage = null;
 var runtime_reaper_running = false;
 var runtime_env_head: ?*RuntimeEnv = null;
 
@@ -162,18 +168,17 @@ fn maybeRetireRuntimeLocked() void {
     if (comptime builtin.single_threaded) {
         // Without threads there are no pool workers that could join themselves:
         // release the runtime here.
-        const retired = runtime_active;
+        const retired = runtime_active.?;
         runtime_active = null;
         unlockRuntime();
-        {
-            var runtime = retired.?;
-            runtime.deinit();
-        }
+        destroyRuntime(retired);
         lockRuntime();
         return;
     }
 
-    runtime_retiring = runtime_active;
+    const retired = runtime_active.?;
+    retired.next = runtime_retiring;
+    runtime_retiring = retired;
     runtime_active = null;
     if (runtime_reaper_running) return;
 
@@ -192,7 +197,7 @@ fn runtimeReaper() void {
     while (true) {
         lockRuntime();
         const retiring = runtime_retiring;
-        runtime_retiring = null;
+        if (retiring) |retired| runtime_retiring = retired.next;
         if (retiring == null) {
             runtime_reaper_running = false;
             unlockRuntime();
@@ -200,8 +205,7 @@ fn runtimeReaper() void {
         }
         unlockRuntime();
 
-        var runtime = retiring.?;
-        runtime.deinit();
+        destroyRuntime(retiring.?);
     }
 }
 
@@ -212,13 +216,15 @@ fn runtimeReaper() void {
 fn retireRuntimeInline() void {
     lockRuntime();
     const retiring = if (!runtime_reaper_running) runtime_retiring else null;
-    if (retiring != null) runtime_retiring = null;
+    if (retiring) |retired| runtime_retiring = retired.next;
     unlockRuntime();
 
-    if (retiring) |retired| {
-        var runtime = retired;
-        runtime.deinit();
-    }
+    if (retiring) |retired| destroyRuntime(retired);
+}
+
+fn destroyRuntime(storage: *RuntimeStorage) void {
+    storage.runtime.deinit();
+    runtimeEnvAllocator().destroy(storage);
 }
 
 /// Called when one environment is torn down. Other environments keep working.
@@ -261,11 +267,14 @@ fn acquireThreadedRuntime(env_raw: napi.napi_env) !std.Io {
     }
 
     if (runtime_active == null) {
-        runtime_active = std.Io.Threaded.init(GlobalAllocator.globalAllocator(), .{});
+        const allocator = runtimeEnvAllocator();
+        const storage = try allocator.create(RuntimeStorage);
+        storage.* = .{ .runtime = std.Io.Threaded.init(allocator, .{}) };
+        runtime_active = storage;
     }
 
     entry.?.active_operations += 1;
-    return runtime_active.?.io();
+    return runtime_active.?.runtime.io();
 }
 
 /// The threaded runtime is only retired once its last owner is gone, so an
@@ -275,7 +284,7 @@ fn activeThreadedIo() std.Io {
     defer unlockRuntime();
 
     std.debug.assert(runtime_active != null);
-    return runtime_active.?.io();
+    return runtime_active.?.runtime.io();
 }
 
 fn releaseThreadedRuntime(env_raw: napi.napi_env) void {
@@ -899,6 +908,7 @@ fn AsyncTaskOperation(
 
         fn runWasmAsyncWork(self: *Self) !void {
             try self.initThreadDispatcher();
+            try self.prepareCompletionRecord();
 
             const resource_name = String.New(Env.from_raw(self.env), "ZigAsyncTask");
             var async_work: napi.napi_async_work = null;
@@ -940,7 +950,10 @@ fn AsyncTaskOperation(
                 _ = napi.napi_delete_async_work(inner_env, self.async_work);
                 self.async_work = null;
             }
-            self.dispatchCompletion(inner_env);
+            // Complete through the same FIFO as progress events. emnapi's work
+            // completion callback can otherwise overtake queued listeners and
+            // resolve before observing their exceptions (or drop their events).
+            self.queueCompletion() catch self.destroyNativeOnly(true);
         }
 
         fn isAbortRequestedFromSignal(self: *Self) bool {

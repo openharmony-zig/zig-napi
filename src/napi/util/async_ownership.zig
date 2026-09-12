@@ -70,8 +70,9 @@ pub const ErrorSnapshot = struct {
                 snapshot.message = copy;
                 snapshot.stored = replaceStrings(snapshot.stored, copy, text.code);
             } else |_| {
-                // Out of memory: keep the borrowed text. It is still valid while
-                // the operation has not released its captured input.
+                // The source may be a stack buffer or thread-local message slot;
+                // never retain it across threads, even on allocation failure.
+                return allocationFailure(allocator);
             }
         }
 
@@ -80,8 +81,18 @@ pub const ErrorSnapshot = struct {
         if (allocator.dupe(u8, code)) |copy| {
             snapshot.code = copy;
             snapshot.stored = replaceStrings(snapshot.stored, snapshot.message orelse text.message, copy);
-        } else |_| {}
+        } else |_| {
+            snapshot.deinit();
+            return allocationFailure(allocator);
+        }
         return snapshot;
+    }
+
+    fn allocationFailure(allocator: std.mem.Allocator) Self {
+        return .{
+            .allocator = allocator,
+            .stored = NapiError.Error.withCodeAndMessage("ERR_NAPI_ERROR_SNAPSHOT_OOM", "Unable to copy native error details"),
+        };
     }
 
     /// Error value whose text is owned by this snapshot.
@@ -140,4 +151,18 @@ test "error snapshots own their text" {
     const restored = snapshot.value();
     try std.testing.expectEqualStrings("borrowed message", restored.JsError.message);
     try std.testing.expect(restored.JsError.message.ptr != borrowed.ptr);
+}
+
+test "error snapshot allocation failure never retains borrowed text" {
+    for (0..2) |fail_index| {
+        var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = fail_index });
+        var message = [_]u8{ 'o', 'o', 'p', 's' };
+        var code = [_]u8{ 'E', 'R', 'R' };
+        var snapshot = ErrorSnapshot.capture(failing.allocator(), NapiError.Error.withCodeAndMessage(&code, &message));
+        defer snapshot.deinit();
+        @memset(&message, 'x');
+        @memset(&code, 'x');
+        try std.testing.expectEqualStrings("Unable to copy native error details", snapshot.value().JsError.message);
+        try std.testing.expectEqualStrings("ERR_NAPI_ERROR_SNAPSHOT_OOM", snapshot.value().JsError.custom_status.?);
+    }
 }

@@ -74,10 +74,9 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                 errdefer allocator.destroy(instance);
                 instance.* = .{
                     .allocator = allocator,
-                    // Deterministic starting point: a user `init` that omits a
-                    // field leaves a zeroed value instead of undefined memory,
-                    // which keeps `deinit` and the field accessors predictable.
-                    .value = std.mem.zeroes(T),
+                    // Never expose or finalize this value before construction.
+                    // Failed field construction only releases its initialized prefix.
+                    .value = undefined,
                     .owned_fields = [_]bool{false} ** fields.len,
                     .borrowed_inputs = null,
                 };
@@ -471,9 +470,24 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
         }
 
         fn toNapiReturn(env: napi.napi_env, value: anytype, comptime name: []const u8) napi.napi_value {
+            defer Napi.disposeOwnedParts(@TypeOf(value), value, GlobalAllocator.capture());
             return Napi.to_napi_value_auto(env, value, name) catch |err| {
                 return throwAnyAndNull(env, err);
             };
+        }
+
+        /// An init/factory result borrows its converted inputs. On rollback,
+        /// release only user-owned fields; the argument owner releases borrows.
+        fn cleanupUnwrappedValue(value: T, allocator: std.mem.Allocator) void {
+            if (comptime has_custom_deinit) {
+                deinitValue(T, value, allocator);
+            } else {
+                inline for (fields) |field| {
+                    if (comptime fieldOwnsItself(field.type)) {
+                        deinitValue(field.type, @field(value, field.name), allocator);
+                    }
+                }
+            }
         }
 
         // ------------------------------------------------------------------
@@ -544,7 +558,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
             var initialized: usize = 0;
 
             inline for (init_params, 0..) |param, i| {
-                tuple_args[i] = Napi.from_napi_value_auto(env, args[i], param.type.?) catch |err| {
+                tuple_args[i] = Napi.from_napi_value_auto_with_allocator(env, args[i], param.type.?, allocator) catch |err| {
                     releaseConvertedArgs(ArgsTuple, &tuple_args, initialized, allocator);
                     reportConversionFailure(env, err);
                     return false;
@@ -555,7 +569,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
             const init_result = if (@typeInfo(@typeInfo(init_type).@"fn".return_type.?) == .error_union)
                 @call(.auto, init_fn, tuple_args) catch |err| {
                     releaseConvertedArgs(ArgsTuple, &tuple_args, initialized, allocator);
-                    throwAnyAndNull(env, err);
+                    _ = throwAnyAndNull(env, err);
                     return false;
                 }
             else
@@ -568,7 +582,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
 
             if (initialized > 0) {
                 retainBorrowedInputs(ArgsTuple, instance, tuple_args) catch {
-                    deinitValue(T, value, allocator);
+                    cleanupUnwrappedValue(value, allocator);
                     releaseConvertedArgs(ArgsTuple, &tuple_args, initialized, allocator);
                     throwError(env, NapiError.Error.withStatus(NapiError.Status.GenericFailure));
                     return false;
@@ -583,9 +597,9 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
             // Field construction transfers ownership of the converted values
             // to the fields; a failure rolls the successfully converted fields
             // back before the shell is destroyed.
-            instance.value = std.mem.zeroes(T);
+            instance.value = undefined;
             inline for (fields, 0..) |field, i| {
-                const converted = Napi.from_napi_value_auto(env, args[i], field.type) catch |err| {
+                const converted = Napi.from_napi_value_auto_with_allocator(env, args[i], field.type, instance.allocator) catch |err| {
                     rollbackFields(instance, i);
                     reportConversionFailure(env, err);
                     return false;
@@ -649,6 +663,13 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
         }
 
         fn constructor_callback(env: napi.napi_env, callback_info: napi.napi_callback_info) callconv(.c) napi.napi_value {
+            var new_target: napi.napi_value = null;
+            const target_status = napi.napi_get_new_target(env, callback_info, &new_target);
+            if (target_status != napi.napi_ok) return throwAnyAndNull(env, NapiError.failStatus(target_status));
+            if (new_target == null) {
+                throwTypeError(env, class_name ++ " constructor must be called with 'new'");
+                return null;
+            }
             const constructor_arg_count = comptime constructorArgCount();
             var args_raw: [constructor_arg_count]napi.napi_value = undefined;
             const call = readCallInfo(constructor_arg_count, env, callback_info, &args_raw) orelse return null;
@@ -760,7 +781,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                         var initialized: usize = 0;
 
                         inline for (params, 0..) |param, i| {
-                            tuple_args[i] = Napi.from_napi_value_auto(env, args_raw[i], param.type.?) catch |err| {
+                            tuple_args[i] = Napi.from_napi_value_auto_with_allocator(env, args_raw[i], param.type.?, allocator) catch |err| {
                                 releaseConvertedArgs(ArgsTuple, &tuple_args, initialized, allocator);
                                 reportConversionFailure(env, err);
                                 return null;
@@ -782,7 +803,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                         };
 
                         keep_alive = makeKeepAlive(ArgsTuple, tuple_args, allocator) catch {
-                            deinitValue(T, value, allocator);
+                            cleanupUnwrappedValue(value, allocator);
                             releaseConvertedArgs(ArgsTuple, &tuple_args, initialized, allocator);
                             throwError(env, NapiError.Error.withStatus(NapiError.Status.GenericFailure));
                             return null;
@@ -790,7 +811,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                     }
 
                     const instance = InstanceData.create(allocator) catch {
-                        deinitValue(T, value, allocator);
+                        cleanupUnwrappedValue(value, allocator);
                         if (keep_alive) |keep| keep.destroy(allocator);
                         throwError(env, NapiError.Error.withStatus(NapiError.Status.GenericFailure));
                         return null;
@@ -939,7 +960,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                             }
                         }
 
-                        const new_value = Napi.from_napi_value_auto(setter_env, args_raw[0], field.type) catch |err| {
+                        const new_value = Napi.from_napi_value_auto_with_allocator(setter_env, args_raw[0], field.type, instance.allocator) catch |err| {
                             reportConversionFailure(setter_env, err);
                             return null;
                         };
@@ -1036,8 +1057,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                             };
                         } else {
                             const MethodWrapper = struct {
-                                fn cleanupArgs(args: *std.meta.ArgsTuple(@TypeOf(method)), initialized: usize) void {
-                                    const allocator = GlobalAllocator.globalAllocator();
+                                fn cleanupArgs(args: *std.meta.ArgsTuple(@TypeOf(method)), initialized: usize, allocator: std.mem.Allocator) void {
                                     inline for (0..method_info.@"fn".params.len - method_args_offset) |k| {
                                         if (k < initialized) {
                                             deinitValue(@TypeOf(args[method_args_offset + k]), args[method_args_offset + k], allocator);
@@ -1046,13 +1066,14 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                                 }
 
                                 fn call(method_env: napi.napi_env, info: napi.napi_callback_info) callconv(.c) napi.napi_value {
+                                    const allocator = GlobalAllocator.capture();
                                     const method_arg_count = params.len - method_args_offset;
                                     var args_raw: [method_arg_count]napi.napi_value = undefined;
                                     const callback = readCallInfo(method_arg_count, method_env, info, &args_raw) orelse return null;
 
                                     var tuple_args: std.meta.ArgsTuple(@TypeOf(method)) = undefined;
                                     var initialized_args: usize = 0;
-                                    defer cleanupArgs(&tuple_args, initialized_args);
+                                    defer cleanupArgs(&tuple_args, initialized_args, allocator);
 
                                     // Inject the receiver. Static methods do not
                                     // touch `this` at all: their `this` is the
@@ -1073,7 +1094,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                                     // Convert and pass the JavaScript arguments.
                                     inline for (0..method_arg_count) |k| {
                                         const param_type = method_info.@"fn".params[method_args_offset + k].type.?;
-                                        tuple_args[method_args_offset + k] = Napi.from_napi_value_auto(method_env, args_raw[k], param_type) catch |err| {
+                                        tuple_args[method_args_offset + k] = Napi.from_napi_value_auto_with_allocator(method_env, args_raw[k], param_type, allocator) catch |err| {
                                             reportConversionFailure(method_env, err);
                                             return null;
                                         };
