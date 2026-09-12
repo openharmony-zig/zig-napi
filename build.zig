@@ -3,6 +3,7 @@ const std = @import("std");
 pub const napi_build = @import("src/build/napi-build.zig");
 
 pub fn build(b: *std.Build) !void {
+    const optimize = b.standardOptimizeOption(.{});
     const napi_sys = b.addModule("napi_sys", .{
         .root_source_file = b.path("src/sys/api.zig"),
     });
@@ -24,9 +25,10 @@ pub fn build(b: *std.Build) !void {
     // Importing a Zig module does not instantiate its generic entrypoints.
     // Keep an explicit host-addon check and a runnable test target for maintainers.
     const check = b.step("check", "Compile the host Node addons and public API regression fixtures");
-    const compile_check = b.addSystemCommand(&.{ b.graph.zig_exe, "build", "--summary", "failures" });
+    const compile_check = b.addSystemCommand(&.{ b.graph.zig_exe, "build", b.fmt("-Doptimize={s}", .{@tagName(optimize)}), "--summary", "failures" });
     compile_check.setCwd(b.path("node-test"));
     check.dependOn(&compile_check.step);
+    b.default_step.dependOn(&compile_check.step);
 
     const test_step = b.step("test", "Run Zig unit tests and the host Node regression suite");
     const node_tests = b.addSystemCommand(&.{ "npm", "run", "test:run" });
@@ -45,6 +47,7 @@ pub fn build(b: *std.Build) !void {
     const unit_root = b.createModule(.{
         .root_source_file = b.path("src/unit_tests.zig"),
         .target = b.graph.host,
+        .optimize = optimize,
     });
     unit_root.addImport("napi-sys", unit_sys);
     unit_root.addImport("build_options", unit_options);

@@ -6,6 +6,26 @@ title: Ownership
 
 These wrappers are for JavaScript values that carry native lifetime, or for native code that must keep JavaScript values alive.
 
+## Native Return Values
+
+Plain native returns are borrowed. Conversion copies their contents to JavaScript
+without freeing literals, input aliases, or sub-slices. Return a freshly allocated
+value as `napi.Owned(T)` so the export boundary releases it after conversion,
+including when conversion fails:
+
+```zig
+pub fn greeting() !napi.Owned([]u8) {
+    const allocator = napi.globalAllocator();
+    return .init(try allocator.dupe(u8, "hello"), allocator);
+}
+```
+
+Converted JavaScript arguments belong to the current native call and are released
+when it returns. Clone data that must survive that call. `Owned(T)` records its
+allocator, but Zig does not enforce move-only types: copying a wrapper does not
+create a second owner. Do not release or transfer the same allocation twice.
+An owned aggregate must not contain overlapping owning slices.
+
 ## `Class`
 
 ```zig
@@ -140,4 +160,9 @@ napi.resetOperationAllocator()
 
 Addon roots may declare `pub const napi_allocator: std.mem.Allocator = ...;` for a root allocator. This declaration is reserved and is not exported as a JavaScript property.
 
-`setOperationAllocator` overrides only short-lived conversion and operation allocations. It is mainly intended for scoped tests. Applications should prefer a root `napi_allocator`.
+`setOperationAllocator` overrides short-lived conversion and operation allocations
+on the current thread. Restore it before leaving your scope. It is mainly intended
+for scoped tests; applications should prefer a thread-safe root `napi_allocator`.
+Long-lived resources retain the allocator that created them. An allocator and its
+backing state must outlive every allocation created through it, including async
+tasks and JavaScript finalizers.

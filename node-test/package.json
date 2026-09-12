@@ -22,7 +22,10 @@
     "binaryNames": [
       "compat_mode",
       "example",
-      "audit"
+      "audit",
+      "conversion_audit",
+      "async_audit",
+      "classes_audit"
     ],
     "packageName": "zig-napi-node-test",
     "targets": [

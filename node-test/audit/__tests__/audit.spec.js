@@ -25,6 +25,24 @@ test("ordinary string and callback return types are checked", (t) => {
   );
 });
 
+test("foreign native payloads are rejected before dereference", (t) => {
+  const result = child(`const assert=require('assert');const foreign=a.foreignObject();
+    assert.throws(()=>a.unwrapForeign(foreign));
+    assert.throws(()=>a.Class.prototype.read.call(foreign));`);
+  t.is(result.signal, null, result.stderr);
+  t.is(result.status, 0, result.stderr);
+});
+
+test("binary views revalidate their backing store after JavaScript reentry", (t) => {
+  if (typeof structuredClone !== "function") return t.pass();
+  const array = new Uint8Array([42]);
+  t.throws(() => a.typedAfterCallback(array, () => structuredClone(array.buffer, { transfer: [array.buffer] })));
+  const view = new DataView(new ArrayBuffer(1));
+  const backing = view.buffer;
+  t.throws(() => a.dataAfterCallback(view, () => structuredClone(backing, { transfer: [backing] })));
+  t.is(a.typedAfterCallback(new Uint8Array([7]), () => {}), 7);
+});
+
 test("getter exceptions preserve the original JS exception", (t) => {
   const error = new Error("getter boom");
   t.is(

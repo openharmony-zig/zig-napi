@@ -6,6 +6,26 @@ pub const napi_allocator = counter.allocator();
 pub fn activeBytes() isize {
     return counter.stats().active_bytes;
 }
+/// An opaque foreign-addon payload need not point to a readable allocation.
+pub fn foreignObject(env: napi.Env) !napi.Object {
+    const object = try napi.Object.Create(env);
+    const api = napi.napi_sys.napi_sys;
+    const status = api.napi_wrap(env.raw, object.raw, @ptrFromInt(1), null, null, null);
+    if (status != api.napi_ok) return error.WrapFailed;
+    return object;
+}
+pub fn unwrapForeign(object: napi.Object) !void {
+    _ = try object.unwrap(u64);
+}
+pub fn typedAfterCallback(view: napi.Uint8Array, callback: napi.Function(struct {}, void)) !u8 {
+    try callback.Call(.{});
+    const bytes = try view.tryAsSlice();
+    return if (bytes.len == 0) 0 else bytes[0];
+}
+pub fn dataAfterCallback(view: napi.DataView, callback: napi.Function(struct {}, void)) !u8 {
+    try callback.Call(.{});
+    return view.getUint8(0);
+}
 pub fn nested(input: struct { text: []const u8, count: i32 }) void {
     _ = input;
 }

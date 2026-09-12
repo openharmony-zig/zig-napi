@@ -43,6 +43,13 @@ pub fn run(value: u32) napi.Async(u32, .thread) {
 
 The run function must accept either `(input)` or `(napi.AsyncContext(void), input)` and return `Result` or `!Result`.
 
+Captured native inputs are deep-copied; the original converted arguments are still
+released when the exporting function returns. JavaScript-backed handles must not
+be captured for background use: first convert them to native data. Async results
+are borrowed unless explicitly wrapped in `napi.Owned(T)`. Heap-allocated results
+must use `Owned`, whereas a literal or an alias of captured input may be returned
+as a plain slice. This is a source-level ownership change from older releases.
+
 ## `AsyncWithEvents`
 
 ```zig
@@ -76,6 +83,7 @@ Async descriptors expose:
 | Method                                                 | Use                                                        |
 | ------------------------------------------------------ | ---------------------------------------------------------- |
 | `from(input, run_fn)`                                  | Create a descriptor from input data and a runner function. |
+| `tryFrom(input, run_fn)`                               | Fallible creation; propagate allocation/clone errors with `try`. |
 | `schedule(env)`                                        | Schedule without listener or abort signal.                 |
 | `scheduleWithListener(env, listener)`                  | Schedule with a JavaScript event listener.                 |
 | `scheduleWithSignal(env, signal)`                      | Schedule with cancellation.                                |
@@ -83,6 +91,10 @@ Async descriptors expose:
 | `deinit()`                                             | Destroy an unscheduled descriptor.                         |
 
 Exported functions usually return the descriptor instead of calling `schedule` manually. The function wrapper schedules it and returns the Promise.
+
+A descriptor has one owner. Schedule it once, or call `deinit` if it is never
+scheduled. Do not copy it into independently used owners. Prefer `tryFrom` when
+allocation failure must be recoverable.
 
 ## `AsyncContext`
 
