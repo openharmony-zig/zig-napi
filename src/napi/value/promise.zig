@@ -5,6 +5,7 @@ const Napi = @import("../util/napi.zig").Napi;
 const NapiValue = @import("../value.zig").NapiValue;
 const NapiError = @import("../wrapper/error.zig");
 const AbortSignal = @import("../abort_signal.zig");
+const Undefined = @import("../value/undefined.zig").Undefined;
 const GlobalAllocator = @import("../util/allocator.zig");
 
 pub const PromiseStatus = enum {
@@ -38,7 +39,7 @@ pub const PromiseValue = struct {
     }
 };
 
-/// Settlement state shared by every copy of a created `Promise`.
+/// Settlement state of a created promise, shared by every copy of the wrapper.
 ///
 /// `napi_resolve_deferred`/`napi_reject_deferred` release the deferred on
 /// success, so the state must never be copied into an independent alias and the
@@ -47,7 +48,34 @@ pub const PromiseValue = struct {
 const Capability = struct {
     allocator: std.mem.Allocator,
     deferred: napi.napi_deferred,
-    settled: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    outcome: std.atomic.Value(u8) = std.atomic.Value(u8).init(@intFromEnum(Outcome.pending)),
+
+    fn claim(self: *Capability) bool {
+        return self.outcome.cmpxchgStrong(
+            @intFromEnum(Outcome.pending),
+            @intFromEnum(Outcome.claimed),
+            .acq_rel,
+            .acquire,
+        ) == null;
+    }
+
+    fn releaseClaim(self: *Capability) void {
+        self.outcome.store(@intFromEnum(Outcome.pending), .release);
+    }
+
+    fn mark(self: *Capability, outcome: Outcome) void {
+        self.outcome.store(@intFromEnum(outcome), .release);
+    }
+};
+
+/// Settlement outcome. `claimed` is the transient state between winning a
+/// settlement attempt and the N-API call that completes it; it protects the
+/// deferred from a second (possibly concurrent) attempt.
+const Outcome = enum(u8) {
+    pending,
+    claimed,
+    resolved,
+    rejected,
 };
 
 pub const Promise = struct {
@@ -81,22 +109,26 @@ pub const Promise = struct {
     /// of it). Every failure is reported instead of leaving an unusable
     /// deferred behind.
     pub fn New(env: Env) !Self {
+        const allocator = GlobalAllocator.capture();
+        // The settlement state is allocated before the promise exists, so a
+        // failed allocation cannot orphan a deferred (a deferred keeps its
+        // promise alive until it is resolved or rejected).
+        const capability = try allocator.create(Capability);
+
         var deferred: napi.napi_deferred = null;
         var raw: napi.napi_value = null;
-
         const create_status = napi.napi_create_promise(env.raw, &deferred, &raw);
         if (create_status != napi.napi_ok) {
+            allocator.destroy(capability);
             return NapiError.Error.fromStatus(NapiError.Status.New(create_status));
         }
         if (deferred == null or raw == null) {
             // On the OHOS C import `napi_status` and the status constants do not
             // share a signedness, so convert explicitly.
             const generic_failure: napi.napi_status = @intCast(napi.napi_generic_failure);
+            allocator.destroy(capability);
             return NapiError.Error.fromStatus(NapiError.Status.New(generic_failure));
         }
-
-        const allocator = GlobalAllocator.globalAllocator();
-        const capability = try allocator.create(Capability);
         capability.* = .{
             .allocator = allocator,
             .deferred = deferred,
@@ -104,6 +136,11 @@ pub const Promise = struct {
 
         const wrap_status = napi.napi_wrap(env.raw, raw, @ptrCast(capability), finalizeCapability, null, null);
         if (wrap_status != napi.napi_ok) {
+            // Without the wrap there is no finalizer to release the state, and
+            // the only way to release the deferred is to settle it. Resolve it
+            // with `undefined` so the never-handed-out promise is reclaimed
+            // silently instead of becoming an unhandled rejection.
+            releaseDeferredQuietly(env, deferred);
             allocator.destroy(capability);
             return NapiError.Error.fromStatus(NapiError.Status.New(wrap_status));
         }
@@ -119,16 +156,31 @@ pub const Promise = struct {
     /// True when this wrapper was created by `New` and has not been settled yet.
     pub fn canSettle(self: Self) bool {
         const capability = self.capability orelse return false;
-        return !capability.settled.load(.acquire);
+        return self.outcomeOf(capability) == .pending;
     }
 
     pub fn isBorrowed(self: Self) bool {
         return self.capability == null;
     }
 
+    /// Outcome recorded by the settlement that won, shared by every copy.
     pub fn status(self: Self) PromiseStatus {
         const capability = self.capability orelse return .Pending;
-        return if (capability.settled.load(.acquire)) .Resolved else .Pending;
+        return switch (self.outcomeOf(capability)) {
+            .pending, .claimed => .Pending,
+            .resolved => .Resolved,
+            .rejected => .Rejected,
+        };
+    }
+
+    fn outcomeOf(_: Self, capability: *Capability) Outcome {
+        return @enumFromInt(capability.outcome.load(.acquire));
+    }
+
+    /// Size of the native settlement state a created promise keeps alive until
+    /// its JavaScript object is collected (diagnostics/tests only).
+    pub fn settlementStateSize() usize {
+        return @sizeOf(Capability);
     }
 
     /// Settle the promise with `value`.
@@ -137,36 +189,69 @@ pub const Promise = struct {
     /// wrapper exist. A second attempt (or an attempt on a borrowed promise)
     /// fails with a JS error and never touches an already released deferred.
     pub fn Resolve(self: *Self, value: anytype) !void {
-        const napi_value = try Napi.to_napi_value(self.env, value, null);
-        try self.resolveRaw(napi_value);
+        // Claim before converting: a borrowed or already settled promise must
+        // not build a JavaScript value (or run conversion side effects) on the
+        // way to failing.
+        const capability = try self.claim();
+        const napi_value = Napi.to_napi_value(self.env, value, null) catch |err| {
+            capability.releaseClaim();
+            return err;
+        };
+        try self.resolveClaimed(capability, napi_value);
     }
 
     pub fn resolveRaw(self: *Self, napi_value: napi.napi_value) !void {
         const capability = try self.claim();
-        const settle_status = napi.napi_resolve_deferred(self.env, capability.deferred, napi_value);
-        if (settle_status != napi.napi_ok) {
-            capability.settled.store(false, .release);
-            return NapiError.Error.fromStatus(NapiError.Status.New(settle_status));
-        }
+        try self.resolveClaimed(capability, napi_value);
     }
 
     pub fn Reject(self: *Self, err: NapiError.Error) !void {
+        const capability = try self.claim();
         const napi_value = err.to_napi_error(Env.from_raw(self.env));
-        try self.rejectRaw(napi_value);
+        try self.rejectClaimed(capability, napi_value);
     }
 
     pub fn RejectAbortError(self: *Self) !void {
-        const napi_value = try AbortSignal.abortErrorValue(Env.from_raw(self.env));
-        try self.rejectRaw(napi_value);
+        const capability = try self.claim();
+        const napi_value = AbortSignal.abortErrorValue(Env.from_raw(self.env)) catch |err| {
+            capability.releaseClaim();
+            return err;
+        };
+        try self.rejectClaimed(capability, napi_value);
     }
 
     pub fn rejectRaw(self: *Self, napi_value: napi.napi_value) !void {
         const capability = try self.claim();
-        const settle_status = napi.napi_reject_deferred(self.env, capability.deferred, napi_value);
+        try self.rejectClaimed(capability, napi_value);
+    }
+
+    /// Settle a promise that is never handed to JavaScript (a setup failure
+    /// after the promise was created) so its deferred is released without
+    /// producing an unhandled rejection.
+    ///
+    /// Best effort: failures are ignored, there is nothing left to report to.
+    pub fn discard(self: *Self) void {
+        const capability = self.claim() catch return;
+        const undefined_value = Undefined.New(Env.from_raw(self.env));
+        self.resolveClaimed(capability, undefined_value.raw) catch {};
+    }
+
+    fn resolveClaimed(self: *Self, capability: *Capability, napi_value: napi.napi_value) !void {
+        const settle_status = napi.napi_resolve_deferred(self.env, capability.deferred, napi_value);
         if (settle_status != napi.napi_ok) {
-            capability.settled.store(false, .release);
+            capability.releaseClaim();
             return NapiError.Error.fromStatus(NapiError.Status.New(settle_status));
         }
+        capability.mark(.resolved);
+    }
+
+    fn rejectClaimed(self: *Self, capability: *Capability, napi_value: napi.napi_value) !void {
+        const settle_status = napi.napi_reject_deferred(self.env, capability.deferred, napi_value);
+        if (settle_status != napi.napi_ok) {
+            capability.releaseClaim();
+            return NapiError.Error.fromStatus(NapiError.Status.New(settle_status));
+        }
+        capability.mark(.rejected);
     }
 
     fn claim(self: *Self) !*Capability {
@@ -177,7 +262,7 @@ pub const Promise = struct {
             );
             return error.GenericFailure;
         };
-        if (capability.settled.swap(true, .acq_rel)) {
+        if (!capability.claim()) {
             NapiError.last_error = NapiError.Error.withCodeAndMessage(
                 "ERR_NAPI_PROMISE_ALREADY_SETTLED",
                 "This promise has already been settled",
@@ -188,6 +273,12 @@ pub const Promise = struct {
     }
 };
 
+/// Release a deferred that no wrapper will ever settle.
+fn releaseDeferredQuietly(env: Env, deferred: napi.napi_deferred) void {
+    const undefined_value = Undefined.New(env);
+    _ = napi.napi_resolve_deferred(env.raw, deferred, undefined_value.raw);
+}
+
 fn finalizeCapability(_: napi.napi_env, data: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
     const raw = data orelse return;
     const capability: *Capability = @ptrCast(@alignCast(raw));
@@ -196,11 +287,42 @@ fn finalizeCapability(_: napi.napi_env, data: ?*anyopaque, _: ?*anyopaque) callc
     capability.allocator.destroy(capability);
 }
 
-test "borrowed promises refuse to settle" {
+test "borrowed promises refuse to claim a settlement" {
+    // `claim` is exercised directly: `Resolve` would need a live environment and
+    // pull the N-API entry points into the unit test binary.
     var promise = Promise.from_raw(null, null);
     try std.testing.expect(promise.isBorrowed());
     try std.testing.expect(!promise.canSettle());
-    try std.testing.expectError(error.GenericFailure, promise.Resolve(@as(i32, 1)));
+    try std.testing.expectError(error.GenericFailure, promise.claim());
     try std.testing.expect(NapiError.last_error != null);
     NapiError.clearLastError();
+}
+
+test "settlement claims are exclusive and released on failure" {
+    var capability = Capability{ .allocator = std.testing.allocator, .deferred = null };
+    var promise = Promise{ .env = null, .raw = null, .type = napi.napi_object, .capability = &capability };
+
+    try std.testing.expect(promise.claim() != error.GenericFailure);
+    // A second claim (a copy, another thread) must fail while the first is held.
+    var copy = promise;
+    try std.testing.expectError(error.GenericFailure, copy.claim());
+    NapiError.clearLastError();
+
+    capability.releaseClaim();
+    try std.testing.expect(promise.canSettle());
+}
+
+test "status reflects the outcome recorded by the winner and is shared by aliases" {
+    var capability = Capability{ .allocator = std.testing.allocator, .deferred = null };
+    var promise = Promise{ .env = null, .raw = null, .type = napi.napi_object, .capability = &capability };
+    var alias = promise;
+
+    try std.testing.expectEqual(PromiseStatus.Pending, promise.status());
+    capability.mark(.rejected);
+    try std.testing.expectEqual(PromiseStatus.Rejected, promise.status());
+    try std.testing.expectEqual(PromiseStatus.Rejected, alias.status());
+    try std.testing.expect(!alias.canSettle());
+
+    capability.mark(.resolved);
+    try std.testing.expectEqual(PromiseStatus.Resolved, alias.status());
 }

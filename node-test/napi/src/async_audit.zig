@@ -88,14 +88,38 @@ pub fn asyncLiteral() napi.Async([]const u8, .single) {
     return napi.Async([]const u8, .single).from(@as(i32, 0), literalResult);
 }
 
+var borrowed_result_slot: ?[]u8 = null;
+
 fn allocatedResult(_: i32) ![]u8 {
-    return try std.fmt.allocPrint(counter.allocator(), "allocated", .{});
+    const buffer = try std.fmt.allocPrint(counter.allocator(), "allocated", .{});
+    borrowed_result_slot = buffer;
+    return buffer;
 }
 
 /// A freshly allocated (borrowed) result is not disposed by the runtime; the
 /// runner keeps ownership unless it wraps the value in `Owned`.
 pub fn asyncAllocatedBorrowed() napi.Async([]u8, .single) {
     return napi.Async([]u8, .single).from(@as(i32, 0), allocatedResult);
+}
+
+/// Release the buffer `asyncAllocatedBorrowed` handed back: the runtime treats
+/// plain results as borrowed, so the owner cleans them up.
+pub fn releaseBorrowedResult() void {
+    if (borrowed_result_slot) |buffer| {
+        counter.allocator().free(buffer);
+        borrowed_result_slot = null;
+    }
+}
+
+fn ownedResult(_: i32) !napi.Owned([]u8) {
+    const buffer = try std.fmt.allocPrint(counter.allocator(), "owned", .{});
+    return napi.Owned([]u8).init(buffer, counter.allocator());
+}
+
+/// An explicit `Owned` result transfers ownership to the runtime, which
+/// disposes it after the value has been converted.
+pub fn asyncOwnedResult() napi.Async(napi.Owned([]u8), .single) {
+    return napi.Async(napi.Owned([]u8), .single).from(@as(i32, 0), ownedResult);
 }
 
 fn runResult(input: i32) napi.Result(i32) {
@@ -169,6 +193,92 @@ pub fn asyncDescriptorReused() u32 {
     return descriptor_reused;
 }
 
+const SliceEvent = struct {
+    text: []const u8,
+    index: u32,
+};
+
+fn sliceEventRun(ctx: napi.AsyncContext(SliceEvent), total: u32) !u32 {
+    var buffer: [32]u8 = undefined;
+    var index: u32 = 0;
+    while (index < total) : (index += 1) {
+        const text = std.fmt.bufPrint(&buffer, "event-{d}", .{index}) catch continue;
+        try ctx.emit(.{ .text = text, .index = index });
+        // The producer reuses its temporary immediately: a shallow copy in the
+        // queue would deliver this overwritten text (or worse, freed memory).
+        @memset(&buffer, 'x');
+    }
+    return total;
+}
+
+/// Events carrying a slice must be deep-copied before they are queued.
+pub fn asyncSliceEvents(total: u32) napi.AsyncWithEvents(u32, SliceEvent, .thread) {
+    return napi.AsyncWithEvents(u32, SliceEvent, .thread).from(total, sliceEventRun);
+}
+
+/// Same runner, single runtime: the event is delivered synchronously and the
+/// producer may reuse its buffer only after the listener returned.
+pub fn asyncSliceEventsSingle(total: u32) napi.AsyncWithEvents(u32, SliceEvent, .single) {
+    return napi.AsyncWithEvents(u32, SliceEvent, .single).from(total, sliceEventRun);
+}
+
+fn throwingSliceEventRun(ctx: napi.AsyncContext(SliceEvent), total: u32) !u32 {
+    var buffer: [32]u8 = undefined;
+    const text = std.fmt.bufPrint(&buffer, "throwing-event", .{}) catch "throwing-event";
+    var index: u32 = 0;
+    while (index < total) : (index += 1) {
+        try ctx.emit(.{ .text = text, .index = index });
+    }
+    return total;
+}
+
+/// The listener throws: the completion must reject with that original
+/// exception instead of leaving it pending on the environment.
+pub fn asyncThrowingEvents(total: u32) napi.AsyncWithEvents(u32, SliceEvent, .thread) {
+    return napi.AsyncWithEvents(u32, SliceEvent, .thread).from(total, throwingSliceEventRun);
+}
+
+fn takenReferenceRun(ctx: napi.AsyncContext(SliceEvent), total: u32) !napi.ObjectRef {
+    _ = total;
+    var buffer: [32]u8 = undefined;
+    const text = std.fmt.bufPrint(&buffer, "pending-exception-event", .{}) catch "pending-exception-event";
+    try ctx.emit(.{ .text = text, .index = 0 });
+    // The result conversion fails while the listener's exception is still
+    // pending: the promise must reject with that original exception.
+    return .{ .raw_ref = null, .taken = true };
+}
+
+/// Completion conversion failure with a pending JavaScript exception.
+pub fn asyncPendingExceptionCompletion() napi.AsyncWithEvents(napi.ObjectRef, SliceEvent, .thread) {
+    return napi.AsyncWithEvents(napi.ObjectRef, SliceEvent, .thread).from(@as(u32, 1), takenReferenceRun);
+}
+
+/// Thread local message storage, the same shape as the conversion layer's
+/// rotating error slots: each thread sees its own copy, so an error created on
+/// the task thread is only readable there.
+threadlocal var task_message: [64]u8 = [_]u8{'?'} ** 64;
+
+fn failingRunner(_: i32) !i32 {
+    const text = std.fmt.bufPrint(&task_message, "background failure {d}", .{@as(u32, 7)}) catch "background failure";
+    return napi.Error.fromReason(text);
+}
+
+/// Error text produced on the task thread must survive the trip to JavaScript.
+pub fn asyncBackgroundError() napi.Async(i32, .thread) {
+    return napi.Async(i32, .thread).from(@as(i32, 0), failingRunner);
+}
+
+fn failingWorker(_: u32) !u32 {
+    const text = std.fmt.bufPrint(&task_message, "worker failure {d}", .{@as(u32, 3)}) catch "worker failure";
+    return napi.Error.fromReason(text);
+}
+
+/// Same for the worker bridge.
+pub fn workerFailure(env: napi.Env, value: u32) !napi.Promise {
+    const worker = napi.Worker(env, .{ .data = value, .Execute = failingWorker });
+    return worker.AsyncQueue();
+}
+
 // ---------------------------------------------------------------------------
 // F11: promise settlement
 // ---------------------------------------------------------------------------
@@ -192,6 +302,43 @@ pub fn sharedPromiseSettlement(env: napi.Env) !napi.Promise {
         settle_successes += 1;
     } else |_| {}
     return promise;
+}
+
+var status_after_reject: u32 = 0;
+
+pub fn promiseStatusAfterReject() u32 {
+    return status_after_reject;
+}
+
+/// The status recorded by the winning settlement must describe the outcome for
+/// every copy of the wrapper (a reject must not read as resolved).
+pub fn rejectedPromiseStatus(env: napi.Env) !napi.Promise {
+    const promise = try napi.Promise.New(env);
+    var writer = promise;
+    try writer.Reject(napi.Error.withReason("status probe"));
+    var alias = promise;
+    status_after_reject = @intFromEnum(alias.status());
+    return promise;
+}
+
+var status_after_resolve: u32 = 0;
+
+pub fn promiseStatusAfterResolve() u32 {
+    return status_after_resolve;
+}
+
+pub fn resolvedPromiseStatus(env: napi.Env) !napi.Promise {
+    const promise = try napi.Promise.New(env);
+    var writer = promise;
+    try writer.Resolve(@as(i32, 3));
+    var alias = promise;
+    status_after_resolve = @intFromEnum(alias.status());
+    return promise;
+}
+
+/// Native size of the settlement state a created promise keeps alive.
+pub fn promiseSettlementStateSize() usize {
+    return napi.Promise.settlementStateSize();
 }
 
 /// A second settlement attempt must throw, never touch the released deferred.
@@ -314,6 +461,22 @@ fn abortableRun(ctx: napi.AsyncContext(void), total: u32) !u32 {
 pub fn asyncAbortable(total: u32, signal: napi.AbortSignal) napi.Async(u32, .thread) {
     _ = signal;
     return napi.Async(u32, .thread).from(total, abortableRun);
+}
+
+fn longRunner(input: u32) u32 {
+    var spin: u32 = 0;
+    while (spin < 30_000_000) : (spin += 1) {
+        std.atomic.spinLoopHint();
+    }
+    return input + 1;
+}
+
+/// A threaded task that stays in flight long enough for its environment to be
+/// torn down underneath it. Its controller thread is a worker of the runtime, so
+/// this is the path that must not release the runtime from one of its own
+/// workers.
+pub fn asyncLongThreadValue(input: u32) napi.Async(u32, .thread) {
+    return napi.Async(u32, .thread).from(input, longRunner);
 }
 
 /// Two tasks sharing one signal: both must observe the abort.

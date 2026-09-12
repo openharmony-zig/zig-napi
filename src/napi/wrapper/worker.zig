@@ -67,6 +67,9 @@ pub fn WorkerContext(comptime T: type) type {
         result: ExecutePayload = if (ExecutePayload == void) {} else undefined,
         result_ready: bool = false,
         err: ?NapiError.Error = null,
+        /// Owns the text of `err` when the error was produced by the runner
+        /// (its message may live in the runner thread's error slots).
+        err_snapshot: ?ownership.ErrorSnapshot = null,
         status: WorkerStatus = .Pending,
         promise: ?Promise = null,
         freed: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
@@ -76,7 +79,7 @@ pub fn WorkerContext(comptime T: type) type {
         /// Create a worker. Creation failures are stored on the instance and
         /// reported by `tryQueue`/`AsyncQueue` instead of aborting the process.
         pub fn New(env: napi_env.Env, init_data: anytype) *Self {
-            const allocator = GlobalAllocator.globalAllocator();
+            const allocator = GlobalAllocator.capture();
             const self = allocator.create(Self) catch @panic("OOM");
 
             self.* = .{
@@ -113,6 +116,10 @@ pub fn WorkerContext(comptime T: type) type {
             if (self.raw != null) {
                 _ = napi.napi_delete_async_work(self.env, self.raw);
                 self.raw = null;
+            }
+            if (self.err_snapshot) |*snapshot| {
+                snapshot.deinit();
+                self.err_snapshot = null;
             }
             self.promise = null;
             self.allocator.destroy(self);
@@ -181,10 +188,23 @@ pub fn WorkerContext(comptime T: type) type {
             NapiError.clearLastError();
             self.run(inner_env) catch |err| {
                 self.status = .Rejected;
-                self.err = NapiError.mapAnyError(err);
+                // The message may point into this thread's error slots: copy it
+                // before the completion callback reports it to JavaScript.
+                self.storeTaskError(NapiError.mapAnyError(err));
                 return;
             };
             self.status = .Resolved;
+        }
+
+        fn storeTaskError(self: *Self, err: NapiError.Error) void {
+            if (self.err_snapshot) |*previous| previous.deinit();
+            self.err_snapshot = ownership.ErrorSnapshot.capture(self.allocator, err);
+            self.err = null;
+        }
+
+        fn currentError(self: *Self) ?NapiError.Error {
+            if (self.err_snapshot) |snapshot| return snapshot.value();
+            return self.err;
         }
 
         fn complete(inner_env: napi.napi_env, status: napi.napi_status, data: ?*anyopaque) callconv(.c) void {
@@ -198,7 +218,7 @@ pub fn WorkerContext(comptime T: type) type {
             const env = napi_env.Env.from_raw(inner_env);
             switch (self.status) {
                 .Rejected => {
-                    const err = self.err orelse NapiError.Error.withCodeAndMessage("ERR_NAPI_WORKER_FAILED", "Worker failed");
+                    const err = self.currentError() orelse NapiError.Error.withCodeAndMessage("ERR_NAPI_WORKER_FAILED", "Worker failed");
                     self.settleReject(env, err);
                 },
                 .Cancelled => {

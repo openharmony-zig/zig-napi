@@ -2,10 +2,14 @@
 // audit addon so the spec can close a second environment while the main one
 // keeps running.
 const path = require("path");
-const { parentPort, workerData } = require("node:worker_threads");
+// No `node:` prefix: this file is loaded on Node versions that do not
+// support it.
+const { parentPort, workerData } = require("worker_threads");
 
-const loadAddon = require(path.join(__dirname, "..", "..", "load-addon.js"));
-const native = loadAddon("async_audit");
+// `workerData.loader` lets the spec run this file from a child process whose
+// working directory is not the repository; the default keeps direct use simple.
+const loader = (workerData && workerData.loader) || path.join(__dirname, "..", "..", "load-addon.js");
+const native = require(loader)("async_audit");
 
 async function main() {
   const mode = workerData && workerData.mode ? workerData.mode : "async";
@@ -17,6 +21,14 @@ async function main() {
       // Never reached: the queue is drained after the environment is gone.
     }, 4);
     parentPort.postMessage({ queued: 4 });
+    return;
+  }
+
+  if (mode === "async-slow") {
+    // Start a threaded task and abandon it: the environment is torn down while
+    // the task's controller is still running on a runtime pool worker.
+    native.asyncLongThreadValue(5).catch(() => {});
+    parentPort.postMessage({ started: true });
     return;
   }
 
