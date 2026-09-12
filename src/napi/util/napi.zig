@@ -125,12 +125,11 @@ fn enumWideTag(comptime T: type) type {
     return std.meta.Int(@typeInfo(tag).int.signedness, 64);
 }
 
-fn enumFromString(env: napi.napi_env, raw: napi.napi_value, comptime T: type) !T {
+fn enumFromString(env: napi.napi_env, raw: napi.napi_value, comptime T: type, allocator: std.mem.Allocator) !T {
     const enum_info = @typeInfo(T).@"enum";
     // The string copy is a temporary: it must be released regardless of whether
     // one of the enum members matches.
-    const allocator = GlobalAllocator.globalAllocator();
-    const value = try NapiValue.String.from_napi_value(env, raw, []u8);
+    const value = try NapiValue.String.from_napi_value_with_allocator(env, raw, []u8, allocator);
     defer allocator.free(value);
 
     inline for (enum_info.fields) |field| {
@@ -175,6 +174,19 @@ fn enumTypeToObject(env: napi.napi_env, comptime E: type) !napi.napi_value {
         }
     }
     return raw;
+}
+
+/// Construct a JavaScript backed wrapper for a converted value.
+///
+/// Wrappers that declare `tryFromRaw` (TypedArray, DataView, ArrayBuffer,
+/// Buffer) validate the backing store there and fail on values that `from_raw`
+/// would turn into an empty, unusable wrapper - for example a detached
+/// ArrayBuffer. Wrappers that do not declare it yet keep using `from_raw`.
+fn wrapperFromNapiValue(comptime T: type, env: napi.napi_env, raw: napi.napi_value) !T {
+    if (comptime @hasDecl(T, "tryFromRaw")) {
+        return try T.tryFromRaw(env, raw);
+    }
+    return T.from_raw(env, raw);
 }
 
 /// Types that accept any JavaScript value and therefore skip the type gate.
@@ -455,10 +467,23 @@ pub const Napi = struct {
     }
 
     pub fn from_napi_value_auto(env: napi.napi_env, raw: napi.napi_value, comptime T: type) !T {
+        return Napi.from_napi_value_auto_with_allocator(env, raw, T, GlobalAllocator.globalAllocator());
+    }
+
+    /// Convert using an explicit allocator for every native copy this conversion
+    /// creates.
+    ///
+    /// Callers that clean the converted value up later must pass the same
+    /// allocator here and to `deinit_napi_value_with_allocator`: a reentrant
+    /// JavaScript callback may replace this thread's operation allocator while
+    /// the conversion (or the call that owns it) is still running, and the
+    /// allocate/free pair must not drift apart.
+    pub fn from_napi_value_auto_with_allocator(env: napi.napi_env, raw: napi.napi_value, comptime T: type, allocator: std.mem.Allocator) !T {
         if (comptime Napi.canFastFrom(T)) {
+            // The fast path copies nothing.
             return Napi.from_napi_value_fast(env, raw, T);
         }
-        return Napi.from_napi_value(env, raw, T);
+        return Napi.from_napi_value_with_allocator(env, raw, T, allocator);
     }
 
     pub fn to_napi_value_fast(env: napi.napi_env, value: anytype) !napi.napi_value {
@@ -581,12 +606,11 @@ pub const Napi = struct {
     /// Release the first `initialized` fields of a partially converted struct.
     /// Used by `errdefer` to roll back a conversion that failed halfway through
     /// instead of leaking everything that was already allocated.
-    pub fn cleanupStructPrefix(comptime T: type, result: *const T, initialized: usize) void {
+    pub fn cleanupStructPrefix(comptime T: type, result: *const T, initialized: usize, allocator: std.mem.Allocator) void {
         const infos = @typeInfo(T);
         if (comptime infos != .@"struct") {
             @compileError("cleanupStructPrefix expects a struct or tuple type, got: " ++ @typeName(T));
         }
-        const allocator = GlobalAllocator.globalAllocator();
         inline for (infos.@"struct".fields, 0..) |field, i| {
             if (i < initialized) {
                 Napi.deinit_napi_value_with_allocator(field.type, @field(result.*, field.name), allocator);
@@ -776,18 +800,41 @@ pub const Napi = struct {
             .@"struct" => {
                 if (comptime helper.isArrayList(T)) {
                     const child = comptime helper.getArrayListElementType(T);
-                    var copy: T = @TypeOf(value).empty;
-                    errdefer copy.deinit(allocator);
+                    var copy: T = T.empty;
+                    var initialized: usize = 0;
+                    errdefer {
+                        // Release the clones that were already appended, then the
+                        // backing buffer: `deinit` only frees the buffer itself.
+                        for (copy.items[0..initialized]) |item| {
+                            Napi.deinit_napi_value_with_allocator(child, item, allocator);
+                        }
+                        copy.deinit(allocator);
+                    }
                     try copy.ensureTotalCapacity(allocator, value.items.len);
                     for (value.items) |item| {
-                        try copy.append(allocator, try Napi.clone_napi_value(child, item, allocator));
+                        // A clone that cannot be appended (capacity growth failed)
+                        // is released by this iteration's errdefer.
+                        const cloned = try Napi.clone_napi_value(child, item, allocator);
+                        errdefer Napi.deinit_napi_value_with_allocator(child, cloned, allocator);
+                        try copy.append(allocator, cloned);
+                        initialized += 1;
                     }
                     return copy;
                 }
 
                 var copy = value;
-                inline for (infos.@"struct".fields) |field| {
+                var initialized: usize = 0;
+                errdefer {
+                    // Fields cloned before the failing field must not be lost.
+                    inline for (infos.@"struct".fields, 0..) |field, i| {
+                        if (i < initialized) {
+                            Napi.deinit_napi_value_with_allocator(field.type, @field(copy, field.name), allocator);
+                        }
+                    }
+                }
+                inline for (infos.@"struct".fields, 0..) |field, i| {
                     @field(copy, field.name) = try Napi.clone_napi_value(field.type, @field(value, field.name), allocator);
+                    initialized = i + 1;
                 }
                 return copy;
             },
@@ -801,21 +848,103 @@ pub const Napi = struct {
         }
     }
 
+    /// True when `T` can contain an explicit `Owned` node somewhere.
+    ///
+    /// Borrowed values (plain slices, literals, JS handles) return false, which
+    /// lets callers skip the cleanup walk entirely: a borrowed slice may alias
+    /// memory that is released elsewhere and must never be read during cleanup.
+    pub fn containsOwnedValue(comptime T: type) bool {
+        if (comptime helper.isOwned(T)) return true;
+
+        switch (@typeInfo(T)) {
+            .optional => |optional| return Napi.containsOwnedValue(optional.child),
+            .array => |array| return Napi.containsOwnedValue(array.child),
+            .pointer => |ptr| return ptr.size == .slice and Napi.containsOwnedValue(ptr.child),
+            .@"struct" => |struct_info| {
+                if (comptime helper.isJsHandle(T)) return false;
+                inline for (struct_info.fields) |field| {
+                    if (comptime Napi.containsOwnedValue(field.type)) return true;
+                }
+                return false;
+            },
+            .@"union" => |union_info| {
+                if (union_info.tag_type == null) return false;
+                inline for (union_info.fields) |field| {
+                    if (comptime Napi.containsOwnedValue(field.type)) return true;
+                }
+                return false;
+            },
+            else => return false,
+        }
+    }
+
+    /// Dispose the explicitly owned parts of an otherwise borrowed value.
+    ///
+    /// Only `Owned` nodes are released, using the allocator each of them
+    /// recorded. Plain slices, literals, input aliases and JS handles are left
+    /// untouched, so this is safe on any value: a converted argument (where the
+    /// call scope owns the copy) as well as a native return (where the payload
+    /// is borrowed unless it says `Owned`).
+    ///
+    /// `allocator` is kept for callers that already thread an allocator through
+    /// the cleanup path; the `Owned` nodes themselves decide what to use.
+    pub fn disposeOwnedParts(comptime T: type, value: T, allocator: std.mem.Allocator) void {
+        if (comptime !Napi.containsOwnedValue(T)) return;
+
+        if (comptime helper.isOwned(T)) {
+            var mutable = value;
+            mutable.deinit();
+            return;
+        }
+
+        switch (@typeInfo(T)) {
+            .optional => |optional| {
+                if (value) |payload| Napi.disposeOwnedParts(optional.child, payload, allocator);
+            },
+            .array => |array| {
+                for (value) |item| Napi.disposeOwnedParts(array.child, item, allocator);
+            },
+            .pointer => |ptr| {
+                if (ptr.size == .slice) {
+                    for (value) |item| Napi.disposeOwnedParts(ptr.child, item, allocator);
+                }
+            },
+            .@"struct" => |struct_info| {
+                if (comptime helper.isJsHandle(T)) return;
+                inline for (struct_info.fields) |field| {
+                    Napi.disposeOwnedParts(field.type, @field(value, field.name), allocator);
+                }
+            },
+            .@"union" => |union_info| {
+                if (union_info.tag_type == null) return;
+                switch (value) {
+                    inline else => |payload| Napi.disposeOwnedParts(@TypeOf(payload), payload, allocator),
+                }
+            },
+            else => {},
+        }
+    }
+
     pub fn from_napi_value(env: napi.napi_env, raw: napi.napi_value, comptime T: type) anyerror!T {
+        return Napi.from_napi_value_with_allocator(env, raw, T, GlobalAllocator.globalAllocator());
+    }
+
+    /// Fallible conversion that allocates every native copy through `allocator`.
+    pub fn from_napi_value_with_allocator(env: napi.napi_env, raw: napi.napi_value, comptime T: type, allocator: std.mem.Allocator) anyerror!T {
         const infos = @typeInfo(T);
         if (comptime helper.isDts(T)) {
             if (comptime !@hasField(T, "value")) {
                 @compileError("Type-only dts wrappers cannot be converted from JavaScript values");
             }
-            return .{ .value = try Napi.from_napi_value_auto(env, raw, T.wrapped_type) };
+            return .{ .value = try Napi.from_napi_value_auto_with_allocator(env, raw, T.wrapped_type, allocator) };
         }
 
         if (comptime helper.isOwned(T)) {
             // An `Owned` parameter receives the freshly allocated conversion
             // result together with the allocator that produced it. The scoped
             // argument cleanup releases it exactly once.
-            const converted: helper.ownedPayload(T) = try Napi.from_napi_value(env, raw, helper.ownedPayload(T));
-            return T.init(converted, GlobalAllocator.globalAllocator());
+            const converted: helper.ownedPayload(T) = try Napi.from_napi_value_with_allocator(env, raw, helper.ownedPayload(T), allocator);
+            return T.init(converted, allocator);
         }
 
         // Every conversion validates the declared type before reading anything, so
@@ -842,7 +971,7 @@ pub const Napi = struct {
 
         switch (T) {
             NapiValue.NapiValue, NapiValue.BigInt, NapiValue.Number, NapiValue.String, NapiValue.Object, NapiValue.Promise, NapiValue.Array, NapiValue.Undefined, NapiValue.Null, Buffer, ArrayBuffer, DataView => {
-                return T.from_raw(env, raw);
+                return wrapperFromNapiValue(T, env, raw);
             },
             else => {
                 const stringMode = comptime helper.stringLike(T);
@@ -853,10 +982,10 @@ pub const Napi = struct {
                         // Slices only ever come from strings.
                         if (comptime infos == .array) {
                             if (try napiTypeOf(env, raw) != napi.napi_string) {
-                                return NapiValue.Array.from_napi_value(env, raw, T);
+                                return NapiValue.Array.from_napi_value_with_allocator(env, raw, T, allocator);
                             }
                         }
-                        return NapiValue.String.from_napi_value(env, raw, T);
+                        return NapiValue.String.from_napi_value_with_allocator(env, raw, T, allocator);
                     },
                     else => {
                         switch (infos) {
@@ -873,7 +1002,7 @@ pub const Napi = struct {
                                 return Napi.numericFromNapiValue(env, raw, T);
                             },
                             .array => {
-                                return NapiValue.Array.from_napi_value(env, raw, T);
+                                return NapiValue.Array.from_napi_value_with_allocator(env, raw, T, allocator);
                             },
                             .pointer => {
                                 if (comptime helper.isSinglePointer(T)) {
@@ -906,7 +1035,7 @@ pub const Napi = struct {
 
                                     @compileError("Unsupported type: " ++ @typeName(T));
                                 }
-                                return NapiValue.Array.from_napi_value(env, raw, T);
+                                return NapiValue.Array.from_napi_value_with_allocator(env, raw, T, allocator);
                             },
                             .@"struct" => {
                                 if (comptime helper.isAbortSignal(T)) {
@@ -927,10 +1056,10 @@ pub const Napi = struct {
                                     return Function(args_type, return_type).from_raw(env, raw);
                                 }
                                 if (comptime helper.isTypedArray(T)) {
-                                    return T.from_raw(env, raw);
+                                    return wrapperFromNapiValue(T, env, raw);
                                 }
                                 if (comptime helper.isDataView(T)) {
-                                    return T.from_raw(env, raw);
+                                    return wrapperFromNapiValue(T, env, raw);
                                 }
                                 if (comptime helper.isReference(T)) {
                                     return try T.from_napi_value(env, raw);
@@ -949,19 +1078,19 @@ pub const Napi = struct {
                                 }
 
                                 if (comptime helper.isTuple(T)) {
-                                    return NapiValue.Array.from_napi_value(env, raw, T);
+                                    return NapiValue.Array.from_napi_value_with_allocator(env, raw, T, allocator);
                                 }
                                 if (comptime helper.isArrayList(T)) {
-                                    return NapiValue.Array.from_napi_value(env, raw, T);
+                                    return NapiValue.Array.from_napi_value_with_allocator(env, raw, T, allocator);
                                 }
-                                return NapiValue.Object.from_napi_value(env, raw, T);
+                                return NapiValue.Object.from_napi_value_with_allocator(env, raw, T, allocator);
                             },
                             .bool => {
                                 return NapiValue.Bool.from_napi_value(env, raw, T);
                             },
                             .@"enum" => {
                                 if (comptime isStringEnum(T)) {
-                                    return enumFromString(env, raw, T);
+                                    return enumFromString(env, raw, T, allocator);
                                 }
                                 return enumFromNumber(env, raw, T);
                             },
@@ -973,7 +1102,7 @@ pub const Napi = struct {
                                         return null;
                                     },
                                     else => {
-                                        const converted: infos.optional.child = try Napi.from_napi_value(env, raw, infos.optional.child);
+                                        const converted: infos.optional.child = try Napi.from_napi_value_with_allocator(env, raw, infos.optional.child, allocator);
                                         return converted;
                                     },
                                 }
@@ -985,7 +1114,7 @@ pub const Napi = struct {
 
                                 inline for (infos.@"union".fields) |field| {
                                     if (try valueMatchesType(env, raw, field.type)) {
-                                        return @unionInit(T, field.name, try Napi.from_napi_value(env, raw, field.type));
+                                        return @unionInit(T, field.name, try Napi.from_napi_value_with_allocator(env, raw, field.type, allocator));
                                     }
                                 }
 
@@ -1177,3 +1306,152 @@ pub const Napi = struct {
         }
     }
 };
+
+// ---------------------------------------------------------------------- tests
+
+test "clone_napi_value rolls back partially cloned values on allocator failure" {
+    const Source = struct {
+        text: []const u8,
+        nested: []const []const u8,
+    };
+
+    const backing = std.testing.allocator;
+    const inner = try backing.alloc([]const u8, 2);
+    defer backing.free(inner);
+    inner[0] = try backing.dupe(u8, "first");
+    inner[1] = try backing.dupe(u8, "second");
+    defer for (inner) |item| backing.free(item);
+
+    const source = Source{
+        .text = try backing.dupe(u8, "hello"),
+        .nested = inner,
+    };
+    defer backing.free(source.text);
+
+    // Every induced allocation failure must leave nothing behind; the testing
+    // allocator fails the test if a clone leaks.
+    var fail_index: usize = 0;
+    while (fail_index < 12) : (fail_index += 1) {
+        var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = fail_index });
+        const cloned = Napi.clone_napi_value(Source, source, failing.allocator()) catch continue;
+        Napi.deinit_napi_value_with_allocator(Source, cloned, failing.allocator());
+    }
+}
+
+test "clone_napi_value rolls back partially cloned ArrayLists" {
+    const Item = struct { name: []const u8 };
+    const List = std.ArrayList(Item);
+
+    const backing = std.testing.allocator;
+    var source = List.empty;
+    defer source.deinit(backing);
+    {
+        const first = try backing.dupe(u8, "first");
+        errdefer backing.free(first);
+        try source.append(backing, .{ .name = first });
+        const second = try backing.dupe(u8, "second");
+        errdefer backing.free(second);
+        try source.append(backing, .{ .name = second });
+    }
+    defer for (source.items) |item| backing.free(item.name);
+
+    var fail_index: usize = 0;
+    while (fail_index < 8) : (fail_index += 1) {
+        var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = fail_index });
+        const cloned = Napi.clone_napi_value(List, source, failing.allocator()) catch continue;
+        Napi.deinit_napi_value_with_allocator(List, cloned, failing.allocator());
+    }
+}
+
+test "owned parts are disposed without touching borrowed containers" {
+    const Payload = struct {
+        borrowed: []const u8,
+        owned: ?[]const u8,
+    };
+
+    const allocator = std.testing.allocator;
+    var disposed: usize = 0;
+
+    const Nested = struct {
+        value: []const u8,
+        allocator: std.mem.Allocator,
+        counter: *usize,
+
+        const Self = @This();
+        pub const is_napi_owned = true;
+        pub const owned_payload_type = []const u8;
+
+        pub fn init(value: []const u8, allocator_: std.mem.Allocator, counter: *usize) Self {
+            return .{ .value = value, .allocator = allocator_, .counter = counter };
+        }
+
+        pub fn deinit(self: *Self) void {
+            self.allocator.free(self.value);
+            self.counter.* += 1;
+        }
+    };
+
+    const value = Payload{
+        .borrowed = "literal",
+        .owned = try allocator.dupe(u8, "owned"),
+    };
+    const nested = Nested.init(value.owned.?, allocator, &disposed);
+
+    try std.testing.expect(Napi.containsOwnedValue(Nested));
+    try std.testing.expect(!Napi.containsOwnedValue(Payload));
+
+    Napi.disposeOwnedParts(Nested, nested, allocator);
+    try std.testing.expectEqual(@as(usize, 1), disposed);
+}
+
+test "wrapper construction prefers tryFromRaw when the wrapper declares it" {
+    const WithTry = struct {
+        used: bool = false,
+
+        pub fn from_raw(env: napi.napi_env, raw: napi.napi_value) @This() {
+            _ = env;
+            _ = raw;
+            return .{ .used = false };
+        }
+
+        pub fn tryFromRaw(env: napi.napi_env, raw: napi.napi_value) !@This() {
+            _ = env;
+            _ = raw;
+            return .{ .used = true };
+        }
+    };
+
+    const WithoutTry = struct {
+        used: bool = false,
+
+        pub fn from_raw(env: napi.napi_env, raw: napi.napi_value) @This() {
+            _ = env;
+            _ = raw;
+            return .{ .used = false };
+        }
+    };
+
+    try std.testing.expect((try wrapperFromNapiValue(WithTry, null, null)).used);
+    try std.testing.expect(!(try wrapperFromNapiValue(WithoutTry, null, null)).used);
+}
+
+test "owned-part cleanup leaves javascript handles, literals and aliases alone" {
+    const Holder = struct {
+        object: NapiValue.Object,
+        text: []const u8,
+        aliases: []const []const u8,
+    };
+
+    const alias = "alias";
+    const value = Holder{
+        .object = NapiValue.Object.from_raw(null, null),
+        .text = "literal",
+        .aliases = &.{ alias, alias },
+    };
+
+    // A borrowed value containing a JS handle has no owned parts, so the walk is
+    // skipped entirely: the handle, the literal and the alias are never read or
+    // released (freeing any of them would be reported by the testing allocator).
+    try std.testing.expect(!Napi.containsOwnedValue(Holder));
+    Napi.disposeOwnedParts(Holder, value, std.testing.allocator);
+}

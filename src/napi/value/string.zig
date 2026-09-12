@@ -49,8 +49,8 @@ pub const String = struct {
         env: napi.napi_env,
         raw: napi.napi_value,
         len: usize,
+        allocator: std.mem.Allocator,
     ) ![]T {
-        const allocator = GlobalAllocator.globalAllocator();
         const with_null = try allocator.alloc(T, len + 1);
         errdefer allocator.free(with_null);
 
@@ -82,6 +82,13 @@ pub const String = struct {
     /// Slices copy the whole string; fixed arrays require an exact element count,
     /// which keeps `[N]u8`/`[N]u16` buffers from silently truncating input.
     pub fn from_napi_value(env: napi.napi_env, raw: napi.napi_value, comptime T: type) !T {
+        return from_napi_value_with_allocator(env, raw, T, GlobalAllocator.globalAllocator());
+    }
+
+    /// Convert with an explicit allocator so the allocation and the matching
+    /// cleanup cannot diverge when this thread's operation allocator changes
+    /// while the conversion is running.
+    pub fn from_napi_value_with_allocator(env: napi.napi_env, raw: napi.napi_value, comptime T: type, allocator: std.mem.Allocator) !T {
         const stringMode = comptime helper.stringLike(T);
         const infos = @typeInfo(T);
 
@@ -93,7 +100,7 @@ pub const String = struct {
                     return NapiError.failStatus(status);
                 }
 
-                return copyInto(T, u8, napi.napi_get_value_string_utf8, env, raw, len, infos);
+                return copyInto(T, u8, napi.napi_get_value_string_utf8, env, raw, len, infos, allocator);
             },
             .Utf16 => {
                 var len: usize = 0;
@@ -102,7 +109,7 @@ pub const String = struct {
                     return NapiError.failStatus(status);
                 }
 
-                return copyInto(T, u16, napi.napi_get_value_string_utf16, env, raw, len, infos);
+                return copyInto(T, u16, napi.napi_get_value_string_utf16, env, raw, len, infos, allocator);
             },
             else => {
                 @compileError("Unsupported string type");
@@ -118,6 +125,7 @@ pub const String = struct {
         raw: napi.napi_value,
         len: usize,
         comptime infos: std.builtin.Type,
+        allocator: std.mem.Allocator,
     ) !T {
         if (comptime infos == .array) {
             const expected = infos.array.len;
@@ -128,15 +136,15 @@ pub const String = struct {
                 );
             }
             var result: T = undefined;
-            const slice = try copyNullTerminated(Unit, get_value, env, raw, len);
-            defer GlobalAllocator.globalAllocator().free(slice);
+            const slice = try copyNullTerminated(Unit, get_value, env, raw, len, allocator);
+            defer allocator.free(slice);
             for (slice, 0..) |unit, i| {
                 result[i] = unit;
             }
             return result;
         }
 
-        const buf = try copyNullTerminated(Unit, get_value, env, raw, len);
+        const buf = try copyNullTerminated(Unit, get_value, env, raw, len, allocator);
         return @as(T, buf);
     }
 

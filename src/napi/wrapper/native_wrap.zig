@@ -183,8 +183,8 @@ fn destroyHeaderRaw(header: *TaggedHeader) void {
 
 fn destroyStoredValue(comptime T: type, allocator: std.mem.Allocator, stored: *T) void {
     // Release with the allocator that created the payload instead of rewriting
-    // the process wide operation allocator: other threads may be allocating
-    // through it concurrently.
+    // the current thread's operation allocator: the payload may be released on a
+    // different thread than the one that wrapped it.
     Napi.deinit_napi_value_with_allocator(T, stored.*, allocator);
     allocator.destroy(stored);
 }

@@ -13,8 +13,24 @@ const counting = @import("counting");
 var counter = counting.CountingAllocator.init(std.heap.page_allocator);
 pub const napi_allocator = counter.allocator();
 
+/// Second, independent accounting allocator used by the allocator-provenance
+/// tests. It is only ever reached through an explicit override.
+var alternate_counter = counting.CountingAllocator.init(std.heap.page_allocator);
+
+fn alternateAllocator() std.mem.Allocator {
+    return alternate_counter.allocator();
+}
+
 pub fn activeBytes() isize {
     return counter.stats().active_bytes;
+}
+
+pub fn activeAltBytes() isize {
+    return alternate_counter.stats().active_bytes;
+}
+
+pub fn activeAltAllocations() isize {
+    return alternate_counter.stats().active_allocations;
 }
 
 pub fn activeAllocations() isize {
@@ -191,6 +207,127 @@ pub fn clonedReturn(input: TextCount) !napi.Owned(TextCount) {
 pub fn clonedArrayReturn(input: []const []const u8) !napi.Owned([]const []const u8) {
     const allocator = napi.globalAllocator();
     return try napi.Owned([]const []const u8).clone(input, allocator);
+}
+
+/// A borrowed return that contains a nested `Owned` field: the container is
+/// borrowed, the `Owned` field must still be disposed after the conversion.
+const OwnedPair = struct {
+    text: napi.Owned([]u8),
+    count: i32,
+};
+
+pub fn ownedPairReturn() OwnedPair {
+    const allocator = napi.globalAllocator();
+    return .{
+        .text = .init(allocator.dupe(u8, "pair") catch @panic("OOM"), allocator),
+        .count = 3,
+    };
+}
+
+/// Same shape, but the second field cannot be converted to a JavaScript value
+/// (`napi.Object.from_raw(env, null)` has no handle). The nested `Owned` field
+/// must be released even though the output conversion fails.
+const OwnedWithFailingOutput = struct {
+    text: napi.Owned([]u8),
+    handle: napi.Object,
+};
+
+pub fn ownedWithFailingOutput(env: napi.Env) OwnedWithFailingOutput {
+    const allocator = napi.globalAllocator();
+    return .{
+        .text = .init(allocator.dupe(u8, "failing-output") catch @panic("OOM"), allocator),
+        .handle = napi.Object.from_raw(env.raw, null),
+    };
+}
+
+/// Nested `Owned` nodes inside a fixed array and an optional.
+pub fn ownedFixedArrayReturn() [2]napi.Owned([]u8) {
+    const allocator = napi.globalAllocator();
+    return .{
+        .init(allocator.dupe(u8, "first") catch @panic("OOM"), allocator),
+        .init(allocator.dupe(u8, "second") catch @panic("OOM"), allocator),
+    };
+}
+
+pub fn ownedOptionalReturn(present: bool) ?napi.Owned([]u8) {
+    if (!present) return null;
+    const allocator = napi.globalAllocator();
+    return .init(allocator.dupe(u8, "optional") catch @panic("OOM"), allocator);
+}
+
+// --------------------------------------------------- F14: allocator provenance
+
+/// Allocate through the alternate allocator and hand the result to the
+/// conversion layer as `Owned`: the value must be released by the allocator that
+/// produced it, not by whatever allocator is current at cleanup time.
+pub fn allocateWithAlternateAllocator() napi.Owned([]u8) {
+    var scope = napi.ScopedAllocatorOverride.enter(alternateAllocator());
+    defer scope.exit();
+
+    const allocator = napi.captureOperationAllocator();
+    return .init(allocator.dupe(u8, "alternate") catch @panic("OOM"), allocator);
+}
+
+/// Reentrant probe: the arguments are converted with the allocator that was
+/// current when the call started, then the callback switches this thread's
+/// operation allocator, and finally the argument copies are released again.
+pub fn allocatorProbe(input: TextCount, callback: napi.Function(struct {}, void)) !u32 {
+    try callback.Call(.{});
+    return @intCast(input.text.len + @as(usize, @intCast(input.count)));
+}
+
+/// Wrap a payload whose native memory (and the wrap header) was allocated by the
+/// alternate allocator. Releasing the wrap must use the recorded allocator.
+pub fn alternateAllocatorWrapProbe(env: napi.Env) !napi.Object {
+    var scope = napi.ScopedAllocatorOverride.enter(alternateAllocator());
+    defer scope.exit();
+
+    const allocator = napi.captureOperationAllocator();
+    var object = try napi.Object.Create(env);
+    try object.wrap(TextCount{
+        .text = allocator.dupe(u8, "wrapped") catch @panic("OOM"),
+        .count = 1,
+    });
+    return object;
+}
+
+/// Runs the same destroy path a GC finalizer would run, without waiting for GC.
+pub fn releaseWrapProbe(object: napi.Object) !void {
+    try object.dropWrapped(TextCount);
+}
+
+pub fn useAlternateOperationAllocator() void {
+    napi.setOperationAllocator(alternateAllocator());
+}
+
+pub fn useDefaultOperationAllocator() void {
+    napi.resetOperationAllocator();
+}
+
+pub fn currentOperationAllocatorIsDefault() bool {
+    const current = napi.globalAllocator();
+    const expected = counter.allocator();
+    return current.vtable == expected.vtable and current.ptr == expected.ptr;
+}
+
+// ---------------------------------------------------- binary inputs (F12/F13)
+
+/// True once the binary wrappers validate their input through `tryFromRaw`.
+/// The detach regression test below only runs when that API exists.
+pub fn supportsBinaryTryFromRaw() bool {
+    return @hasDecl(napi.Uint8Array, "tryFromRaw") and
+        @hasDecl(napi.Buffer, "tryFromRaw") and
+        @hasDecl(napi.ArrayBuffer, "tryFromRaw") and
+        @hasDecl(napi.DataView, "tryFromRaw");
+}
+
+/// Reads through the wrapper. If a detached backing store were accepted by the
+/// conversion, this body would read freed memory.
+pub fn firstByte(view: napi.Uint8Array) u8 {
+    native_calls += 1;
+    const slice = view.asConstSlice();
+    if (slice.len == 0) return 0;
+    return slice[0];
 }
 
 // --------------------------------------------------------------- F13: generics

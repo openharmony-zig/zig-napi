@@ -12,6 +12,7 @@ const Array = @import("./array.zig").Array;
 const helper = @import("../util/helper.zig");
 const Napi = @import("../util/napi.zig").Napi;
 const NapiError = @import("../wrapper/error.zig");
+const GlobalAllocator = @import("../util/allocator.zig");
 const Reference = @import("../wrapper/reference.zig").Reference;
 const native_wrap = @import("../wrapper/native_wrap.zig");
 const options = @import("../options.zig");
@@ -28,6 +29,13 @@ pub const Object = struct {
     }
 
     pub fn from_napi_value(env: napi.napi_env, raw: napi.napi_value, comptime T: type) !T {
+        return from_napi_value_with_allocator(env, raw, T, GlobalAllocator.globalAllocator());
+    }
+
+    /// Convert with an explicit allocator: the partially converted fields are
+    /// rolled back with the same allocator that produced them even if this
+    /// thread's operation allocator changed during the conversion.
+    pub fn from_napi_value_with_allocator(env: napi.napi_env, raw: napi.napi_value, comptime T: type, allocator: std.mem.Allocator) !T {
         const infos = @typeInfo(T);
         switch (infos) {
             .@"struct" => {
@@ -39,7 +47,7 @@ pub const Object = struct {
                 // Track how many fields were converted so a failure half way
                 // through releases exactly the successfully initialized prefix.
                 var initialized: usize = 0;
-                errdefer Napi.cleanupStructPrefix(T, &result, initialized);
+                errdefer Napi.cleanupStructPrefix(T, &result, initialized, allocator);
 
                 inline for (infos.@"struct".fields, 0..) |field, i| {
                     var element: napi.napi_value = undefined;
@@ -47,7 +55,7 @@ pub const Object = struct {
                     if (status != napi.napi_ok) {
                         return NapiError.failStatus(status);
                     }
-                    @field(result, field.name) = try Napi.from_napi_value_auto(env, element, field.type);
+                    @field(result, field.name) = try Napi.from_napi_value_auto_with_allocator(env, element, field.type, allocator);
                     initialized = i + 1;
                 }
                 return result;

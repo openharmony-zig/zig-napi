@@ -186,6 +186,71 @@ test("owned arguments are released by the call scope", (t) => {
   t.is(bindings.activeAllocations(), 0);
 });
 
+test("nested Owned nodes are released on success and on conversion failure", (t) => {
+  const baseline = bindings.activeBytes();
+  const baselineAllocations = bindings.activeAllocations();
+
+  t.deepEqual(bindings.ownedPairReturn(), { text: "pair", count: 3 });
+  t.deepEqual(Array.from(bindings.ownedFixedArrayReturn()), ["first", "second"]);
+  t.is(bindings.ownedOptionalReturn(true), "optional");
+  t.is(bindings.ownedOptionalReturn(false), undefined);
+
+  // The container is borrowed, but the nested Owned field must still be freed
+  // even though the output conversion fails.
+  t.throws(() => bindings.ownedWithFailingOutput());
+
+  t.is(bindings.activeBytes(), baseline);
+  t.is(bindings.activeAllocations(), baselineAllocations);
+});
+
+test("owned values are released by the allocator that produced them", (t) => {
+  const baselineDefault = bindings.activeBytes();
+  const baselineAlt = bindings.activeAltBytes();
+
+  for (let i = 0; i < 100; i += 1) {
+    t.is(bindings.allocateWithAlternateAllocator(), "alternate");
+  }
+
+  t.is(bindings.activeAltBytes(), baselineAlt);
+  t.is(bindings.activeAltAllocations(), 0);
+  t.is(bindings.activeBytes(), baselineDefault);
+});
+
+test("wrapped payloads are released by the allocator that created them", (t) => {
+  const baselineDefault = bindings.activeBytes();
+  const baselineAlt = bindings.activeAltBytes();
+
+  for (let i = 0; i < 100; i += 1) {
+    const wrapped = bindings.alternateAllocatorWrapProbe();
+    // Same destroy path the GC finalizer uses.
+    bindings.releaseWrapProbe(wrapped);
+  }
+
+  t.is(bindings.activeAltBytes(), baselineAlt);
+  t.is(bindings.activeAltAllocations(), 0);
+  t.is(bindings.activeBytes(), baselineDefault);
+});
+
+test("a reentrant callback that switches allocators cannot break cleanup", (t) => {
+  const baselineDefault = bindings.activeBytes();
+  const baselineAlt = bindings.activeAltBytes();
+
+  for (let i = 0; i < 100; i += 1) {
+    try {
+      // The callback leaves this thread's operation allocator switched for the
+      // rest of the outer call, so the outer argument cleanup would mismatch if
+      // the allocator were not captured when the call started.
+      t.is(bindings.allocatorProbe({ text: "abc", count: 1 }, () => bindings.useAlternateOperationAllocator()), 4);
+    } finally {
+      bindings.useDefaultOperationAllocator();
+    }
+  }
+
+  t.true(bindings.currentOperationAllocatorIsDefault());
+  t.is(bindings.activeBytes(), baselineDefault);
+  t.is(bindings.activeAltBytes(), baselineAlt);
+});
+
 test("deep clones do not share memory with their source", (t) => {
   const baseline = bindings.activeBytes();
 
@@ -237,6 +302,28 @@ test("empty strings round trip without leaking", (t) => {
   }
   t.is(bindings.activeBytes(), baseline);
   t.is(bindings.activeAllocations(), 0);
+});
+
+test("detached binary inputs are rejected before the native body runs", (t) => {
+  if (!bindings.supportsBinaryTryFromRaw()) {
+    // The wrappers in this build do not validate their backing store yet; the
+    // class-owned migration adds `tryFromRaw` and this test then runs for real.
+    t.pass("binary wrappers do not expose tryFromRaw in this build");
+    return;
+  }
+
+  bindings.resetNativeCallCount();
+
+  const buffer = new ArrayBuffer(8);
+  const view = new Uint8Array(buffer);
+  view[0] = 123;
+  t.is(bindings.firstByte(view), 123);
+
+  // Detach the backing store through a structured clone transfer.
+  structuredClone(buffer, { transfer: [buffer] });
+
+  t.throws(() => bindings.firstByte(view));
+  t.is(bindings.nativeCallCount(), 1);
 });
 
 test("utf16 strings survive the round trip", (t) => {

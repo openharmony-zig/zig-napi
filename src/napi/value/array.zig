@@ -50,6 +50,13 @@ pub const Array = struct {
     }
 
     pub fn from_napi_value(env: napi.napi_env, raw: napi.napi_value, comptime T: type) !T {
+        return from_napi_value_with_allocator(env, raw, T, GlobalAllocator.globalAllocator());
+    }
+
+    /// Convert with an explicit allocator: allocation and the matching rollback
+    /// stay on the same allocator even if this thread's operation allocator is
+    /// replaced by a reentrant JavaScript callback.
+    pub fn from_napi_value_with_allocator(env: napi.napi_env, raw: napi.napi_value, comptime T: type, allocator: std.mem.Allocator) !T {
         const infos = @typeInfo(T);
         var is_typedarray = false;
         const typedarray_status = napi.napi_is_typedarray(env, raw, &is_typedarray);
@@ -58,7 +65,7 @@ pub const Array = struct {
         }
 
         if (is_typedarray and comptime supports_typedarray_target(T)) {
-            return from_typedarray_value(env, raw, T);
+            return from_typedarray_value(env, raw, T, allocator);
         }
 
         switch (infos) {
@@ -74,7 +81,7 @@ pub const Array = struct {
 
                 var result: T = undefined;
                 var initialized: usize = 0;
-                errdefer cleanupPrefix(infos.array.child, &result, initialized);
+                errdefer cleanupPrefix(infos.array.child, &result, initialized, allocator);
 
                 for (0..array_len) |i| {
                     var element: napi.napi_value = undefined;
@@ -82,7 +89,7 @@ pub const Array = struct {
                     if (status != napi.napi_ok) {
                         return NapiError.failStatus(status);
                     }
-                    result[i] = try Napi.from_napi_value_auto(env, element, infos.array.child);
+                    result[i] = try Napi.from_napi_value_auto_with_allocator(env, element, infos.array.child, allocator);
                     initialized = i + 1;
                 }
 
@@ -92,7 +99,6 @@ pub const Array = struct {
                 if (comptime helper.isSlice(T)) {
                     const len = try arrayLength(env, raw);
 
-                    const allocator = GlobalAllocator.globalAllocator();
                     const buf = try allocator.alloc(infos.pointer.child, len);
                     var initialized: usize = 0;
                     errdefer {
@@ -108,7 +114,7 @@ pub const Array = struct {
                         if (status != napi.napi_ok) {
                             return NapiError.failStatus(status);
                         }
-                        buf[i] = try Napi.from_napi_value_auto(env, element, infos.pointer.child);
+                        buf[i] = try Napi.from_napi_value_auto_with_allocator(env, element, infos.pointer.child, allocator);
                         initialized = i + 1;
                     }
                     return buf;
@@ -131,7 +137,7 @@ pub const Array = struct {
                     errdefer {
                         inline for (infos.@"struct".fields, 0..) |field, i| {
                             if (i < initialized) {
-                                Napi.deinit_napi_value_with_allocator(field.type, @field(result, field.name), GlobalAllocator.globalAllocator());
+                                Napi.deinit_napi_value_with_allocator(field.type, @field(result, field.name), allocator);
                             }
                         }
                     }
@@ -142,7 +148,7 @@ pub const Array = struct {
                         if (status != napi.napi_ok) {
                             return NapiError.failStatus(status);
                         }
-                        @field(result, field.name) = try Napi.from_napi_value_auto(env, element, field.type);
+                        @field(result, field.name) = try Napi.from_napi_value_auto_with_allocator(env, element, field.type, allocator);
                         initialized = i + 1;
                     }
                     return result;
@@ -150,8 +156,6 @@ pub const Array = struct {
                 if (comptime helper.isArrayList(T)) {
                     // Get Array List's items type
                     const child = comptime helper.getArrayListElementType(T);
-
-                    const allocator = GlobalAllocator.globalAllocator();
 
                     var result: T = T.empty;
                     var initialized: usize = 0;
@@ -170,7 +174,7 @@ pub const Array = struct {
                         if (status != napi.napi_ok) {
                             return NapiError.failStatus(status);
                         }
-                        const converted = try Napi.from_napi_value_auto(env, element, child);
+                        const converted = try Napi.from_napi_value_auto_with_allocator(env, element, child, allocator);
                         try result.append(allocator, converted);
                         initialized += 1;
                     }
@@ -185,8 +189,7 @@ pub const Array = struct {
     }
 
     /// Release the elements that were converted before the current element failed.
-    fn cleanupPrefix(comptime Child: type, result: anytype, initialized: usize) void {
-        const allocator = GlobalAllocator.globalAllocator();
+    fn cleanupPrefix(comptime Child: type, result: anytype, initialized: usize, allocator: std.mem.Allocator) void {
         for (result[0..initialized]) |item| {
             Napi.deinit_napi_value_with_allocator(Child, item, allocator);
         }
@@ -301,7 +304,7 @@ pub const Array = struct {
         }
     }
 
-    fn from_typedarray_value(env: napi.napi_env, raw: napi.napi_value, comptime T: type) !T {
+    fn from_typedarray_value(env: napi.napi_env, raw: napi.napi_value, comptime T: type, allocator: std.mem.Allocator) !T {
         var raw_type: napi.napi_typedarray_type = undefined;
         var len: usize = 0;
         var data: ?*anyopaque = null;
@@ -343,7 +346,6 @@ pub const Array = struct {
                     @compileError("TypedArray only supports numeric slice targets, got: " ++ @typeName(T));
                 }
 
-                const allocator = GlobalAllocator.globalAllocator();
                 const buf = try allocator.alloc(ptr.child, element_len);
                 errdefer allocator.free(buf);
                 try fillFromTypedArray(ptr.child, buf, raw_type, data, element_len);
@@ -356,7 +358,6 @@ pub const Array = struct {
                         @compileError("TypedArray only supports numeric ArrayList targets, got: " ++ @typeName(T));
                     }
 
-                    const allocator = GlobalAllocator.globalAllocator();
                     const items = try allocator.alloc(child, element_len);
                     defer allocator.free(items);
                     try fillFromTypedArray(child, items, raw_type, data, element_len);

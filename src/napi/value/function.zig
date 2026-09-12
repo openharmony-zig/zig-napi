@@ -95,6 +95,7 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                     payload: anytype,
                     event_listener: napi.napi_value,
                     abort_signal: ?AbortSignal,
+                    allocator: std.mem.Allocator,
                 ) napi.napi_value {
                     if (comptime helper.isAsyncDescriptor(@TypeOf(payload))) {
                         var task = payload;
@@ -104,13 +105,15 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                         return promise.raw;
                     }
 
-                    // Owned payloads transfer native ownership to this call: the
-                    // data is copied into JavaScript values first, then released.
-                    // Plain payloads are borrowed and are never freed here.
-                    if (comptime helper.isOwned(@TypeOf(payload))) {
-                        var owned = payload;
-                        defer owned.deinit();
-                        return Napi.to_napi_value_auto(inner_env, owned.value, null) catch |err| {
+                    // A plain return is borrowed: its container, literals and
+                    // aliases are never freed. Only explicit `Owned` nodes (at
+                    // the top level or nested inside the returned value) transfer
+                    // ownership to this call, and they are disposed after the
+                    // JavaScript value has been built - on success and on a
+                    // failed output conversion alike.
+                    if (comptime Napi.containsOwnedValue(@TypeOf(payload))) {
+                        defer Napi.disposeOwnedParts(@TypeOf(payload), payload, allocator);
+                        return Napi.to_napi_value_auto(inner_env, payload, null) catch |err| {
                             return throwAnyAndUndefined(inner_env, err);
                         };
                     }
@@ -125,15 +128,16 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                     ret: anytype,
                     event_listener: napi.napi_value,
                     abort_signal: ?AbortSignal,
+                    allocator: std.mem.Allocator,
                 ) napi.napi_value {
                     if (comptime NapiError.isResult(@TypeOf(ret))) {
                         return switch (ret) {
-                            .ok => |payload| completePayload(inner_env, payload, event_listener, abort_signal),
+                            .ok => |payload| completePayload(inner_env, payload, event_listener, abort_signal, allocator),
                             .err => |err| throwAndUndefined(inner_env, err),
                         };
                     }
 
-                    return completePayload(inner_env, ret, event_listener, abort_signal);
+                    return completePayload(inner_env, ret, event_listener, abort_signal, allocator);
                 }
 
                 fn inner_fn(inner_env: napi.napi_env, info: napi.napi_callback_info) callconv(.c) napi.napi_value {
@@ -141,7 +145,7 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                     // error state of the embedding frame intact and never leak
                     // callback local errors into it.
                     const outer_frame = NapiError.ErrorFrame.save();
-                    defer _ = outer_frame.restore();
+                    defer outer_frame.restore();
 
                     const return_info = infos.@"fn".return_type.?;
                     const return_payload = returnPayloadType(return_info);
@@ -165,10 +169,15 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                         }
                     }
 
-                    // Every converted argument is a native copy owned by this call.
-                    // It is released on both the success and the failure path; async
-                    // descriptors clone what they capture themselves.
-                    const frame_allocator = GlobalAllocator.globalAllocator();
+                    // Every converted argument is a native copy owned by this call
+                    // scope: it is released on both the success and the failure
+                    // path. The allocator is captured *once* here and threaded
+                    // through the conversion and the cleanup, so a reentrant
+                    // JavaScript callback that replaces this thread's operation
+                    // allocator cannot make cleanup use a different allocator than
+                    // the one that produced the copies. Async descriptors clone
+                    // what they capture themselves.
+                    const frame_allocator = GlobalAllocator.capture();
 
                     var napi_params: std.meta.ArgsTuple(value_type) = undefined;
                     var initialized_params: usize = 0;
@@ -182,7 +191,12 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                     var abort_signal: ?AbortSignal = null;
                     inline for (params[env_index..], env_index..) |param_index, i| {
                         NapiError.clearLastError();
-                        const converted = Napi.from_napi_value_auto(inner_env, args_raw[i - env_index], param_index.type.?) catch |err| {
+                        const converted = Napi.from_napi_value_auto_with_allocator(
+                            inner_env,
+                            args_raw[i - env_index],
+                            param_index.type.?,
+                            frame_allocator,
+                        ) catch |err| {
                             return throwAnyAndUndefined(inner_env, err);
                         };
                         napi_params[i] = converted;
@@ -201,10 +215,10 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                         const ret = @call(.auto, value, napi_params) catch |err| {
                             return throwAnyAndUndefined(inner_env, err);
                         };
-                        return completeReturn(inner_env, ret, event_listener, abort_signal);
+                        return completeReturn(inner_env, ret, event_listener, abort_signal, frame_allocator);
                     } else {
                         const ret = @call(.auto, value, napi_params);
-                        return completeReturn(inner_env, ret, event_listener, abort_signal);
+                        return completeReturn(inner_env, ret, event_listener, abort_signal, frame_allocator);
                     }
                 }
             };

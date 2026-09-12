@@ -121,6 +121,16 @@ pub fn resetOperationAllocator() void {
     global_allocator.global_manager.set(global_allocator.defaultAllocator());
 }
 
+/// Read the operation allocator of the current thread once, so a value that is
+/// released later can use exactly the allocator that produced it.
+pub fn captureOperationAllocator() std.mem.Allocator {
+    return global_allocator.capture();
+}
+
+/// Temporarily replace the current thread's operation allocator; the previous
+/// one is restored when the scope exits. Overrides are per thread and nest.
+pub const ScopedAllocatorOverride = global_allocator.ScopedOverride;
+
 pub fn AsyncContext(comptime Event: type) type {
     return async.AsyncContext(Event);
 }
@@ -133,3 +143,12 @@ pub fn AsyncWithEvents(comptime AsyncResult: type, comptime Event: type, comptim
 
 pub const NODE_API_MODULE = module.NODE_API_MODULE;
 pub const NODE_API_MODULE_WITH_INIT = module.NODE_API_MODULE_WITH_INIT;
+
+test {
+    // Pull in the native unit tests of the conversion layer so
+    // `zig test src/napi.zig` runs them.
+    _ = @import("./napi/util/allocator.zig");
+    _ = @import("./napi/util/napi.zig");
+    _ = @import("./napi/wrapper/error.zig");
+    _ = @import("./napi/ownership.zig");
+}

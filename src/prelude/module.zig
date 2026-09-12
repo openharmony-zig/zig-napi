@@ -39,7 +39,7 @@ pub fn NODE_API_MODULE_WITH_INIT(
             // Module initialization runs inside the embedding frame; keep that
             // frame intact and do not leak initialization errors into it.
             const outer_frame = NapiError.ErrorFrame.save();
-            defer _ = outer_frame.restore();
+            defer outer_frame.restore();
 
             const export_obj = Object.from_raw(env, exports);
             const undefined_value = Undefined.New(inner_env);
