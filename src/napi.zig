@@ -20,6 +20,7 @@ const native_wrap = @import("./napi/wrapper/native_wrap.zig");
 const global_allocator = @import("./napi/util/allocator.zig");
 const options = @import("./napi/options.zig");
 const dts_override = @import("./napi/dts.zig");
+const ownership = @import("./napi/ownership.zig");
 
 pub const napi_sys = @import("napi-sys");
 pub const NapiVersion = options.NapiVersion;
@@ -84,6 +85,29 @@ pub const dts = dts_override.dts;
 
 pub fn globalAllocator() std.mem.Allocator {
     return global_allocator.globalAllocator();
+}
+
+/// Explicitly owned native value.
+///
+/// Conversion results that were allocated natively (for example by
+/// `allocator.dupe`) must be returned as `Owned(T)`: the conversion layer
+/// converts the payload and then releases it with its own allocator. Plain
+/// slices are treated as borrowed and are never freed, so literals and input
+/// aliases stay safe.
+pub fn Owned(comptime T: type) type {
+    return ownership.Owned(T);
+}
+
+/// True when `T` is an `napi.Owned` wrapper.
+pub fn isOwned(comptime T: type) bool {
+    return ownership.isOwned(T);
+}
+
+/// Deep-copy a native value shape into memory owned by `allocator`.
+/// JavaScript handles are rejected at compile time: they must not become shared
+/// state between threads.
+pub fn cloneOwned(comptime T: type, source: T, allocator: std.mem.Allocator) !Owned(T) {
+    return ownership.Owned(T).clone(source, allocator);
 }
 
 /// Override only short-lived conversion/operation allocations.

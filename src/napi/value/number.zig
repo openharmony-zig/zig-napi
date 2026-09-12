@@ -2,6 +2,8 @@ const std = @import("std");
 const napi = @import("napi-sys").napi_sys;
 const Env = @import("../env.zig").Env;
 const helper = @import("../util/helper.zig");
+const Napi = @import("../util/napi.zig").Napi;
+const NapiError = @import("../wrapper/error.zig");
 
 pub const Number = struct {
     env: napi.napi_env,
@@ -16,41 +18,21 @@ pub const Number = struct {
         };
     }
 
-    pub fn from_napi_value(env: napi.napi_env, raw: napi.napi_value, comptime T: type) T {
+    /// Strict numeric conversion. See `Napi.numericFromNapiValue` for the rules;
+    /// the fast path uses exactly the same validation.
+    pub fn from_napi_value(env: napi.napi_env, raw: napi.napi_value, comptime T: type) !T {
         switch (@typeInfo(T)) {
-            .float => {
-                var temp: f64 = undefined;
-                _ = napi.napi_get_value_double(env, raw, &temp);
-                return @floatCast(temp);
-            },
-            .int => |int| {
-                if (int.signedness == .signed) {
-                    if (int.bits <= 32) {
-                        var temp: i32 = undefined;
-                        _ = napi.napi_get_value_int32(env, raw, &temp);
-                        return @intCast(temp);
-                    }
-
-                    var temp: i64 = undefined;
-                    _ = napi.napi_get_value_int64(env, raw, &temp);
-                    return @intCast(temp);
-                }
-
-                if (int.bits <= 32) {
-                    var temp: u32 = undefined;
-                    _ = napi.napi_get_value_uint32(env, raw, &temp);
-                    return @intCast(temp);
-                }
-
-                var temp: i64 = undefined;
-                _ = napi.napi_get_value_int64(env, raw, &temp);
-                return @intCast(temp);
-            },
+            .float, .int => return Napi.numericFromNapiValue(env, raw, T),
             else => @compileError("Unsupported type: " ++ @typeName(T)),
         }
     }
 
     pub fn New(env: Env, value: anytype) Number {
+        return create(env, value) catch @panic("napi: failed to create number value");
+    }
+
+    /// Failing constructor used by the conversion layer.
+    pub fn create(env: Env, value: anytype) !Number {
         const value_type = @TypeOf(value);
 
         if (@typeInfo(value_type) != .float and @typeInfo(value_type) != .int and @typeInfo(value_type) != .comptime_int and @typeInfo(value_type) != .comptime_float) {
@@ -63,39 +45,25 @@ pub const Number = struct {
             else => value_type,
         };
 
-        switch (merge_type) {
-            f16, f32, f64 => {
-                var result: napi.napi_value = undefined;
-                _ = napi.napi_create_double(env.raw, @floatCast(value), &result);
-                return Number.from_raw(env.raw, result);
-            },
-            isize,
+        var result: napi.napi_value = undefined;
+        const status = switch (merge_type) {
+            f16, f32, f64 => napi.napi_create_double(env.raw, @floatCast(value), &result),
             i8,
             i16,
             i32,
-            => {
-                var result: napi.napi_value = undefined;
-                _ = napi.napi_create_int32(env.raw, @intCast(value), &result);
-                return Number.from_raw(env.raw, result);
-            },
-            i64 => {
-                var result: napi.napi_value = undefined;
-                _ = napi.napi_create_int64(env.raw, @intCast(value), &result);
-                return Number.from_raw(env.raw, result);
-            },
-            usize, u8, u16, u32 => {
-                var result: napi.napi_value = undefined;
-                _ = napi.napi_create_uint32(env.raw, @intCast(value), &result);
-                return Number.from_raw(env.raw, result);
-            },
-            u64 => {
-                var result: napi.napi_value = undefined;
-                _ = napi.napi_create_double(env.raw, @floatFromInt(value), &result);
-                return Number.from_raw(env.raw, result);
-            },
+            => napi.napi_create_int32(env.raw, @intCast(value), &result),
+            i64, isize => napi.napi_create_int64(env.raw, @intCast(value), &result),
+            u8, u16, u32 => napi.napi_create_uint32(env.raw, @intCast(value), &result),
+            // 64 bit unsigned values do not fit `napi_create_int64`; JavaScript
+            // numbers are exact up to 2^53, use `napi.BigInt` beyond that.
+            u64, usize => napi.napi_create_double(env.raw, @floatFromInt(value), &result),
             else => {
                 @compileError("For u128, i128, f128 please use BigInt instead");
             },
+        };
+        if (status != napi.napi_ok) {
+            return NapiError.failStatus(status);
         }
+        return Number.from_raw(env.raw, result);
     }
 };

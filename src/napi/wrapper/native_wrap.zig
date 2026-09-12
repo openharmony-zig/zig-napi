@@ -174,11 +174,10 @@ fn destroyHeaderRaw(header: *TaggedHeader) void {
 }
 
 fn destroyStoredValue(comptime T: type, allocator: std.mem.Allocator, stored: *T) void {
-    const previous_allocator = GlobalAllocator.globalAllocator();
-    GlobalAllocator.global_manager.set(allocator);
-    defer GlobalAllocator.global_manager.set(previous_allocator);
-
-    Napi.deinit_napi_value(T, stored.*);
+    // Release with the allocator that created the payload instead of rewriting
+    // the process wide operation allocator: other threads may be allocating
+    // through it concurrently.
+    Napi.deinit_napi_value_with_allocator(T, stored.*, allocator);
     allocator.destroy(stored);
 }
 

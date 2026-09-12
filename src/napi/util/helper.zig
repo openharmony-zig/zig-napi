@@ -101,19 +101,88 @@ pub fn isAbortSignal(comptime T: type) bool {
 }
 
 pub fn isTypedArray(comptime T: type) bool {
+    switch (@typeInfo(T)) {
+        .@"struct", .@"union", .@"enum", .@"opaque" => {},
+        else => return false,
+    }
     return @hasDecl(T, "is_napi_typedarray");
 }
 
 pub fn isDataView(comptime T: type) bool {
+    switch (@typeInfo(T)) {
+        .@"struct", .@"union", .@"enum", .@"opaque" => {},
+        else => return false,
+    }
     return @hasDecl(T, "is_napi_dataview");
 }
 
 pub fn isReference(comptime T: type) bool {
+    switch (@typeInfo(T)) {
+        .@"struct", .@"union", .@"enum", .@"opaque" => {},
+        else => return false,
+    }
     return @hasDecl(T, "is_napi_reference");
 }
 
 pub fn isExternal(comptime T: type) bool {
+    switch (@typeInfo(T)) {
+        .@"struct", .@"union", .@"enum", .@"opaque" => {},
+        else => return false,
+    }
     return @hasDecl(T, "is_napi_external");
+}
+
+pub fn isFixedArray(comptime T: type) bool {
+    return @typeInfo(T) == .array;
+}
+
+/// True when `T` is a `napi.Owned` wrapper.
+pub fn isOwned(comptime T: type) bool {
+    switch (@typeInfo(T)) {
+        .@"struct", .@"union", .@"enum", .@"opaque" => {},
+        else => return false,
+    }
+    return @hasDecl(T, "is_napi_owned") and @TypeOf(@field(T, "is_napi_owned")) == bool and @field(T, "is_napi_owned");
+}
+
+/// Payload type of a `napi.Owned` wrapper.
+pub fn ownedPayload(comptime T: type) type {
+    if (!isOwned(T)) {
+        @compileError("Type is not napi.Owned: " ++ @typeName(T));
+    }
+    return @field(T, "owned_payload_type");
+}
+
+/// True for the error payload types of this library. Their message strings are
+/// borrowed, so ownership handling must skip them entirely.
+pub fn isErrorValue(comptime T: type) bool {
+    switch (@typeInfo(T)) {
+        .@"struct", .@"union", .@"enum", .@"opaque" => {},
+        else => return false,
+    }
+    return @hasDecl(T, "is_napi_error") and @TypeOf(@field(T, "is_napi_error")) == bool and @field(T, "is_napi_error");
+}
+
+/// True when the type is backed by a JavaScript handle instead of native memory.
+/// Such values must not be declared thread safe, cloned or freed by native code.
+pub fn isJsHandle(comptime T: type) bool {
+    switch (@typeInfo(T)) {
+        .@"struct", .@"union", .@"enum", .@"opaque" => {},
+        else => return false,
+    }
+    if (isOwned(T)) return false;
+    if (T == @import("napi-sys").napi_sys.napi_value) return true;
+    // Every JS backed wrapper in this library exposes `from_raw` and stores an
+    // `env`/`raw` pair. User data types must not declare `from_raw`.
+    return @hasDecl(T, "from_raw") or
+        isNapiFunction(T) or
+        isThreadSafeFunction(T) or
+        isTypedArray(T) or
+        isDataView(T) or
+        isReference(T) or
+        isExternal(T) or
+        isAbortSignal(T) or
+        isErrorValue(T);
 }
 
 pub fn isDts(comptime T: type) bool {
@@ -223,6 +292,10 @@ pub fn collectFunctionArgs(comptime functions: anytype) type {
 }
 
 pub fn shortTypeName(comptime T: type) []const u8 {
-    var iter = std.mem.splitBackwardsScalar(u8, @typeName(T), '.');
+    const full = @typeName(T);
+    // Drop generic arguments before splitting so `a.b.External(a.c.Object, i32)`
+    // is reported as `External`.
+    const head = if (std.mem.indexOfScalar(u8, full, '(')) |open| full[0..open] else full;
+    var iter = std.mem.splitBackwardsScalar(u8, head, '.');
     return iter.first();
 }

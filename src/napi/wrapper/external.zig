@@ -216,7 +216,7 @@ pub fn External(comptime T: type) type {
             const stored = try allocator.create(T);
             stored.* = payload;
             errdefer {
-                Napi.deinit_napi_value(T, stored.*);
+                Napi.deinit_napi_value_with_allocator(T, stored.*, allocator);
                 allocator.destroy(stored);
             }
 
@@ -241,7 +241,7 @@ pub fn External(comptime T: type) type {
             const allocator = header.allocator;
             if (header.value_ptr) |ptr| {
                 const stored: *T = @ptrCast(@alignCast(ptr));
-                Napi.deinit_napi_value(T, stored.*);
+                Napi.deinit_napi_value_with_allocator(T, stored.*, allocator);
                 allocator.destroy(stored);
                 header.value_ptr = null;
             }

@@ -27,7 +27,7 @@ pub const Object = struct {
         };
     }
 
-    pub fn from_napi_value(env: napi.napi_env, raw: napi.napi_value, comptime T: type) T {
+    pub fn from_napi_value(env: napi.napi_env, raw: napi.napi_value, comptime T: type) !T {
         const infos = @typeInfo(T);
         switch (infos) {
             .@"struct" => {
@@ -36,10 +36,19 @@ pub const Object = struct {
                 }
 
                 var result: T = undefined;
-                inline for (infos.@"struct".fields) |field| {
+                // Track how many fields were converted so a failure half way
+                // through releases exactly the successfully initialized prefix.
+                var initialized: usize = 0;
+                errdefer Napi.cleanupStructPrefix(T, &result, initialized);
+
+                inline for (infos.@"struct".fields, 0..) |field, i| {
                     var element: napi.napi_value = undefined;
-                    _ = napi.napi_get_named_property(env, raw, @ptrCast(field.name.ptr), &element);
-                    @field(result, field.name) = Napi.from_napi_value_auto(env, element, field.type);
+                    const status = napi.napi_get_named_property(env, raw, @ptrCast(field.name.ptr), &element);
+                    if (status != napi.napi_ok) {
+                        return NapiError.failStatus(status);
+                    }
+                    @field(result, field.name) = try Napi.from_napi_value_auto(env, element, field.type);
+                    initialized = i + 1;
                 }
                 return result;
             },
@@ -116,33 +125,38 @@ pub const Object = struct {
         try self.SetProperty(key, value);
     }
 
-    pub fn Get(self: Object, key: []const u8, comptime T: type) T {
-        const key_raw = self.keyToNapiValue(key) catch @panic("Failed to create object property key");
+    pub fn Get(self: Object, key: []const u8, comptime T: type) !T {
+        const key_raw = try self.keyToNapiValue(key);
         var raw: napi.napi_value = undefined;
-        _ = napi.napi_get_property(self.env, self.raw, key_raw, &raw);
+        const status = napi.napi_get_property(self.env, self.raw, key_raw, &raw);
+        if (status != napi.napi_ok) {
+            return NapiError.failStatus(status);
+        }
         return Napi.from_napi_value_auto(self.env, raw, T);
     }
 
-    pub fn GetNamed(self: Object, comptime key: []const u8, comptime T: type) T {
+    pub fn GetNamed(self: Object, comptime key: []const u8, comptime T: type) !T {
         var raw: napi.napi_value = undefined;
-        _ = napi.napi_get_named_property(self.env, self.raw, @ptrCast(key.ptr), &raw);
+        const status = napi.napi_get_named_property(self.env, self.raw, @ptrCast(key.ptr), &raw);
+        if (status != napi.napi_ok) {
+            return NapiError.failStatus(status);
+        }
         return Napi.from_napi_value_auto(self.env, raw, T);
     }
 
     /// Check if the object has a property
     /// If key is []u8 or likely, key will marked as a string, it will try to get a named property
     /// Otherwise, key will be marked as a NapiValue and check a property by napi_has_property
-    pub fn Has(self: Object, comptime key: []const u8) bool {
+    pub fn Has(self: Object, comptime key: []const u8) !bool {
         var result: bool = false;
 
         const is_string = helper.isString(key);
-        switch (is_string) {
-            .true => {
-                _ = napi.napi_has_named_property(self.env, self.raw, @ptrCast(key.ptr), &result);
-            },
-            .false => {
-                _ = napi.napi_has_property(self.env, self.raw, @ptrCast(key.ptr), &result);
-            },
+        const status = switch (is_string) {
+            .true => napi.napi_has_named_property(self.env, self.raw, @ptrCast(key.ptr), &result),
+            .false => napi.napi_has_property(self.env, self.raw, @ptrCast(key.ptr), &result),
+        };
+        if (status != napi.napi_ok) {
+            return NapiError.failStatus(status);
         }
         return result;
     }

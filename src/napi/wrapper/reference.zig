@@ -36,9 +36,11 @@ pub fn Reference(comptime T: type) type {
             return Self.from_raw(env.raw, raw_ref);
         }
 
-        pub fn from_napi_value(env: napi.napi_env, raw_value: napi.napi_value) Self {
+        /// Create a strong reference for a JavaScript value. Fails instead of
+        /// aborting when the runtime refuses to create the reference.
+        pub fn from_napi_value(env: napi.napi_env, raw_value: napi.napi_value) !Self {
             const value = T.from_raw(env, raw_value);
-            return Self.New(Env.from_raw(env), value) catch @panic("Failed to create reference");
+            return try Self.New(Env.from_raw(env), value);
         }
 
         pub fn to_napi_value(self: Self, env: napi.napi_env) !napi.napi_value {

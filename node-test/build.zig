@@ -9,6 +9,18 @@ fn addNodeAddon(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
 ) !void {
+    try addNodeAddonWith(b, napi, name, source, target, optimize, null);
+}
+
+fn addNodeAddonWith(
+    b: *std.Build,
+    napi: *std.Build.Module,
+    name: []const u8,
+    source: []const u8,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    extra_imports: ?[]const struct { []const u8, *std.Build.Module },
+) !void {
     const addon = try napi_build.nodeAddonBuild(b, .{
         .name = name,
         .napi_module = napi,
@@ -36,6 +48,12 @@ fn addNodeAddon(
         napi_build.nodeAddonFilename(b, name, target),
     );
     b.getInstallStep().dependOn(&npm_root_install.step);
+
+    if (extra_imports) |imports| {
+        for (imports) |entry| {
+            addon.root_module.addImport(entry[0], entry[1]);
+        }
+    }
 }
 
 pub fn build(b: *std.Build) !void {
@@ -63,4 +81,20 @@ pub fn build(b: *std.Build) !void {
         optimize,
     );
     try addNodeAddon(b, napi, "audit", "audit/src/lib.zig", target, optimize);
+
+    // Conversion/ownership regression addon. It uses its own counting allocator
+    // so the spec can assert that conversions return to their allocation
+    // baseline, including on the failure paths.
+    const counting_allocator = b.createModule(.{
+        .root_source_file = b.path("../examples/allocator-custom/src/counting_allocator.zig"),
+    });
+    try addNodeAddonWith(
+        b,
+        napi,
+        "conversion_audit",
+        "napi/src/conversion_audit.zig",
+        target,
+        optimize,
+        &.{.{ "counting", counting_allocator }},
+    );
 }

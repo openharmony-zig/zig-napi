@@ -29,10 +29,10 @@ pub fn get_arraylist(array: ArrayList(f32)) ArrayList(f32) {
     return array;
 }
 
-pub fn raw_array_sum(array: napi.Array) f64 {
+pub fn raw_array_sum(array: napi.Array) !f64 {
     var total: f64 = 0;
     for (0..array.length()) |i| {
-        total += array.Get(@intCast(i), f64);
+        total += try array.Get(@intCast(i), f64);
     }
     return total;
 }

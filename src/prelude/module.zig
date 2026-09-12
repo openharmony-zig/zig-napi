@@ -25,22 +25,34 @@ pub fn NODE_API_MODULE_WITH_INIT(
     }
 
     const InitFn = struct {
+        /// Report a failed export conversion to JavaScript. A pending exception is
+        /// left untouched so the original error object survives.
+        fn reportInitFailure(inner_env: Env, err: anyerror) void {
+            if (err == error.PendingException or NapiError.hasPendingException()) {
+                return;
+            }
+            NapiError.throwCurrent(inner_env);
+        }
+
         fn inner_init(env: napi.napi_env, exports: napi.napi_value) callconv(.c) napi.napi_value {
+            const inner_env = Env.from_raw(env);
+            // Module initialization runs inside the embedding frame; keep that
+            // frame intact and do not leak initialization errors into it.
+            const outer_frame = NapiError.ErrorFrame.save();
+            defer _ = outer_frame.restore();
+
             const export_obj = Object.from_raw(env, exports);
-            const undefined_value = Undefined.New(Env.from_raw(env));
+            const undefined_value = Undefined.New(inner_env);
 
             inline for (root_infos.@"struct".fields) |field| {
-                const value = Napi.to_napi_value(env, @field(root, field.name), field.name) catch {
-                    if (NapiError.last_error) |last_err| {
-                        last_err.throwInto(Env.from_raw(env));
-                    }
+                const value = Napi.to_napi_value(env, @field(root, field.name), field.name) catch |err| {
+                    reportInitFailure(inner_env, err);
                     return undefined_value.raw;
                 };
 
-                export_obj.Set(field.name, value) catch {
-                    if (NapiError.last_error) |last_err| {
-                        last_err.throwInto(Env.from_raw(env));
-                    }
+                export_obj.Set(field.name, value) catch |err| {
+                    reportInitFailure(inner_env, err);
+                    return undefined_value.raw;
                 };
             }
 
@@ -49,36 +61,22 @@ pub fn NODE_API_MODULE_WITH_INIT(
                     continue;
                 }
                 const origin_value = @field(root, decl.name);
-                const value = Napi.to_napi_value(env, origin_value, decl.name) catch {
-                    if (NapiError.last_error) |last_err| {
-                        last_err.throwInto(Env.from_raw(env));
-                    }
+                const value = Napi.to_napi_value(env, origin_value, decl.name) catch |err| {
+                    reportInitFailure(inner_env, err);
                     return undefined_value.raw;
                 };
-                export_obj.Set(decl.name, value) catch {
-                    if (NapiError.last_error) |last_err| {
-                        last_err.throwInto(Env.from_raw(env));
-                    }
+                export_obj.Set(decl.name, value) catch |err| {
+                    reportInitFailure(inner_env, err);
+                    return undefined_value.raw;
                 };
             }
 
             if (init) |init_fn| {
                 const result = init_fn(
-                    Env.from_raw(env),
+                    inner_env,
                     export_obj,
                 ) catch |e| {
-                    switch (e) {
-                        error.GenericFailure, error.PendingException, error.Cancelled, error.EscapeCalledTwice, error.HandleScopeMismatch, error.CallbackScopeMismatch, error.QueueFull, error.Closing, error.BigintExpected, error.DateExpected, error.ArrayBufferExpected, error.DetachableArraybufferExpected, error.WouldDeadlock, error.NoExternalBuffersAllowed, error.Unknown, error.InvalidArg, error.ObjectExpected, error.StringExpected, error.NameExpected, error.FunctionExpected, error.NumberExpected, error.BooleanExpected, error.ArrayExpected => {
-                            if (NapiError.last_error) |last_err| {
-                                last_err.throwInto(Env.from_raw(env));
-                            }
-                        },
-                        else => {
-                            if (NapiError.last_error) |last_err| {
-                                last_err.throwInto(Env.from_raw(env));
-                            }
-                        },
-                    }
+                    reportInitFailure(inner_env, e);
                     return export_obj.raw;
                 };
 
