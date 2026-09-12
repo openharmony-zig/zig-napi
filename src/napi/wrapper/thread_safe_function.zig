@@ -78,8 +78,9 @@ fn CallData(comptime Args: type) type {
 ///
 /// Unlike `NapiError.Error.to_napi_error`, every N-API status is checked instead
 /// of asserted: a queued call has no caller to report a failed allocation to,
-/// and an uninitialized handle must never reach the engine. Any failure falls
-/// back to `undefined`, which leaves the error slot empty instead of invalid.
+/// and an uninitialized handle must never reach the engine. `null` means the
+/// error could not be built, and the caller must not dispatch the failure call
+/// at all rather than report it as a success.
 fn createErrorValue(inner_env: napi.napi_env, err: NapiError.Error) ?napi.napi_value {
     const text = switch (err) {
         inline else => |inner| .{
@@ -185,9 +186,11 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
                     // the engine with one crashes the process (audit H03).
                     if (self.thread_safe_function_call_variant) {
                         if (call_data.err) |snapshot| {
-                            var argv = [1]napi.napi_value{
-                                createErrorValue(inner_env, snapshot.value()) orelse undefined_value,
-                            };
+                            // A failure that cannot be turned into an error
+                            // object is not delivered as a successful call
+                            // instead: the payload is released and the callback
+                            // simply never runs for this item.
+                            var argv = [1]napi.napi_value{createErrorValue(inner_env, snapshot.value()) orelse return};
                             var ret: napi.napi_value = null;
                             _ = napi.napi_call_function(inner_env, undefined_value, js_callback, argv.len, &argv, &ret);
                             return;
@@ -227,9 +230,11 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
                     if (conversion_error) |err| {
                         // Never pass an invalid handle to JavaScript: report the
                         // conversion failure through the error slot when the
-                        // callee accepts one, otherwise as undefined values.
+                        // callee accepts one, otherwise as undefined values. An
+                        // error slot that cannot hold the error object must not
+                        // be delivered as a success.
                         if (call_variant == 1) {
-                            argv[0] = createErrorValue(inner_env, err) orelse undefined_value;
+                            argv[0] = createErrorValue(inner_env, err) orelse return;
                         }
                     }
 

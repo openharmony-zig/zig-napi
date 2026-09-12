@@ -294,6 +294,8 @@ pub const ConversionFrame = struct {
     /// `allocator` releases the bookkeeping list and must stay valid until
     /// `end` ran.
     pub fn start(self: *Self, allocator: std.mem.Allocator) void {
+        // Installing the same frame twice would make it its own outer frame.
+        std.debug.assert(current_frame != self);
         self.allocator = allocator;
         self.outer = current_frame;
         self.pending = .empty;
@@ -323,6 +325,8 @@ pub const ConversionFrame = struct {
     /// Roll back (if needed), restore the previous frame and release the
     /// bookkeeping list. Must be the last call on a started frame.
     pub fn end(self: *Self) void {
+        // Frames unwind in reverse order of `start`.
+        std.debug.assert(current_frame == self);
         self.rollbackUncommitted();
         current_frame = self.outer;
         self.pending.deinit(self.allocator);
