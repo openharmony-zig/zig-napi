@@ -135,7 +135,9 @@ test("double resolve and reject-after-resolve throw instead of crashing", async 
   t.is(resolved.status, 0);
   t.true(resolved.stdout.includes("caught:"));
 
-  const rejected = runIsolated("try{a.rejectAfterResolve()}catch(e){console.log('caught:'+e.message)}");
+  const rejected = runIsolated(
+    "try{a.rejectAfterResolve()}catch(e){console.log('caught:'+e.message)}",
+  );
   t.is(rejected.status, 0);
   t.true(rejected.stdout.includes("caught:"));
 });
@@ -144,7 +146,9 @@ test("borrowed JavaScript promises cannot be settled", async (t) => {
   t.false(native.borrowedPromiseSettlable(Promise.resolve(1)));
   t.throws(() => native.resolveForeign(Promise.resolve(1)));
 
-  const isolated = runIsolated("try{a.resolveForeign(Promise.resolve(1))}catch(e){console.log('caught:'+e.message)}");
+  const isolated = runIsolated(
+    "try{a.resolveForeign(Promise.resolve(1))}catch(e){console.log('caught:'+e.message)}",
+  );
   t.is(isolated.status, 0);
   t.true(isolated.stdout.includes("caught:"));
 });
@@ -220,7 +224,9 @@ test("foreign wrapped objects are rejected with a TypeError", async (t) => {
   const error = t.throws(() => native.bindAndHold({}));
   t.true(String(error.message).includes("AbortSignal"));
 
-  const isolated = runIsolated("try{a.bindAndHold({})}catch(e){console.log('caught:'+e.name+':'+e.message)}");
+  const isolated = runIsolated(
+    "try{a.bindAndHold({})}catch(e){console.log('caught:'+e.name+':'+e.message)}",
+  );
   t.is(isolated.status, 0);
   t.true(isolated.stdout.includes("caught:TypeError"));
 });

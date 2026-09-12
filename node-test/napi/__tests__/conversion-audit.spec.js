@@ -240,7 +240,12 @@ test("a reentrant callback that switches allocators cannot break cleanup", (t) =
       // The callback leaves this thread's operation allocator switched for the
       // rest of the outer call, so the outer argument cleanup would mismatch if
       // the allocator were not captured when the call started.
-      t.is(bindings.allocatorProbe({ text: "abc", count: 1 }, () => bindings.useAlternateOperationAllocator()), 4);
+      t.is(
+        bindings.allocatorProbe({ text: "abc", count: 1 }, () =>
+          bindings.useAlternateOperationAllocator(),
+        ),
+        4,
+      );
     } finally {
       bindings.useDefaultOperationAllocator();
     }
@@ -280,17 +285,28 @@ test("fixed size array and string inputs", (t) => {
 });
 
 test("void callbacks and callback return conversion", (t) => {
-  t.is(bindings.callVoid(() => {}), undefined);
-  const thrown = t.throws(() => bindings.callVoid(() => {
-    throw new Error("callboom");
-  }));
+  t.is(
+    bindings.callVoid(() => {}),
+    undefined,
+  );
+  const thrown = t.throws(() =>
+    bindings.callVoid(() => {
+      throw new Error("callboom");
+    }),
+  );
   t.is(thrown.message, "callboom");
 
-  t.is(bindings.callNumber(() => 42), 42);
+  t.is(
+    bindings.callNumber(() => 42),
+    42,
+  );
   t.throws(() => bindings.callNumber(() => "oops"), { name: "TypeError" });
 
   // The exception thrown by a callback does not corrupt later calls.
-  t.is(bindings.callNumber(() => 7), 7);
+  t.is(
+    bindings.callNumber(() => 7),
+    7,
+  );
 });
 
 test("empty strings round trip without leaking", (t) => {

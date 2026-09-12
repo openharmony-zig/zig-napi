@@ -41,6 +41,16 @@ fn addNodeAddonWith(
         addon.root_module.addImport("audit_counting", b.createModule(.{
             .root_source_file = b.path("../examples/allocator-custom/src/counting_allocator.zig"),
         }));
+        const example_async = b.createModule(.{
+            .root_source_file = b.path("../examples/basic/src/async.zig"),
+        });
+        example_async.addImport("napi", addon.root_module.import_table.get("napi").?);
+        addon.root_module.addImport("example_async", example_async);
+        const memory_async = b.createModule(.{
+            .root_source_file = b.path("../examples/memory/src/async.zig"),
+        });
+        memory_async.addImport("napi", addon.root_module.import_table.get("napi").?);
+        addon.root_module.addImport("memory_async", memory_async);
     }
     const npm_root_install = b.addInstallFileWithDir(
         addon.getEmittedBin(),

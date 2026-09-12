@@ -768,8 +768,13 @@ pub const Napi = struct {
             .null, .undefined, .void => return value,
             .array => |arr| {
                 var copy: T = undefined;
+                var initialized: usize = 0;
+                errdefer for (copy[0..initialized]) |item| {
+                    Napi.deinit_napi_value_with_allocator(arr.child, item, allocator);
+                };
                 for (value, 0..) |item, i| {
                     copy[i] = try Napi.clone_napi_value(arr.child, item, allocator);
+                    initialized = i + 1;
                 }
                 return copy;
             },
@@ -1332,6 +1337,16 @@ test "clone_napi_value rolls back partially cloned values on allocator failure" 
     // allocator fails the test if a clone leaks.
     var fail_index: usize = 0;
     while (fail_index < 12) : (fail_index += 1) {
+        var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = fail_index });
+        const cloned = Napi.clone_napi_value(Source, source, failing.allocator()) catch continue;
+        Napi.deinit_napi_value_with_allocator(Source, cloned, failing.allocator());
+    }
+}
+
+test "clone_napi_value rolls back partially cloned fixed arrays" {
+    const Source = [3][]const u8;
+    const source = Source{ "one", "two", "three" };
+    for (0..4) |fail_index| {
         var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = fail_index });
         const cloned = Napi.clone_napi_value(Source, source, failing.allocator()) catch continue;
         Napi.deinit_napi_value_with_allocator(Source, cloned, failing.allocator());

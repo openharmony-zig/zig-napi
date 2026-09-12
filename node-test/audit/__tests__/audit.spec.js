@@ -36,11 +36,47 @@ test("foreign native payloads are rejected before dereference", (t) => {
 test("binary views revalidate their backing store after JavaScript reentry", (t) => {
   if (typeof structuredClone !== "function") return t.pass();
   const array = new Uint8Array([42]);
-  t.throws(() => a.typedAfterCallback(array, () => structuredClone(array.buffer, { transfer: [array.buffer] })));
+  t.throws(() =>
+    a.typedAfterCallback(array, () => structuredClone(array.buffer, { transfer: [array.buffer] })),
+  );
   const view = new DataView(new ArrayBuffer(1));
   const backing = view.buffer;
-  t.throws(() => a.dataAfterCallback(view, () => structuredClone(backing, { transfer: [backing] })));
-  t.is(a.typedAfterCallback(new Uint8Array([7]), () => {}), 7);
+  t.throws(() =>
+    a.dataAfterCallback(view, () => structuredClone(backing, { transfer: [backing] })),
+  );
+  t.is(
+    a.typedAfterCallback(new Uint8Array([7]), () => {}),
+    7,
+  );
+});
+
+test("example async heap results and parallel reads release owned allocations", (t) => {
+  if (process.env.NAPI_RS_FORCE_WASI) return t.pass();
+  const result = child(
+    `
+    const fs=require('fs'),path=require('path'),os=require('os'),assert=require('assert');
+    const dir=fs.mkdtempSync(path.join(os.tmpdir(),'zig-napi-files-'));
+    const file=path.join(dir,'input.txt');fs.writeFileSync(file,'hello');
+    const collect=async()=>{for(let i=0;i<5;i++){global.gc();await new Promise(r=>setImmediate(r));}};
+    async function run(){
+      assert.strictEqual(await a.readFile(file),'hello');
+      assert.deepStrictEqual(await a.readSummary(file),{path:file,bytes:5,text:'hello'});
+      assert.deepStrictEqual(await a.readParallel({first_path:file,second_path:file,preview_bytes:2}),
+        {first_bytes:5,second_bytes:5,total_bytes:10,preview:'he\\n---\\nhe'});
+      const summary=await a.memorySummary({label:'abc',values:[1,2,3]});
+      assert.strictEqual(summary.label,'abc');assert.strictEqual(summary.total,6);
+      const custom=await a.memoryCustom('custom');
+      assert.strictEqual(custom.owned_label,'custom:owned');
+      await assert.rejects(a.readParallel({first_path:file,second_path:file+'.missing',preview_bytes:2}));
+    }
+    (async()=>{try{await run();await collect();const before=a.activeBytes();
+      for(let i=0;i<50;i++)await run();await collect();assert.strictEqual(a.activeBytes(),before);
+    }finally{fs.unlinkSync(file);fs.rmdirSync(dir);}})().catch(e=>{console.error(e);process.exitCode=1});
+  `,
+    ["--expose-gc"],
+  );
+  t.is(result.signal, null, result.stderr);
+  t.is(result.status, 0, result.stderr);
 });
 
 test("getter exceptions preserve the original JS exception", (t) => {
@@ -125,7 +161,10 @@ test("async borrowed literals and uncaptured input are safe", async (t) => {
   t.is(await a.asyncUnused("abc", 7), 7);
   t.is(await a.asyncLiteral(), "literal");
   if (process.env.NAPI_RS_FORCE_WASI) return;
-  const result = child(`(async()=>{const assert=require('assert');const collect=async()=>{for(let i=0;i<5;i++){global.gc();await new Promise(setImmediate)}};await collect();const before=a.activeBytes();for(let i=0;i<100;i++)assert.strictEqual(await a.asyncUnused('abc',7),7);await collect();assert.strictEqual(a.activeBytes(),before)})().catch(e=>{console.error(e);process.exitCode=1});`, ["--expose-gc"]);
+  const result = child(
+    `(async()=>{const assert=require('assert');const collect=async()=>{for(let i=0;i<5;i++){global.gc();await new Promise(setImmediate)}};await collect();const before=a.activeBytes();for(let i=0;i<100;i++)assert.strictEqual(await a.asyncUnused('abc',7),7);await collect();assert.strictEqual(a.activeBytes(),before)})().catch(e=>{console.error(e);process.exitCode=1});`,
+    ["--expose-gc"],
+  );
   t.is(result.status, 0, result.stderr);
 });
 

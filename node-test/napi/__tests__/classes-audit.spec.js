@@ -226,7 +226,7 @@ test("typed array reads revalidate the backing store", (t) => {
   const rejected = detachedView();
   structuredClone(rejected.buffer, { transfer: [rejected.buffer] });
   t.throws(() => audit.firstByte(rejected.view), {
-    message: /backing store was detached/,
+    code: "InvalidatedBackingStore",
   });
 });
 

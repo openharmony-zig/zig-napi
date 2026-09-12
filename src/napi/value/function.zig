@@ -146,6 +146,7 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                     // callback local errors into it.
                     const outer_frame = NapiError.ErrorFrame.save();
                     defer outer_frame.restore();
+                    NapiError.clearLastError();
 
                     const return_info = infos.@"fn".return_type.?;
                     const return_payload = returnPayloadType(return_info);

@@ -152,6 +152,11 @@ pub const DataView = struct {
     /// returned slice stays valid only until the next JavaScript reentry.
     pub fn tryAsSlice(self: DataView) ![]u8 {
         if (self.raw == null) return arraybuffer_mod.BinaryError.InvalidBinaryValue;
+        // emnapi reads DataView.byteLength inside get_dataview_info; that
+        // accessor itself throws after detach. Check the retained backing first.
+        if (try arraybuffer_mod.backingIsDetached(self.env, self.arraybuffer.raw)) {
+            return arraybuffer_mod.BinaryError.InvalidatedBackingStore;
+        }
         const refreshed = try DataView.tryFromRaw(self.env, self.raw);
         if (refreshed.byte_length != self.byte_length) return arraybuffer_mod.BinaryError.InvalidatedBackingStore;
         return refreshed.data[0..refreshed.byte_length];
@@ -188,8 +193,13 @@ pub const DataView = struct {
     /// Sync wasm-side mutations for a byte range relative to this DataView.
     pub fn flushRange(self: DataView, byte_offset: usize, byte_length: usize) !void {
         if (comptime !options.isWasmNodeAddon()) return;
-        const refreshed = try DataView.tryFromRaw(self.env, self.raw);
-        try refreshed.ensureRange(byte_offset, byte_length);
+        // get_dataview_info synchronizes JS -> Wasm in emnapi and would erase
+        // the writes that this method is meant to publish. The write accessor
+        // already revalidated the view; check detachment without pulling data.
+        if (try arraybuffer_mod.backingIsDetached(self.env, self.arraybuffer.raw)) {
+            return arraybuffer_mod.BinaryError.InvalidatedBackingStore;
+        }
+        try self.ensureRange(byte_offset, byte_length);
         if (byte_length == 0) return;
         var raw = self.raw;
         const status = napi.emnapi_sync_memory(self.env, false, &raw, byte_offset, byte_length);

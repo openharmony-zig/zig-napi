@@ -2,6 +2,11 @@ const std = @import("std");
 const napi = @import("napi");
 var counter = @import("audit_counting").CountingAllocator.init(std.heap.page_allocator);
 pub const napi_allocator = counter.allocator();
+pub const readFile = @import("example_async").read_file_async;
+pub const readSummary = @import("example_async").read_file_summary_async;
+pub const readParallel = @import("example_async").parallel_read_files_async;
+pub const memorySummary = @import("memory_async").memory_async_summary;
+pub const memoryCustom = @import("memory_async").memory_async_custom_deinit;
 
 pub fn activeBytes() isize {
     return counter.stats().active_bytes;

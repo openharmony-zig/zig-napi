@@ -100,7 +100,8 @@ threadlocal var message_slot_index: usize = 0;
 threadlocal var message_slot_pins: [message_slot_count]u16 = .{0} ** message_slot_count;
 
 pub fn formatMessage(comptime fmt: []const u8, args: anytype) []const u8 {
-    const slot = &message_slots[takeMessageSlot()];
+    const index = takeMessageSlot() orelse return "Native conversion error (nested error storage exhausted)";
+    const slot = &message_slots[index];
     return std.fmt.bufPrint(slot, fmt, args) catch fmt;
 }
 
@@ -114,10 +115,8 @@ fn messageSlotOf(message: []const u8) ?usize {
     return null;
 }
 
-/// Next slot that is not pinned by a live frame. When every slot is pinned the
-/// oldest one is reused, which can only happen with more simultaneously saved
-/// error frames than slots.
-fn takeMessageSlot() usize {
+/// Never overwrite text referenced by a saved outer error frame.
+fn takeMessageSlot() ?usize {
     var candidate: usize = 0;
     while (candidate < message_slot_count) : (candidate += 1) {
         const slot = (message_slot_index + candidate) % message_slot_count;
@@ -127,9 +126,7 @@ fn takeMessageSlot() usize {
         }
     }
 
-    const slot = message_slot_index;
-    message_slot_index = (slot + 1) % message_slot_count;
-    return slot;
+    return null;
 }
 
 /// Record a failed N-API call. A pending JavaScript exception is preserved
@@ -544,5 +541,23 @@ test "pending exception marker survives a frame" {
     try std.testing.expect(!hasPendingException());
     frame.restore();
     try std.testing.expect(hasPendingException());
+    clearLastError();
+}
+
+test "saturated error storage preserves every saved frame" {
+    clearLastError();
+    var frames: [message_slot_count]ErrorFrame = undefined;
+    for (&frames, 0..) |*frame, i| {
+        last_error = Error.withReason(formatMessage("frame {d}", .{i}));
+        frame.* = ErrorFrame.save();
+    }
+    try std.testing.expectEqualStrings("Native conversion error (nested error storage exhausted)", formatMessage("overflow", .{}));
+    var index = frames.len;
+    while (index > 0) {
+        index -= 1;
+        frames[index].restore();
+        var expected: [32]u8 = undefined;
+        try std.testing.expectEqualStrings(try std.fmt.bufPrint(&expected, "frame {d}", .{index}), messageOf(last_error.?));
+    }
     clearLastError();
 }

@@ -37,6 +37,8 @@ const CustomDeinitInput = struct {
     pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
         _ = custom_async_input_deinits.fetchAdd(1, .monotonic);
         allocator.free(self.owned_label);
+        // Async captures deep-clone every native slice, including this marker.
+        allocator.free(self.borrowed_marker);
     }
 };
 
@@ -62,23 +64,23 @@ const CountProgress = struct {
 const FnArgs = struct { i32, i32 };
 const FnReturn = i32;
 
-fn async_summary_execute(ctx: napi.AsyncContext(void), input: AsyncInput) !AsyncSummary {
+fn async_summary_execute(ctx: napi.AsyncContext(void), input: AsyncInput) !napi.Owned(AsyncSummary) {
     var total: f64 = 0;
     for (input.values) |value| {
         total += value;
     }
     const label = try ctx.allocator.dupe(u8, input.label);
-    return .{ .label = label, .count = input.values.len, .total = total };
+    return .init(.{ .label = label, .count = input.values.len, .total = total }, ctx.allocator);
 }
 
-fn custom_deinit_execute(ctx: napi.AsyncContext(void), input: CustomDeinitInput) !CustomDeinitSummary {
+fn custom_deinit_execute(ctx: napi.AsyncContext(void), input: CustomDeinitInput) !napi.Owned(CustomDeinitSummary) {
     const owned_label = try std.fmt.allocPrint(ctx.allocator, "{s}:owned", .{input.owned_label});
-    return .{
+    return .init(.{
         .borrowed_input_marker = input.borrowed_marker,
         .borrowed_result_marker = "result-borrowed-marker",
         .owned_label = owned_label,
         .label_len = input.owned_label.len,
-    };
+    }, ctx.allocator);
 }
 
 fn async_void_execute(_: []u8) void {}
@@ -120,23 +122,23 @@ fn abortable_slow_count_execute(ctx: napi.AsyncContext(void), total: u32) !u32 {
     return total;
 }
 
-pub fn memory_async_summary(input: AsyncInput) napi.Async(AsyncSummary, .thread) {
-    return napi.Async(AsyncSummary, .thread).from(input, async_summary_execute);
+pub fn memory_async_summary(input: AsyncInput) napi.Async(napi.Owned(AsyncSummary), .thread) {
+    return napi.Async(napi.Owned(AsyncSummary), .thread).from(input, async_summary_execute);
 }
 
-pub fn memory_async_summary_single(input: AsyncInput) napi.Async(AsyncSummary, .single) {
-    return napi.Async(AsyncSummary, .single).from(input, async_summary_execute);
+pub fn memory_async_summary_single(input: AsyncInput) napi.Async(napi.Owned(AsyncSummary), .single) {
+    return napi.Async(napi.Owned(AsyncSummary), .single).from(input, async_summary_execute);
 }
 
-pub fn memory_async_custom_deinit(label: []u8) napi.Async(CustomDeinitSummary, .thread) {
-    return napi.Async(CustomDeinitSummary, .thread).from(CustomDeinitInput{
+pub fn memory_async_custom_deinit(label: []u8) napi.Async(napi.Owned(CustomDeinitSummary), .thread) {
+    return napi.Async(napi.Owned(CustomDeinitSummary), .thread).from(CustomDeinitInput{
         .owned_label = label,
         .borrowed_marker = "input-borrowed-marker",
     }, custom_deinit_execute);
 }
 
-pub fn memory_async_custom_deinit_single(label: []u8) napi.Async(CustomDeinitSummary, .single) {
-    return napi.Async(CustomDeinitSummary, .single).from(CustomDeinitInput{
+pub fn memory_async_custom_deinit_single(label: []u8) napi.Async(napi.Owned(CustomDeinitSummary), .single) {
+    return napi.Async(napi.Owned(CustomDeinitSummary), .single).from(CustomDeinitInput{
         .owned_label = label,
         .borrowed_marker = "input-borrowed-marker",
     }, custom_deinit_execute);

@@ -13,12 +13,9 @@ async function main() {
   if (mode === "tsfn-abandon") {
     // Queue calls and never release: the environment teardown must drain the
     // queue with a null environment instead of leaking or touching JS.
-    native.queueThreadSafeFunctionAbandon(
-      () => {
-        // Never reached: the queue is drained after the environment is gone.
-      },
-      4,
-    );
+    native.queueThreadSafeFunctionAbandon(() => {
+      // Never reached: the queue is drained after the environment is gone.
+    }, 4);
     parentPort.postMessage({ queued: 4 });
     return;
   }
