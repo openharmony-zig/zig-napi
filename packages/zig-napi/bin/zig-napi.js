@@ -53,7 +53,7 @@ function run(command, args, options = {}) {
   const result = childProcess.spawnSync(command, args, {
     cwd: options.cwd || process.cwd(),
     stdio: "inherit",
-    shell: process.platform === "win32",
+    shell: false,
   });
   if (result.error) fail(result.error.message);
   if (result.status !== 0) process.exit(result.status || 1);
@@ -260,7 +260,7 @@ function repairZigFingerprint(projectDir) {
     cwd: projectDir,
     encoding: "utf8",
     stdio: "pipe",
-    shell: process.platform === "win32",
+    shell: false,
   });
   const output = `${result.stdout || ""}\n${result.stderr || ""}`;
   const match = output.match(/use this value:\s*(0x[0-9a-fA-F]+)/);
@@ -367,8 +367,21 @@ function updateTemplatePackageForTargets(projectDir, targets) {
 }
 
 function resolveZigNapiPath(targetDir, value) {
-  const source = value ? path.resolve(process.cwd(), value) : workspaceRoot;
-  return path.relative(targetDir, source) || ".";
+  const bundled = path.join(packageDir, "zig");
+  const source = value
+    ? path.resolve(process.cwd(), value)
+    : fs.existsSync(path.join(bundled, "build.zig"))
+      ? bundled
+      : workspaceRoot;
+  if (
+    !fs.existsSync(path.join(source, "build.zig")) ||
+    !fs.existsSync(path.join(source, "src", "napi.zig"))
+  ) {
+    fail(
+      "Zig library sources are missing; reinstall @ohos-rs/zig-cli or pass --zig-napi <source-directory>",
+    );
+  }
+  return path.relative(fs.realpathSync(targetDir), fs.realpathSync(source)) || ".";
 }
 
 function readZigNapiConfig(cwd, flags) {
@@ -751,16 +764,17 @@ async function commandNew(projectDir, flags) {
 
   const packageName = options.packageName;
   const addonName = options.addonName;
+  fs.mkdirSync(targetDir, { recursive: true });
   const zigNapiZigPath = resolveZigNapiPath(targetDir, flags.zigNapi);
 
-  fs.mkdirSync(targetDir, { recursive: true });
   copyTemplate(templateDir, targetDir, {
     __PACKAGE_NAME__: packageName,
     __ADDON_NAME__: addonName,
     __ZIG_PACKAGE_NAME__: sanitizeZigName(packageName),
-    __ZIG_NAPI_ZIG_PATH__: normalizePathForZig(zigNapiZigPath),
+    __ZIG_NAPI_ZIG_PATH__: JSON.stringify(normalizePathForZig(zigNapiZigPath)).slice(1, -1),
     '      "__NAPI_TARGETS__"': formatJsonStringArrayItems(options.targets, "      "),
     __FINGERPRINT__: "0x0",
+    __CLI_VERSION__: readJson(path.join(packageDir, "package.json")).version,
   });
   updateTemplatePackageForTargets(targetDir, options.targets);
   repairZigFingerprint(targetDir);
@@ -881,7 +895,7 @@ function createProgram() {
     .argument("[dir]", "project directory")
     .option("--name <package>", "npm package name")
     .option("--addon <name>", "native addon binary name")
-    .option("--zig-napi <path>", "path to zig-napi Zig package from the new project")
+    .option("--zig-napi <path>", "path to zig-napi Zig package, relative to the current directory")
     .option("-i, --interactive", "ask project information interactively", true)
     .option("--no-interactive", "disable interactive prompts")
     .option(

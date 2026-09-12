@@ -39,6 +39,9 @@ jobs:
       - name: Verify Zig
         run: zig version
 
+      - name: Run Zig unit tests
+        run: zig build test-unit --summary all
+
       - name: Setup Node.js for install
         uses: actions/setup-node@v4
         with:
@@ -122,3 +125,20 @@ jobs:
         env:
           NAPI_RS_FORCE_WASI: 'error'
         run: npm run test:run
+
+  cli-package-test:
+    runs-on: ubuntu-latest
+    name: Standalone npm package smoke test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.24.0
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run test:cli-pack

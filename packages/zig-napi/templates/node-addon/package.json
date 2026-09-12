@@ -46,7 +46,7 @@
   },
   "devDependencies": {
     "ava": "^8.0.0",
-    "zig-napi": "^0.1.0"
+    "@ohos-rs/zig-cli": "__CLI_VERSION__"
   },
   "napi": {
     "binaryName": "__ADDON_NAME__",

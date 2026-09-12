@@ -10,3 +10,4 @@ node-test/*.node
 node-test/*.wasm
 .tmp_arkvm_runner
 .tmp_arkvm_memory_runner
+packages/zig-napi/zig/

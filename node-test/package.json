@@ -21,7 +21,8 @@
   "napi": {
     "binaryNames": [
       "compat_mode",
-      "example"
+      "example",
+      "audit"
     ],
     "packageName": "zig-napi-node-test",
     "targets": [
@@ -31,7 +32,8 @@
   "ava": {
     "files": [
       "napi-compat-mode/__tests__/**/*.spec.js",
-      "napi/__tests__/**/*.spec.js"
+      "napi/__tests__/**/*.spec.js",
+      "audit/__tests__/**/*.spec.js"
     ],
     "timeout": "30s",
     "workerThreads": false

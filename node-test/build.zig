@@ -25,6 +25,11 @@ fn addNodeAddon(
             .link_libc = true,
         },
     });
+    if (std.mem.eql(u8, name, "audit")) {
+        addon.root_module.addImport("audit_counting", b.createModule(.{
+            .root_source_file = b.path("../examples/allocator-custom/src/counting_allocator.zig"),
+        }));
+    }
     const npm_root_install = b.addInstallFileWithDir(
         addon.getEmittedBin(),
         .{ .custom = ".." },
@@ -57,4 +62,5 @@ pub fn build(b: *std.Build) !void {
         target,
         optimize,
     );
+    try addNodeAddon(b, napi, "audit", "audit/src/lib.zig", target, optimize);
 }
