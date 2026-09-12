@@ -52,6 +52,12 @@ const MemoryWithoutInitData = struct {
 
     const Self = @This();
 
+    /// `ClassWithoutInit` rejects JavaScript construction, so the factory is
+    /// the only construction path.
+    pub fn make() Self {
+        return .{ .count = 0 };
+    }
+
     pub fn total(self: *Self) u32 {
         return self.count;
     }

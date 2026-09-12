@@ -1,7 +1,8 @@
 const std = @import("std");
 const napi = @import("napi-sys").napi_sys;
 const Env = @import("../env.zig").Env;
-const ArrayBuffer = @import("./arraybuffer.zig").ArrayBuffer;
+const arraybuffer_mod = @import("./arraybuffer.zig");
+const ArrayBuffer = arraybuffer_mod.ArrayBuffer;
 const NapiError = @import("./error.zig");
 const options = @import("../options.zig");
 const Endian = std.builtin.Endian;
@@ -16,13 +17,33 @@ pub const DataView = struct {
     byte_offset: usize,
     arraybuffer: ArrayBuffer,
 
+    /// Whether this wrapper refers to a usable DataView.
+    pub fn isValid(self: DataView) bool {
+        return self.raw != null;
+    }
+
+    /// Create a wrapper from a raw napi_value.
+    ///
+    /// Kept for source compatibility with the previous infallible API: the
+    /// N-API status is checked, and a value that is not a DataView throws a
+    /// JavaScript `TypeError` and yields an invalid wrapper. Prefer
+    /// `tryFromRaw` when the failure has to be handled in Zig.
     pub fn from_raw(env: napi.napi_env, raw: napi.napi_value) DataView {
+        return DataView.tryFromRaw(env, raw) catch |err| {
+            arraybuffer_mod.recordBinaryFailure("DataView expected", err);
+            return invalid(env, null);
+        };
+    }
+
+    /// Create a wrapper from a raw napi_value, validating the N-API status and
+    /// the backing store.
+    pub fn tryFromRaw(env: napi.napi_env, raw: napi.napi_value) !DataView {
         var byte_length: usize = 0;
         var data: ?*anyopaque = null;
         var arraybuffer_raw: napi.napi_value = undefined;
         var byte_offset: usize = 0;
 
-        _ = napi.napi_get_dataview_info(
+        const status = napi.napi_get_dataview_info(
             env,
             raw,
             &byte_length,
@@ -30,6 +51,25 @@ pub const DataView = struct {
             &arraybuffer_raw,
             &byte_offset,
         );
+        if (status != napi.napi_ok) {
+            if (NapiError.Status.New(status) == .InvalidArg) {
+                return arraybuffer_mod.BinaryError.InvalidBinaryValue;
+            }
+            return NapiError.toError(NapiError.Status.New(status));
+        }
+
+        const backing = ArrayBuffer.tryFromRaw(env, arraybuffer_raw) catch {
+            return arraybuffer_mod.BinaryError.InvalidatedBackingStore;
+        };
+        if (try arraybuffer_mod.backingIsDetached(env, arraybuffer_raw)) {
+            return arraybuffer_mod.BinaryError.InvalidatedBackingStore;
+        }
+        if (byte_offset > backing.length() or byte_length > backing.length() - byte_offset) {
+            return arraybuffer_mod.BinaryError.InvalidatedBackingStore;
+        }
+        if (byte_length > 0 and data == null) {
+            return arraybuffer_mod.BinaryError.InvalidatedBackingStore;
+        }
 
         return DataView{
             .env = env,
@@ -37,12 +77,26 @@ pub const DataView = struct {
             .data = if (byte_length == 0 or data == null) &[_]u8{} else @ptrCast(data),
             .byte_length = byte_length,
             .byte_offset = byte_offset,
-            .arraybuffer = ArrayBuffer.from_raw(env, arraybuffer_raw),
+            .arraybuffer = backing,
+        };
+    }
+
+    pub fn invalid(env: napi.napi_env, raw: napi.napi_value) DataView {
+        return DataView{
+            .env = env,
+            .raw = raw,
+            .data = &[_]u8{},
+            .byte_length = 0,
+            .byte_offset = 0,
+            .arraybuffer = ArrayBuffer.invalid(env, null),
         };
     }
 
     pub fn fromArrayBuffer(env: Env, arraybuffer: ArrayBuffer, byte_offset: usize, byte_length: usize) !DataView {
-        if (byte_offset + byte_length > arraybuffer.length()) {
+        const end = std.math.add(usize, byte_offset, byte_length) catch {
+            return NapiError.Error.rangeError("DataView offset overflows the byte range");
+        };
+        if (end > arraybuffer.length()) {
             return NapiError.Error.fromStatus(NapiError.Status.InvalidArg);
         }
 
@@ -59,14 +113,7 @@ pub const DataView = struct {
             return NapiError.Error.fromStatus(NapiError.Status.New(status));
         }
 
-        return DataView{
-            .env = env.raw,
-            .raw = raw,
-            .data = if (byte_length == 0) &[_]u8{} else arraybuffer.data + byte_offset,
-            .byte_length = byte_length,
-            .byte_offset = byte_offset,
-            .arraybuffer = arraybuffer,
-        };
+        return DataView.tryFromRaw(env.raw, raw);
     }
 
     pub fn New(env: Env, byte_length: usize) !DataView {
@@ -88,12 +135,45 @@ pub const DataView = struct {
         return result;
     }
 
-    pub fn asSlice(self: DataView) []u8 {
-        return self.data[0..self.byte_length];
+    /// Re-query the view and refresh the cached pointer, length and offset.
+    pub fn refresh(self: *DataView) !void {
+        const refreshed = try DataView.tryFromRaw(self.env, self.raw);
+        self.data = refreshed.data;
+        self.byte_length = refreshed.byte_length;
+        self.byte_offset = refreshed.byte_offset;
+        self.arraybuffer = refreshed.arraybuffer;
     }
 
+    /// Borrowed native view of the DataView contents, re-validated against the
+    /// backing store on every call.
+    ///
+    /// Fails when the wrapper is invalid or when the backing store was
+    /// detached, transferred or resized since the wrapper was created. The
+    /// returned slice stays valid only until the next JavaScript reentry.
+    pub fn tryAsSlice(self: DataView) ![]u8 {
+        if (self.raw == null) return arraybuffer_mod.BinaryError.InvalidBinaryValue;
+        const refreshed = try DataView.tryFromRaw(self.env, self.raw);
+        if (refreshed.byte_length != self.byte_length) return arraybuffer_mod.BinaryError.InvalidatedBackingStore;
+        return refreshed.data[0..refreshed.byte_length];
+    }
+
+    /// Safe variant of `asConstSlice`.
+    pub fn tryAsConstSlice(self: DataView) ![]const u8 {
+        return try self.tryAsSlice();
+    }
+
+    /// Borrowed native view of the DataView contents.
+    ///
+    /// The view is re-validated on every call; when the backing store is no
+    /// longer valid the result is an empty slice rather than a dangling
+    /// pointer. Use `tryAsSlice` to observe the failure.
+    pub fn asSlice(self: DataView) []u8 {
+        return self.tryAsSlice() catch &[_]u8{};
+    }
+
+    /// Const variant of `asSlice`. See `asSlice` for the empty-slice rule.
     pub fn asConstSlice(self: DataView) []const u8 {
-        return self.data[0..self.byte_length];
+        return self.tryAsSlice() catch &[_]u8{};
     }
 
     pub fn byteLength(self: DataView) usize {
@@ -108,7 +188,8 @@ pub const DataView = struct {
     /// Sync wasm-side mutations for a byte range relative to this DataView.
     pub fn flushRange(self: DataView, byte_offset: usize, byte_length: usize) !void {
         if (comptime !options.isWasmNodeAddon()) return;
-        try self.ensureRange(byte_offset, byte_length);
+        const refreshed = try DataView.tryFromRaw(self.env, self.raw);
+        try refreshed.ensureRange(byte_offset, byte_length);
         if (byte_length == 0) return;
         var raw = self.raw;
         const status = napi.emnapi_sync_memory(self.env, false, &raw, byte_offset, byte_length);
@@ -127,9 +208,12 @@ pub const DataView = struct {
         }
     }
 
+    /// Resolves the bytes for one access. The view is re-validated first, so a
+    /// detached backing store can never be read through a cached pointer.
     fn bytesAt(self: DataView, byte_offset: usize, len: usize) ![]u8 {
         try self.ensureRange(byte_offset, len);
-        return self.asSlice()[byte_offset .. byte_offset + len];
+        const slice = try self.tryAsSlice();
+        return slice[byte_offset .. byte_offset + len];
     }
 
     pub fn readInt(self: DataView, comptime T: type, byte_offset: usize, little_endian: bool) !T {

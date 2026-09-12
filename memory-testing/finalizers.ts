@@ -27,7 +27,9 @@ export function exerciseFinalizerWrappers(native: NativeAddon) {
     assertEqual(classValue.total(), i + 6, "class method");
     classValue = null;
 
-    let withoutInit: ESObject | null = new native.MemoryClassWithoutInit();
+    // `MemoryClassWithoutInit` is a `ClassWithoutInit`: JavaScript cannot call
+    // its constructor, `make` is the documented construction path.
+    let withoutInit: ESObject | null = native.MemoryClassWithoutInit.make();
     assertEqual(withoutInit.total(), 0, "class without init method");
     withoutInit = null;
 

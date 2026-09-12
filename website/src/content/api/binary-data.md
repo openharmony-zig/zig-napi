@@ -6,6 +6,28 @@ title: Binary Data
 
 Binary wrappers make ownership and copying explicit at the JavaScript boundary.
 
+## Borrowed views and revalidation
+
+`asSlice()` and `asConstSlice()` hand out a view into the memory the JavaScript
+runtime owns, so the view stays valid only until the next JavaScript reentry: a
+callback, a getter or a Proxy trap may detach, transfer or resize the backing
+store. Every accessor therefore re-queries the runtime instead of trusting the
+pointer that was cached when the wrapper was created, and every wrapper offers a
+fallible variant:
+
+| Method                                     | Behavior                                                                                        |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| `tryAsSlice()` / `tryAsConstSlice()`       | Revalidate and return the view; fails with `error.InvalidatedBackingStore` after a detach.      |
+| `asSlice()` / `asConstSlice()`             | Same view, but an invalid backing store yields an empty slice instead of a dangling pointer.     |
+| `refresh()`                                | Re-query the view and update the cached pointer and length.                                     |
+| `isValid()`                                | Whether the wrapper refers to a value of the expected JavaScript type.                          |
+| `tryFromRaw(env, raw)`                     | Fallible wrapper construction; `from_raw` keeps the infallible signature for compatibility.      |
+
+Reads through `napi.DataView` (`getUint8`, `readInt`, ...) and the element
+accessors revalidate the same way. Buffers and views are never copied
+implicitly: use `Buffer.copy`, `ArrayBuffer.copy`, `TypedArray(T).copy` or
+`DataView.copy` when the bytes have to outlive the JavaScript object.
+
 ## `Buffer`
 
 ```zig
@@ -48,12 +70,13 @@ napi.ArrayBuffer
 | `ArrayBuffer.fromWithFinalizer(env, data, on_finalize)` | Wrap mutable data and run a callback when released.     |
 | `ArrayBuffer.from_raw(env, raw)`                        | Wrap an existing `napi_value`.                          |
 
-| Method                         | Use                                                 |
-| ------------------------------ | --------------------------------------------------- |
-| `asSlice()` / `asConstSlice()` | Access bytes.                                       |
-| `length()`                     | Byte length.                                        |
-| `detach()`                     | Detach the ArrayBuffer. Requires Node-API v7.       |
-| `isDetached()`                 | Check whether it is detached. Requires Node-API v7. |
+| Method                         | Use                                                       |
+| ------------------------------ | --------------------------------------------------------- |
+| `asSlice()` / `asConstSlice()` | Access bytes.                                             |
+| `length()`                     | Byte length.                                              |
+| `detach()`                     | Detach the ArrayBuffer. Requires Node-API v7.             |
+| `isDetached()`                 | Check whether it is detached. Requires Node-API v7.       |
+| `tryAsSlice()`                 | Fails with `error.InvalidatedBackingStore` when detached. |
 
 ## `TypedArray`
 
@@ -71,11 +94,12 @@ Typed arrays can be created from new memory, copied memory, external memory, or 
 | `TypedArray(T).fromArrayBuffer(env, arraybuffer, len, byte_offset)` | Create a view over an existing ArrayBuffer.                |
 | `TypedArray(T).from_raw(env, raw)`                                  | Wrap an existing TypedArray.                               |
 
-| Method                         | Use                    |
-| ------------------------------ | ---------------------- |
-| `asSlice()` / `asConstSlice()` | Access typed elements. |
-| `length()`                     | Element length.        |
-| `byteLength()`                 | Byte length.           |
+| Method                         | Use                                                     |
+| ------------------------------ | ------------------------------------------------------- |
+| `asSlice()` / `asConstSlice()` | Access typed elements.                                  |
+| `tryAsSlice()`                 | Fail instead of returning an invalidated view.           |
+| `length()`                     | Element length.                                          |
+| `tryByteLength()` / `byteLength()` | Byte length, with checked arithmetic.               |
 
 Aliases are exported for common element types:
 
@@ -110,6 +134,7 @@ napi.DataView
 | Method                                                                                | Use                            |
 | ------------------------------------------------------------------------------------- | ------------------------------ |
 | `asSlice()` / `asConstSlice()`                                                        | Access bytes.                  |
+| `tryAsSlice()`                                                                        | Fail instead of returning an invalidated view. |
 | `byteLength()`                                                                        | View byte length.              |
 | `readInt(T, offset, little_endian)` / `writeInt(T, offset, value, little_endian)`     | Generic integer access.        |
 | `readFloat(T, offset, little_endian)` / `writeFloat(T, offset, value, little_endian)` | Generic floating-point access. |

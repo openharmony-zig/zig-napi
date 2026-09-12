@@ -65,6 +65,48 @@ const Counter = struct {
 pub const CounterClass = napi.Class(Counter);
 ```
 
+### Calls, receivers and factories
+
+- A method whose first parameter is `*T` or `T` is an instance method. The
+  receiver is validated: calling it on an object that is not wrapped with this
+  class (or that belongs to another class) throws a `TypeError` instead of
+  reinterpreting foreign memory. A `self: T` receiver works on a copy of the
+  native state, so field writes through the copy are not visible afterwards.
+- Every other method is a static method. Its `this` is the class constructor and
+  is never unwrapped, so `Class.twice(3)` behaves like a plain function.
+- A static method returning `T` or `*T` is a factory. The returned value is moved
+  into a real instance of the class (correct prototype, wrapped exactly once)
+  and user `init` is *not* executed again. `*T` moves the pointee; the
+  allocation holding it stays owned by the factory.
+- Each `napi_env` owns its own constructor reference, so the main thread and
+  worker threads can construct instances and call factories concurrently. The
+  references are released through environment cleanup hooks.
+
+### Ownership
+
+- Field construction (`Class(T)` without `init`) transfers ownership of the
+  converted constructor arguments to the fields; a failure releases the
+  arguments that were converted before the failing one.
+- Construction through `init` or a factory *borrows* its converted inputs: the
+  wrapper keeps them alive until the instance is finalized and releases them
+  exactly once. Clone them when the native code has to own them.
+- A setter converts the new value first. The previous value is released only
+  after the new one has been installed, and only when the wrapper installed it,
+  so static literals and values handed over by `init` are never freed.
+- When `T` declares `deinit`, it owns the buffers reachable from its fields; the
+  wrapper only releases inputs the finalized value no longer references.
+  `deinit` runs exactly once per instance.
+
+### Construction from JavaScript
+
+`ClassWithoutInit(T)` keeps native construction fully under the addon's control:
+
+- `new ClassWithoutInit(...)` throws a `TypeError`; the class can only be built
+  through its factory methods, which matches the `private constructor()`
+  declaration emitted by the declaration generator.
+- Fields are still exposed as instance properties, and static values and static
+  methods keep working.
+
 ## `ClassWithoutInit`
 
 ```zig
