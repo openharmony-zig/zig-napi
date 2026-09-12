@@ -28,11 +28,11 @@ const isWasi =
 const nativeOnlyTest = isWasi ? test.skip : test;
 const abortTest = typeof AbortController === "undefined" ? test.skip : test;
 
-function runIsolated(body, extraArgs = []) {
+function runIsolated(body, extraArgs = [], timeoutMs = 5000) {
   return childProcess().spawnSync(
     process.execPath,
     [...extraArgs, "-e", `const a=require(${JSON.stringify(loaderPath)})("async_audit");${body}`],
-    { encoding: "utf8", timeout: 5000 },
+    { encoding: "utf8", timeout: timeoutMs },
   );
 }
 
@@ -172,6 +172,225 @@ test("queued events own their payload data", async (t) => {
   const single = [];
   t.is(await native.asyncSliceEventsSingle(3, (event) => single.push(event.text)), 3);
   t.deepEqual(single, ["event-0", "event-1", "event-2"]);
+});
+
+test("a listener that throws a primitive rejects with exactly that value", async (t) => {
+  // `napi_create_reference` only accepts objects below N-API 10: the runtime
+  // roots the thrown value in a holder object instead, so primitives keep their
+  // identity and the task can never resolve silently.
+  const cases = [
+    ["number", 42, (value) => value === 42],
+    ["string", "boom", (value) => value === "boom"],
+    ["null", null, (value) => value === null],
+    ["undefined", undefined, (value) => value === undefined],
+  ];
+  for (const [name, thrown, matches] of cases) {
+    const outcome = await settlesWithin(
+      native.asyncThrowingEvents(2, () => {
+        throw thrown;
+      }),
+      3000,
+    );
+    t.is(outcome.state, "rejected", `${name} must reject`);
+    t.true(matches(outcome.error), `${name} must reject with its own value`);
+  }
+});
+
+test("a synchronous listener failure follows the same path", async (t) => {
+  const boom = { marker: "single-runtime" };
+  const outcome = await settlesWithin(
+    native.asyncThrowingEventsSingle(2, () => {
+      throw boom;
+    }),
+    3000,
+  );
+  t.is(outcome.state, "rejected");
+  t.is(outcome.error, boom);
+});
+
+test("a listener exception is not overridden by a runner failure", async (t) => {
+  const boom = new Error("listener wins");
+  const outcome = await settlesWithin(
+    native.asyncRunnerFailureAfterEvent(() => {
+      throw boom;
+    }),
+    3000,
+  );
+  t.is(outcome.state, "rejected");
+  t.is(outcome.error, boom, "the listener's own exception has priority");
+});
+
+abortTest("a hostile removeEventListener settles the promise instead of hanging it", (t) => {
+  // The cleanup runs after the settlement reason is fixed: an exception thrown
+  // by `removeEventListener` must neither leave the promise pending nor escape
+  // as an uncaught Node-API callback exception.
+  const probe = runIsolated(
+    `const signal = { aborted: false, addEventListener() {}, removeEventListener() { const e = new Error("cleanup boom"); e.marker = "cleanup"; throw e; } };
+     (async () => {
+       const outcome = await a.asyncAbortable(4096, signal).then(
+         (value) => ({ state: "resolved", value }),
+         (error) => ({ state: "rejected", marker: error && error.marker, message: error && error.message }),
+       );
+       console.log(JSON.stringify(outcome));
+     })();`,
+    ["--force-node-api-uncaught-exceptions-policy=true"],
+  );
+  t.is(probe.status, 0, probe.stderr);
+  const outcome = JSON.parse(probe.stdout.trim().split("\n").pop());
+  t.is(outcome.state, "rejected", "a failed cleanup must not resolve the promise");
+  t.is(outcome.marker, "cleanup");
+  t.false(
+    /Uncaught Node-API callback exception/.test(probe.stderr),
+    `cleanup exceptions must not escape: ${probe.stderr}`,
+  );
+});
+
+test("a missing optional listener behaves like an explicit undefined one", async (t) => {
+  // The generated wrapper passes the absent listener as a null handle (a nested
+  // optional `Some(null)`); it must not reach `napi_typeof`.
+  t.is(await native.asyncSliceEvents(1), 1);
+  t.is(await native.asyncSliceEvents(1, undefined), 1);
+  t.is(await native.asyncSliceEvents(1, null), 1);
+  // A non-callable listener is still rejected (the missing/undefined/null
+  // spellings above are the ones that mean "no listener").
+  t.throws(() => native.asyncSliceEvents(1, 42));
+});
+
+test("events without a listener are neither cloned nor queued", async (t) => {
+  const before = native.allocationCount();
+  const beforeBytes = native.activeBytes();
+  // Explicit `undefined` is the same as passing nothing: nobody can observe the
+  // events, so the producer must not pay for them (H10).
+  t.is(await native.asyncSliceEvents(3000, undefined), 3000);
+  t.is(await native.asyncSliceEventsNoListener(3000), 3000);
+  const allocationDelta = native.allocationCount() - before;
+  t.true(allocationDelta < 64, `expected no per-event allocations, got ${allocationDelta}`);
+  const byteDelta = native.activeBytes() - beforeBytes;
+  t.true(byteDelta < 64 * 1024, `no per-event payload may be retained: ${byteDelta} bytes`);
+});
+
+test("an omitted listener with many events allocates almost nothing", async (t) => {
+  const before = native.allocationCount();
+  t.is(await native.asyncSliceEventsNoListener(10000), 10000);
+  t.is(await native.asyncSliceEvents(10000, undefined), 10000);
+  // 20000 events without a listener: the whole run may only cost the operation
+  // and its completion (the leader's hidden-risk fixture allows 128 calls for
+  // half that many events).
+  const allocationDelta = native.allocationCount() - before;
+  t.true(allocationDelta < 128, `unobserved events allocated ${allocationDelta} times`);
+});
+
+nativeOnlyTest("thousands of threaded tasks return to the allocation baseline", (t) => {
+  // Every threaded operation owns two producer futures (`std.Io.concurrent`),
+  // and each of them is freed by exactly one `await`/`cancel`. A per-operation
+  // leak of even a few dozen bytes shows up here; a crash-only regression test
+  // would not see it.
+  const probe = runIsolated(
+    `(async()=>{
+      const collect=async()=>{for(let i=0;i<5;i++){global.gc();await new Promise(r=>setImmediate(r));}};
+      for(let i=0;i<50;i++){await a.asyncTinyThreadValue(i);}
+      await collect();
+      const before=a.activeBytes();
+      for(let i=0;i<2000;i++){await a.asyncTinyThreadValue(i);}
+      await collect();
+      console.log(JSON.stringify({before,after:a.activeBytes()}));
+    })().catch((error)=>{console.error(error);process.exitCode=1});`,
+    ["--expose-gc"],
+    60000,
+  );
+  t.is(probe.status, 0, probe.stderr);
+  const measured = JSON.parse(probe.stdout.trim().split("\n").pop());
+  t.is(measured.after, measured.before, `2000 threaded tasks leaked ${measured.after - measured.before} bytes`);
+});
+
+test("the event queue is bounded and still delivers every event in order", async (t) => {
+  const limit = native.eventQueueLimit();
+  t.true(limit > 0 && limit < 100000, `unexpected queue limit ${limit}`);
+
+  native.resetEventQueueHighWater();
+  const total = limit * 20;
+  const seen = [];
+  const pending = native.asyncSliceEvents(total, (event) => {
+    seen.push(event.index);
+  });
+  // Block the JavaScript thread so nothing drains while the producer fills the
+  // queue: it has to wait for capacity instead of allocating `total` payloads.
+  const until = Date.now() + 300;
+  while (Date.now() < until) {
+    // busy wait
+  }
+  t.is(native.eventQueueHighWater(), limit, "the producer must stop at the queue limit");
+  t.is(await pending, total);
+  t.is(seen.length, total, "no event may be lost");
+  // FIFO: the listener observes the producer's order, so a listener exception
+  // still precedes the settlement.
+  for (let index = 0; index < total; index += 1) {
+    if (seen[index] !== index) {
+      t.fail(`event ${index} arrived as ${seen[index]}`);
+      break;
+    }
+  }
+  t.is(native.eventQueueHighWater(), limit, "the bound holds for the whole run");
+});
+
+abortTest("cancelling releases a producer that waits for queue capacity", async (t) => {
+  const controller = new AbortController();
+  const limit = native.eventQueueLimit();
+  native.resetEventQueueHighWater();
+  let delivered = 0;
+  const pending = native.asyncAbortableSliceEvents(1000000, controller.signal, () => {
+    delivered += 1;
+  });
+  // Make the JavaScript side slow enough that the producer fills the queue and
+  // blocks, then abort: the cancellation must wake it even though the
+  // JavaScript thread cannot drain the queue it is waiting on.
+  const until = Date.now() + 50;
+  while (Date.now() < until) {
+    // busy wait
+  }
+  t.is(native.eventQueueHighWater(), limit, "the producer must have been blocked on a full queue");
+  controller.abort();
+  const outcome = await settlesWithin(pending, 5000);
+  t.is(outcome.state, "rejected");
+  t.true(String(outcome.message).includes("AbortError"), `got ${outcome.message}`);
+  t.true(delivered < 1000000, `the producer stopped instead of draining the queue (${delivered})`);
+});
+
+nativeOnlyTest("queued events and a blocked producer release everything at worker shutdown", async (t) => {
+  // Ten environments, each with a producer that filled its bounded queue while
+  // the environment's thread was blocked in the listener. Terminating them
+  // closes the queue under a blocked producer, runs the finalizer before the
+  // null-environment drain, and must leave the counting allocator at its
+  // baseline - without crashing or hanging.
+  await native.asyncSliceEvents(1, () => {});
+  const probe = runIsolated(
+    `(async()=>{
+      const {Worker}=require("worker_threads");
+      const collect=async()=>{for(let i=0;i<5;i++){global.gc();await new Promise(r=>setImmediate(r));}};
+      await a.asyncSliceEvents(1,()=>{});
+      await collect();
+      const baseline=a.activeBytes();
+      for(let i=0;i<10;i++){
+        const worker=new Worker(${JSON.stringify(
+          `const {parentPort}=require('worker_threads');
+           const a=require(${JSON.stringify(loaderPath)})("async_audit");
+           a.asyncSliceEvents(100000,(event)=>{if(event.index===0){const until=Date.now()+500;while(Date.now()<until){}};}).catch(()=>{});
+           parentPort.postMessage("started");`,
+        )},{eval:true});
+        await new Promise((resolve,reject)=>{worker.once("message",resolve);worker.once("error",reject);});
+        await new Promise((r)=>setTimeout(r,25));
+        await worker.terminate();
+      }
+      await new Promise((r)=>setTimeout(r,1000));
+      await collect();
+      console.log(JSON.stringify({baseline,after:a.activeBytes()}));
+    })().catch((error)=>{console.error(error);process.exitCode=1});`,
+    ["--expose-gc"],
+    60000,
+  );
+  t.is(probe.status, 0, probe.stderr);
+  const measured = JSON.parse(probe.stdout.trim().split("\n").pop());
+  t.is(measured.after, measured.baseline, `shutdown leaked ${measured.after - measured.baseline} bytes`);
 });
 
 test("a throwing event listener rejects the task with the original exception", async (t) => {
@@ -446,17 +665,79 @@ nativeOnlyTest("a runtime released from its own pool worker does not join itself
   // The worker environment is the only owner of the runtime in this child
   // process, and its task is still in flight when the environment goes away, so
   // the release happens on a runtime pool worker. A self join would hang here.
+  //
+  // The parent stays alive for the whole window in which the abandoned producer
+  // is still running: exiting as soon as the worker is terminated would hide a
+  // use-after-free inside `runTask` (H01).
   const probe = runIsolated(
     `(async()=>{
       const { Worker } = require("worker_threads");
       const worker = new Worker(${JSON.stringify(workerSource)}, { workerData: { mode: "async-slow", loader: ${JSON.stringify(loaderPath)} } });
       await new Promise((resolve, reject) => { worker.once("message", resolve); worker.once("error", reject); });
       await worker.terminate();
+      await new Promise((resolve) => setTimeout(resolve, 2000));
       console.log("survived");
     })().catch((error) => { console.log("error:" + error.message); })`,
+    ["--force-node-api-uncaught-exceptions-policy=true"],
   );
   t.is(probe.status, 0, probe.stderr);
   t.true(probe.stdout.includes("survived"), `unexpected output: ${probe.stdout} ${probe.stderr}`);
+  t.false(/uncaught/i.test(probe.stderr), `no exception may escape teardown: ${probe.stderr}`);
+});
+
+nativeOnlyTest("an abandoned producer finishes after its environment is torn down", async (t) => {
+  const { Worker } = workerThreads();
+  const before = native.completedThreadedOperations();
+  const worker = new Worker(workerSource, { workerData: { mode: "async-counted-slow" } });
+  await new Promise((resolve, reject) => {
+    worker.once("message", resolve);
+    worker.once("error", reject);
+  });
+  await worker.terminate();
+  // The addon's state is process wide: the counter proves the task ran to its
+  // end (reading its own captured input) after the environment was destroyed.
+  await delay(2000);
+  const after = native.completedThreadedOperations();
+  t.true(after > before, `abandoned producer did not finish (${before} -> ${after})`);
+  // ... and the runtime is still usable by the surviving environment.
+  t.is(await native.asyncThreadValue(3), 4);
+});
+
+nativeOnlyTest("queued events survive the environment finalizer and its null-environment drain", async (t) => {
+  const { Worker } = workerThreads();
+  for (let round = 0; round < 2; round += 1) {
+    const worker = new Worker(workerSource, { workerData: { mode: "events-abandoned" } });
+    await new Promise((resolve, reject) => {
+      worker.once("message", resolve);
+      worker.once("error", reject);
+    });
+    // Terminate while the worker's listener is blocked and events are queued:
+    // the finalizer runs first, the queue is drained afterwards with a null
+    // environment, and the records must still be usable then. The producer is
+    // already done, so only the records' own references keep the operation
+    // alive at that point.
+    await delay(150);
+    await worker.terminate();
+    await delay(100);
+  }
+  await delay(1200);
+  t.is(await native.asyncThreadValue(2), 3);
+});
+
+abortTest("tearing down an environment with an abortable task does not free it early", async (t) => {
+  const { Worker } = workerThreads();
+  for (let round = 0; round < 3; round += 1) {
+    const worker = new Worker(workerSource, { workerData: { mode: "async-abandoned-abortable" } });
+    await new Promise((resolve, reject) => {
+      worker.once("message", resolve);
+      worker.once("error", reject);
+    });
+    await worker.terminate();
+  }
+  // The operation, its controller and its abort registration must all outlive
+  // the environment that started them (H01: three of three crashed before).
+  await delay(1500);
+  t.is(await native.asyncThreadValue(1), 2);
 });
 
 nativeOnlyTest("thread-safe function queue survives its environment being torn down", async (t) => {

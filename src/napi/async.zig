@@ -58,6 +58,181 @@ var runtime_env_closing_head: ?*RuntimeEnv = null;
 
 const use_wasm_emnapi_async_work = builtin.cpu.arch == .wasm32 and builtin.os.tag == .wasi;
 
+/// Largest number of events that may be queued but not delivered yet.
+///
+/// Past this point a producer waits for the JavaScript side to catch up instead
+/// of growing the queue without bound. The wait is native (a condition variable),
+/// so it never depends on JavaScript running and can never deadlock the
+/// environment's thread. Completions are posted outside this budget, so the
+/// final settlement is never dropped or delayed by a full event queue.
+pub const max_inflight_events = 256;
+
+/// Gate of one thread-safe function handle, packed into a single word so that
+/// producers and the finalizer agree on one total order:
+///
+/// * `active`  - pushes that were admitted and have not returned yet,
+/// * `closing` - no new push may be admitted,
+/// * `owned`   - the handle's fate belongs to the engine (the finalizer ran, or
+///               a push returned `napi_closing`, which already consumed this
+///               thread's reference): it must never be released by us again.
+///
+/// Node calls the user finalizer *before* it drains the queue with a null
+/// environment and deletes the handle, so the finalizer closes the gate and
+/// waits for the admitted pushes to return; a producer that was admitted before
+/// that can therefore finish its (non-blocking) push safely.
+/// The word is 32 bits wide because 32-bit targets (the WASI build) have no
+/// 64-bit atomics.
+const dispatcher_active_mask: u32 = 0xffff;
+const dispatcher_closing_bit: u32 = 1 << 16;
+const dispatcher_owned_bit: u32 = 1 << 17;
+
+/// Highest number of events any operation held in flight at once. Diagnostic for
+/// the bounded-queue regression test; monotonic until it is reset.
+var inflight_events_high_water: std.atomic.Value(usize) = std.atomic.Value(usize).init(0);
+
+/// See `inflight_events_high_water`.
+pub fn eventQueueHighWaterMark() usize {
+    return inflight_events_high_water.load(.acquire);
+}
+
+/// Reset the high water mark so a test can measure one operation.
+pub fn resetEventQueueHighWaterMark() void {
+    inflight_events_high_water.store(0, .release);
+}
+
+/// Record a new in-flight observation (diagnostics only, monotonic).
+fn noteInflightHighWater(count: usize) void {
+    var observed = inflight_events_high_water.load(.monotonic);
+    while (observed < count) {
+        observed = inflight_events_high_water.cmpxchgWeak(observed, count, .release, .monotonic) orelse break;
+    }
+}
+
+/// A unit of deferred cleanup that is allowed to block.
+///
+/// The node is owned by the work item itself (intrusive, preallocated), so
+/// queueing never allocates and can never fail halfway.
+pub const ReapNode = struct {
+    next: ?*ReapNode = null,
+    context: ?*anyopaque = null,
+    run: ?*const fn (?*anyopaque) void = null,
+};
+
+/// Shared, bounded reaper for cleanup that must not run on (or block) the
+/// environment's thread.
+///
+/// Bounded in *threads*: at most `max_workers` helper threads exist per module,
+/// created on demand. The queue is an intrusive list of caller-owned nodes, so
+/// it has no capacity limit, and work is never dropped: if no helper can be
+/// started the node stays queued until one can.
+pub const ReapService = struct {
+    lock: std.atomic.Mutex = .unlocked,
+    head: ?*ReapNode = null,
+    tail: ?*ReapNode = null,
+    /// Nodes currently queued.
+    pending: usize = 0,
+    workers: usize = 0,
+    max_workers: usize = 4,
+
+    const Self = @This();
+
+    /// Queue `node` and make sure a helper is running.
+    pub fn submit(self: *Self, node: *ReapNode, run: *const fn (?*anyopaque) void, context: ?*anyopaque) void {
+        node.context = context;
+        node.run = run;
+
+        spinLock(&self.lock);
+        node.next = null;
+        if (self.tail) |tail| {
+            tail.next = node;
+        } else {
+            self.head = node;
+        }
+        self.tail = node;
+        self.pending += 1;
+        // One worker per outstanding item, capped: a worker can block for a long
+        // time, so a single one would serialize unrelated cleanups.
+        const need_worker = self.workers < self.max_workers and (self.workers == 0 or self.pending > self.workers);
+        if (need_worker) self.workers += 1;
+        self.lock.unlock();
+
+        if (!need_worker) return;
+        const thread = std.Thread.spawn(.{}, reaperMain, .{self}) catch {
+            // No helper available: the node stays queued (never dropped), and
+            // the next submit starts a worker that picks it up.
+            spinLock(&self.lock);
+            self.workers -= 1;
+            self.lock.unlock();
+            return;
+        };
+        thread.detach();
+    }
+
+    fn pop(self: *Self) ?*ReapNode {
+        spinLock(&self.lock);
+        defer self.lock.unlock();
+        const node = self.head orelse return null;
+        self.head = node.next;
+        if (self.head == null) self.tail = null;
+        node.next = null;
+        self.pending -= 1;
+        return node;
+    }
+
+    fn peekHasWork(self: *Self) bool {
+        spinLock(&self.lock);
+        defer self.lock.unlock();
+        return self.head != null;
+    }
+
+    fn claimWorker(self: *Self) bool {
+        spinLock(&self.lock);
+        defer self.lock.unlock();
+        if (self.workers >= self.max_workers) return false;
+        self.workers += 1;
+        return true;
+    }
+
+    fn releaseWorker(self: *Self) void {
+        spinLock(&self.lock);
+        defer self.lock.unlock();
+        self.workers -= 1;
+    }
+};
+
+/// Spin lock over `std.atomic.Mutex`.
+///
+/// The critical sections it protects are a few pointer updates, never an
+/// allocation and never a call into N-API, so spinning (with a yield) is
+/// preferable to a blocking mutex: it also works on single threaded targets,
+/// where a contended blocking lock is unavailable.
+fn spinLock(mutex: *std.atomic.Mutex) void {
+    while (!mutex.tryLock()) {
+        std.Thread.yield() catch {};
+    }
+}
+
+var reap_service: ReapService = .{};
+
+/// Helper thread: runs deferred cleanup until the queue is empty, then exits.
+///
+/// The work may block for as long as the user task behind it runs; the node and
+/// the reference it carries stay valid until it returns.
+fn reaperMain(service: *ReapService) void {
+    while (true) {
+        const node = service.pop() orelse {
+            service.releaseWorker();
+            // Work that arrived while this worker was finishing is handled by
+            // its own submit (which starts another worker when none is left);
+            // if none is, this worker takes it over.
+            if (!service.peekHasWork()) return;
+            if (!service.claimWorker()) return;
+            continue;
+        };
+        if (node.run) |run| run(node.context);
+    }
+}
+
 pub const RuntimeModel = enum {
     single,
     thread,
@@ -498,6 +673,17 @@ fn AsyncTaskDescriptor(comptime Result: type, comptime Event: type, comptime run
         pub const async_event_type = Event;
         pub const async_runtime_model = runtime;
         pub const async_has_events = Event != void;
+        /// Largest number of events one operation keeps in flight (see
+        /// `max_inflight_events`), exposed so regressions can assert the bound.
+        pub const async_max_inflight_events = max_inflight_events;
+        /// Highest number of in-flight events observed, process wide.
+        pub fn asyncEventQueueHighWaterMark() usize {
+            return eventQueueHighWaterMark();
+        }
+        /// Reset the observation above so a test can measure one operation.
+        pub fn asyncResetEventQueueHighWaterMark() void {
+            resetEventQueueHighWaterMark();
+        }
 
         base: *AsyncTaskDescriptorBase,
 
@@ -734,6 +920,13 @@ fn AsyncTaskOperation(
         cancel_token: CancelToken = .{},
         future: ?std.Io.Future(void) = null,
         controller_future: ?std.Io.Future(void) = null,
+        /// Exactly one consumer may await `controller_future`: the JavaScript
+        /// thread while the environment is alive, or the shared reaper when it
+        /// is not.
+        controller_future_claimed: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+        /// Preallocated work item handed to the shared reaper, so the teardown
+        /// path never allocates a node or spawns a private thread.
+        reap_node: ReapNode = .{},
         async_work: napi.napi_async_work = null,
         tsfn_raw: napi.napi_threadsafe_function = null,
         /// Completion record, allocated before the promise reaches JavaScript so
@@ -767,14 +960,36 @@ fn AsyncTaskOperation(
         /// owner - the dispatcher finalizer or the last producer - frees the
         /// memory. `create` starts with one reference for the caller.
         ref_count: std.atomic.Value(usize) = std.atomic.Value(usize).init(1),
-        /// Serializes every use of the thread-safe function handle against the
-        /// finalizer that ends its life: Node frees the handle during
-        /// environment teardown, so a producer must never call into it
-        /// afterwards.
-        dispatcher_gate: std.Io.Mutex = .init,
-        /// True while `tsfn_raw` may still be called. Guarded by
-        /// `dispatcher_gate`.
-        dispatcher_live: bool = false,
+        /// Lifecycle of the thread-safe function handle; see the module level
+        /// constants for the protocol.
+        dispatcher_word: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
+
+        /// Orders the queue accounting against the condition variable below.
+        /// Never held while waiting for JavaScript, and never taken on a single
+        /// threaded target (where a contended lock is unavailable).
+        event_queue_mutex: std.Io.Mutex = .init,
+        /// Producers waiting for a queue slot are woken here whenever one is
+        /// released, the queue is closed, or the task is cancelled.
+        event_queue_cond: std.Io.Condition = .init,
+        /// Events posted to the dispatcher but not delivered yet.
+        ///
+        /// Atomic because a single threaded target (the WASI build) has no
+        /// blocking primitive to wait on: it spins on this counter instead. On
+        /// threaded targets the mutex above orders every access.
+        inflight_events: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
+        /// Set once the dispatcher can no longer deliver.
+        queue_closed: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+        /// Recycled queue records.
+        ///
+        /// Guarded by a small spin lock, not a lock-free stack: several consumer
+        /// threads recycle records concurrently, and a pointer-only CAS stack
+        /// would be exposed to ABA. The lock is only ever held for a couple of
+        /// pointer updates - never across an N-API call or an allocation.
+        free_records: ?*DispatchData = null,
+        records_lock: std.atomic.Mutex = .unlocked,
+        /// True when a JavaScript listener was supplied. Producers read it to
+        /// skip cloning and queueing events nobody would observe.
+        has_event_listener: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 
         const Self = @This();
         const Context = AsyncContext(Event);
@@ -784,11 +999,22 @@ fn AsyncTaskOperation(
         /// A queued item owns everything needed to release it, including when
         /// the environment is already gone and the JS callback receives a null
         /// environment.
+        ///
+        /// The event payload is stored inline: one queue item is one allocation
+        /// (and, in steady state, no allocation at all - the operation recycles
+        /// its records through `free_records`).
         const DispatchData = struct {
             kind: DispatchKind,
             allocator: std.mem.Allocator,
-            payload: ?*Event = null,
+            /// Owned event payload. Unused (and never read) for completions.
+            payload: Event = if (Event == void) {} else undefined,
+            /// Link of the operation's record pool; only valid while the record
+            /// sits in `free_records`.
+            next_free: ?*DispatchData = null,
         };
+
+        /// See `max_inflight_events`.
+        const queue_limit = max_inflight_events;
 
         fn setState(self: *Self, new_state: AsyncState) void {
             self.state.store(@intFromEnum(new_state), .release);
@@ -811,6 +1037,20 @@ fn AsyncTaskOperation(
                 // because every producer held a reference of its own.
                 self.releaseNative();
                 self.allocator.destroy(self);
+            }
+        }
+
+        /// Reaper callback: consume the controller's future and release the
+        /// reference the finalizer took on the reaper's behalf.
+        fn reapControllerFutureNode(raw: ?*anyopaque) void {
+            const ptr = raw orelse return;
+            const self: *Self = @ptrCast(@alignCast(ptr));
+            defer self.dropOwner();
+            if (self.controller_future) |*controller_future| {
+                // Blocks until the controller returns, which is bounded by the
+                // task the controller is waiting for - not by the environment.
+                _ = controller_future.await(self.operationIo());
+                self.controller_future = null;
             }
         }
 
@@ -857,6 +1097,9 @@ fn AsyncTaskOperation(
 
             if (Event != void) {
                 self.listener_ref = try createOptionalCallbackRef(env.raw, listener);
+                // Producers on other threads check this before cloning and
+                // queueing an event nobody would ever observe.
+                self.has_event_listener.store(self.listener_ref != null, .release);
             }
 
             if (signal) |abort_signal| {
@@ -877,14 +1120,15 @@ fn AsyncTaskOperation(
         }
 
         fn submit(self: *Self) !Promise {
-            // The initial reference either stays here (nothing was started) or
-            // is handed to the thread-safe function, whose finalizer drops it.
-            var handed_to_dispatcher = false;
             errdefer {
                 var discardable = self.promise;
                 discardable.discard();
+                // A created thread-safe function already owns the initial
+                // reference and its finalizer drops it (whether or not the
+                // setup finished). Without one, this call still owns it.
+                const dispatcher_owns_initial = self.tsfn_created;
                 _ = self.destroyJs(self.env);
-                if (!handed_to_dispatcher) self.dropOwner();
+                if (!dispatcher_owns_initial) self.dropOwner();
             }
 
             const promise = self.promise;
@@ -903,6 +1147,10 @@ fn AsyncTaskOperation(
                 },
                 .thread => {
                     if (comptime use_wasm_emnapi_async_work) {
+                        // Every failure inside is covered by the errdefer above,
+                        // which uses `tsfn_created` to decide who owns the
+                        // initial reference - the setup can fail after the
+                        // dispatcher was created.
                         try self.runWasmAsyncWork();
                         return promise;
                     }
@@ -914,7 +1162,6 @@ fn AsyncTaskOperation(
                     // From here on the dispatcher owns the initial reference:
                     // it is dropped by the thread-safe function's finalizer.
                     try self.initThreadDispatcher();
-                    handed_to_dispatcher = true;
                     // The completion record is allocated while the promise has
                     // not been handed to JavaScript yet, so the completion path
                     // itself never has to allocate (and can never fail on a live
@@ -931,6 +1178,15 @@ fn AsyncTaskOperation(
                     self.retain();
                     self.controller_future = std.Io.concurrent(io, controllerTaskOwned, .{self}) catch |err| {
                         self.dropOwner();
+                        // Nothing will observe the abort from here on: mark the
+                        // task cancelled, refuse further events and wake a
+                        // producer that is waiting for queue capacity *before*
+                        // joining the task. Otherwise the join below would wait
+                        // for a producer that is waiting for this thread to
+                        // drain a queue it can no longer drain.
+                        self.cancel_token.cancel();
+                        self.cancel_requested = true;
+                        self.closeEventQueue();
                         if (self.future) |*future| {
                             future.cancel(io);
                             self.future = null;
@@ -1150,6 +1406,8 @@ fn AsyncTaskOperation(
                 }
             }
             self.state_cond.signal(io);
+            // Cancellation must unblock producers waiting for queue capacity.
+            self.wakeEventProducers();
         }
 
         fn markTaskDone(self: *Self) void {
@@ -1218,26 +1476,166 @@ fn AsyncTaskOperation(
             switch (effectiveRuntime(runtime)) {
                 .single => self.dispatchEvent(self.env, event),
                 .thread => {
+                    // Without a listener nobody can observe the event: skip the
+                    // deep copy and the queue entirely and keep producing. An
+                    // explicit `undefined` listener lands here too.
+                    if (!self.has_event_listener.load(.acquire)) return;
+
+                    // Reserve capacity first: a full queue must throttle the
+                    // producer, not grow memory without bound.
+                    try self.reserveEventSlot();
+
+                    const data = self.acquireRecord() orelse {
+                        self.releaseEventSlot();
+                        return error.OutOfMemory;
+                    };
+                    data.kind = .event;
+                    data.allocator = self.allocator;
                     // The event crosses a thread boundary and is delivered
                     // later: it must own its data (a slice field would otherwise
                     // alias a buffer the producer may reuse or release).
-                    const payload = try self.allocator.create(Event);
-                    payload.* = ownership.cloneValue(Event, event, self.allocator) catch |err| {
-                        self.allocator.destroy(payload);
+                    data.payload = ownership.cloneValue(Event, event, self.allocator) catch |err| {
+                        self.recycleRecord(data);
+                        self.releaseEventSlot();
                         return err;
                     };
-                    errdefer {
-                        ownership.deinitValue(Event, payload.*, self.allocator);
-                        self.allocator.destroy(payload);
-                    }
 
-                    const data = try self.allocator.create(DispatchData);
-                    data.* = .{ .kind = .event, .allocator = self.allocator, .payload = payload };
-                    errdefer self.allocator.destroy(data);
-
-                    try self.postToDispatcher(data);
+                    self.postToDispatcher(data) catch |err| {
+                        ownership.deinitValue(Event, data.payload, self.allocator);
+                        self.recycleRecord(data);
+                        self.releaseEventSlot();
+                        return err;
+                    };
                 },
             }
+        }
+
+        fn lockRecords(self: *Self) void {
+            spinLock(&self.records_lock);
+        }
+
+        fn unlockRecords(self: *Self) void {
+            self.records_lock.unlock();
+        }
+
+        /// Take a queue record from the operation's pool, allocating only when
+        /// the pool is empty.
+        fn acquireRecord(self: *Self) ?*DispatchData {
+            self.lockRecords();
+            if (self.free_records) |record| {
+                self.free_records = record.next_free;
+                self.unlockRecords();
+                return record;
+            }
+            self.unlockRecords();
+
+            // Allocation happens outside the lock: it can be slow and must never
+            // serialize the JavaScript thread against a producer.
+            const record = self.allocator.create(DispatchData) catch return null;
+            record.* = .{ .kind = .completion, .allocator = self.allocator };
+            return record;
+        }
+
+        /// Give a record back to the pool. Its payload must already be released.
+        fn recycleRecord(self: *Self, data: *DispatchData) void {
+            self.lockRecords();
+            data.next_free = self.free_records;
+            self.free_records = data;
+            self.unlockRecords();
+        }
+
+        /// Claim one of the bounded event slots, waiting for the JavaScript side
+        /// to drain the queue when it is full.
+        ///
+        /// The wait is purely native - it never requires the environment's
+        /// thread to run - and ends as soon as the queue drains, the task is
+        /// cancelled, or the dispatcher is gone. `napi_tsfn_blocking` is
+        /// deliberately not used here: it can block forever when the environment
+        /// is already shutting down.
+        fn reserveEventSlot(self: *Self) !void {
+            if (comptime builtin.single_threaded) {
+                // A single threaded target has no blocking primitive to wait on
+                // (the WASI executor shares atomics with the JavaScript thread,
+                // which drains the queue): poll the counter instead.
+                while (true) {
+                    if (self.queue_closed.load(.acquire)) return error.Closing;
+                    if (self.cancel_token.isCancelled()) return error.Cancelled;
+                    const current = self.inflight_events.load(.acquire);
+                    if (current < queue_limit) {
+                        if (self.inflight_events.cmpxchgWeak(current, current + 1, .acq_rel, .acquire) == null) {
+                            noteInflightHighWater(current + 1);
+                            return;
+                        }
+                        continue;
+                    }
+                    std.Thread.yield() catch {};
+                }
+            }
+
+            const io = self.operationIo();
+            // The classic condition-variable pattern: the predicate is
+            // inspected and changed under the mutex, and the releaser takes the
+            // same mutex before signalling, so no wake-up can be lost.
+            self.event_queue_mutex.lockUncancelable(io);
+            defer self.event_queue_mutex.unlock(io);
+
+            while (true) {
+                if (self.queue_closed.load(.acquire)) return error.Closing;
+                if (self.cancel_token.isCancelled()) return error.Cancelled;
+                const current = self.inflight_events.load(.monotonic);
+                if (current < queue_limit) {
+                    self.inflight_events.store(current + 1, .release);
+                    noteInflightHighWater(current + 1);
+                    return;
+                }
+                // Backpressure: wait until a queued event is delivered.
+                self.event_queue_cond.waitUncancelable(io, &self.event_queue_mutex);
+            }
+        }
+
+        /// Release an event slot once its record was delivered (or dropped).
+        ///
+        /// On threaded targets the counter is updated under the same mutex the
+        /// waiter holds while it inspects it, so a decrement can never be lost
+        /// (which would leave the queue permanently full) and a wake-up can
+        /// never be lost (which would leave a producer asleep past a free slot).
+        /// A single threaded target has no blocking mutex: it uses one atomic
+        /// read-modify-write instead.
+        fn releaseEventSlot(self: *Self) void {
+            if (comptime builtin.single_threaded) {
+                while (true) {
+                    const current = self.inflight_events.load(.acquire);
+                    if (current == 0) return;
+                    if (self.inflight_events.cmpxchgWeak(current, current - 1, .acq_rel, .acquire) == null) return;
+                }
+            }
+
+            const io = self.operationIo();
+            self.event_queue_mutex.lockUncancelable(io);
+            const current = self.inflight_events.load(.monotonic);
+            if (current > 0) self.inflight_events.store(current - 1, .release);
+            self.event_queue_mutex.unlock(io);
+            self.event_queue_cond.signal(io);
+        }
+
+        /// Wake every producer waiting for a queue slot.
+        ///
+        /// The mutex round-trip orders this with a producer that already decided
+        /// to wait: it is held for a few instructions and never across a wait,
+        /// so it can neither block the JavaScript thread nor deadlock against a
+        /// producer that is waiting for it to drain the queue.
+        fn wakeEventProducers(self: *Self) void {
+            if (comptime builtin.single_threaded) return;
+            const io = self.operationIo();
+            self.event_queue_mutex.lockUncancelable(io);
+            self.event_queue_mutex.unlock(io);
+            self.event_queue_cond.broadcast(io);
+        }
+
+        /// Refuse further events and wake every waiting producer.
+        fn closeEventQueue(self: *Self) void {
+            self.queue_closed.store(true, .release);
+            self.wakeEventProducers();
         }
 
         fn dispatchEvent(self: *Self, env_raw: napi.napi_env, event: Event) void {
@@ -1359,8 +1757,10 @@ fn AsyncTaskOperation(
 
         fn prepareCompletionRecord(self: *Self) !void {
             if (self.completion != null) return;
-            const data = try self.allocator.create(DispatchData);
-            data.* = .{ .kind = .completion, .allocator = self.allocator };
+            // Allocated before the promise is handed to JavaScript, so the
+            // completion itself never has to allocate.
+            const data = self.acquireRecord() orelse return error.OutOfMemory;
+            data.kind = .completion;
             self.completion = data;
         }
 
@@ -1375,32 +1775,86 @@ fn AsyncTaskOperation(
             // (producers are done by now) and it must not be lost.
             self.postToDispatcher(data) catch |err| {
                 self.completion = null;
-                self.allocator.destroy(data);
+                self.recycleRecord(data);
                 return err;
             };
             self.completion = null;
         }
 
+        /// Admit one push: returns false once the gate is closed.
+        ///
+        /// The admitted push keeps a count in the same word the finalizer and
+        /// the releaser observe, so there is a single total order over "may
+        /// push" and "the handle is going away".
+        fn admitDispatcherPush(self: *Self) bool {
+            while (true) {
+                const word = self.dispatcher_word.load(.acquire);
+                if ((word & dispatcher_closing_bit) != 0) return false;
+                // A saturated counter refuses instead of corrupting the word.
+                if ((word & dispatcher_active_mask) == dispatcher_active_mask) return false;
+                if (self.dispatcher_word.cmpxchgWeak(word, word + 1, .acq_rel, .acquire) == null) return true;
+            }
+        }
+
+        fn leaveDispatcherPush(self: *Self) void {
+            _ = self.dispatcher_word.fetchSub(1, .acq_rel);
+        }
+
+        /// Close the gate and wait for every admitted push to return.
+        ///
+        /// The pushes are non-blocking N-API calls that only queue an item, so
+        /// this is bounded; waiting is what lets Node delete the handle (right
+        /// after the finalizer returns) without pulling it from under a push.
+        fn closeDispatcherAndWait(self: *Self) void {
+            _ = self.dispatcher_word.fetchOr(dispatcher_closing_bit, .acq_rel);
+            while ((self.dispatcher_word.load(.acquire) & dispatcher_active_mask) != 0) {
+                std.Thread.yield() catch {};
+            }
+        }
+
+        /// Close the gate without waiting, for callers that must not block (a
+        /// failed push on a producer thread, native-only teardown).
+        fn closeDispatcher(self: *Self) void {
+            _ = self.dispatcher_word.fetchOr(dispatcher_closing_bit, .acq_rel);
+            self.closeEventQueue();
+        }
+
+        /// Claim the one release of the handle. False when the engine already
+        /// owns it (finalizer ran, or a push returned `napi_closing`).
+        fn claimDispatcherRelease(self: *Self) bool {
+            const previous = self.dispatcher_word.fetchOr(dispatcher_owned_bit, .acq_rel);
+            return (previous & dispatcher_owned_bit) == 0;
+        }
+
         /// Hand one queue record to the environment's dispatcher.
         ///
-        /// The dispatcher gate is what makes this safe against environment
-        /// teardown: Node frees the thread-safe function handle while producers
-        /// may still be running, and calling it after that is undefined
-        /// behavior. Inside the gate the handle is either still usable, or the
-        /// finalizer already marked it dead.
+        /// The record must already own a reference to this operation: Node runs
+        /// the user finalizer *before* it drains the queue with a null
+        /// environment, so a queued item can outlive the last producer and the
+        /// dispatcher's own reference.
         fn postToDispatcher(self: *Self, data: *DispatchData) !void {
-            const io = self.operationIo();
-            self.dispatcher_gate.lockUncancelable(io);
-            if (!self.dispatcher_live or self.tsfn_raw == null) {
-                self.dispatcher_gate.unlock(io);
-                return error.Closing;
-            }
+            if (!self.admitDispatcherPush()) return error.Closing;
+
+            self.retain();
             const status = napi.napi_call_threadsafe_function(self.tsfn_raw, @ptrCast(data), napi.napi_tsfn_nonblocking);
-            self.dispatcher_gate.unlock(io);
+            self.leaveDispatcherPush();
 
             if (status != napi.napi_ok) {
+                if (status == napi.napi_closing) {
+                    // The engine already consumed this thread's reference: the
+                    // handle must never be released or called again.
+                    _ = self.dispatcher_word.fetchOr(dispatcher_closing_bit | dispatcher_owned_bit, .acq_rel);
+                    self.closeEventQueue();
+                } else {
+                    // An incidental enqueue failure (for example a full engine
+                    // queue): stop pushing, but leave the still-live handle for
+                    // the JavaScript thread to release.
+                    self.closeDispatcher();
+                }
+                self.dropOwner();
                 return NapiError.Error.fromStatus(NapiError.Status.New(status));
             }
+            return;
         }
 
         const Settlement = struct {
@@ -1468,6 +1922,22 @@ fn AsyncTaskOperation(
             // hold one for the duration of the settlement.
             self.retain();
             defer self.dropOwner();
+
+            // Release the producer futures. `await`/`cancel` are what free the
+            // future's own allocation, and the controller always releases the
+            // task's future in both of its branches; the controller's own future
+            // is consumed here. The wait is bounded and never depends on
+            // JavaScript: a completion item can only be processed after the
+            // controller posted it, which is after it left
+            // `waitForTaskDoneOrAbort`, so there is nothing left to wait for.
+            // The claim keeps the reaper (teardown path) out of the same future.
+            if (!self.controller_future_claimed.swap(true, .acq_rel)) {
+                if (self.controller_future) |*controller_future| {
+                    _ = controller_future.await(self.operationIo());
+                    self.controller_future = null;
+                }
+            }
+            self.future = null;
 
             if (self.settled.swap(true, .acq_rel)) return;
             self.setState(.settling);
@@ -1540,57 +2010,82 @@ fn AsyncTaskOperation(
                 return NapiError.Error.fromStatus(NapiError.Status.New(create_status));
             }
             self.tsfn_raw = tsfn_raw;
+            // From here on the dispatcher owns the caller's reference: the
+            // finalizer drops it, whether the rest of the setup succeeds or not.
             self.tsfn_created = true;
-            const io = self.operationIo();
-            self.dispatcher_gate.lockUncancelable(io);
-            self.dispatcher_live = true;
-            self.dispatcher_gate.unlock(io);
+            self.dispatcher_word.store(0, .release);
         }
 
         fn dispatcherNoop(inner_env: napi.napi_env, _: napi.napi_callback_info) callconv(.c) napi.napi_value {
             return Undefined.New(Env.from_raw(inner_env)).raw;
         }
 
-        /// The thread-safe function is gone: the queue was drained (with a null
-        /// environment when the environment is shutting down) and its handle is
-        /// about to be freed by the engine.
+        /// The thread-safe function finalizer.
+        ///
+        /// Node runs this *before* it drains the queue with a null environment
+        /// and deletes the handle, so the dispatcher is retired here first: no
+        /// producer may push afterwards, and no producer can be inside a push
+        /// while the engine walks the queue.
         ///
         /// Only the dispatcher's *reference* is dropped here. Producers may
         /// still be running - a finalized thread-safe function is not proof that
         /// they stopped - and they keep the operation alive until they return.
+        /// The queued items own references of their own.
         fn dispatcherFinalize(_: napi.napi_env, data: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
             const raw = data orelse return;
             const self: *Self = @ptrCast(@alignCast(raw));
-            self.closeDispatcher();
+            // The engine deletes the handle as soon as this returns: no push
+            // may still be running, and the handle must never be released by us.
+            self.closeDispatcherAndWait();
+            _ = self.claimDispatcherRelease();
+            self.closeEventQueue();
             self.js_released.store(true, .release);
+            self.enqueueControllerReap();
             self.dropOwner();
         }
 
-        /// Mark the thread-safe function unusable.
+        /// Hand the controller's future to the shared reaper when the
+        /// environment went away before the completion could be dispatched.
         ///
-        /// Serialized with `postToDispatcher` and `releaseDispatcher`, so no
-        /// producer can be inside `napi_call_threadsafe_function` when the
-        /// handle dies.
-        fn closeDispatcher(self: *Self) void {
-            const io = self.operationIo();
-            self.dispatcher_gate.lockUncancelable(io);
-            self.dispatcher_live = false;
-            self.dispatcher_gate.unlock(io);
+        /// `std.Io.concurrent` gives every task its own allocation, freed by
+        /// exactly one `await`/`cancel`. The controller cannot await its own
+        /// future (it would wait for itself) and the environment's thread must
+        /// not wait for an abandoned user task, so a shared reaper thread
+        /// consumes it instead. The work item is this operation's own
+        /// preallocated node, so queueing never allocates and the operation
+        /// reference it carries keeps the runtime alive until the future is
+        /// really consumed.
+        fn enqueueControllerReap(self: *Self) void {
+            if (comptime builtin.single_threaded) return;
+            if (self.controller_future == null) return;
+            if (self.controller_future_claimed.swap(true, .acq_rel)) return;
+
+            self.retain();
+            reap_service.submit(&self.reap_node, reapControllerFutureNode, self);
         }
 
-        /// Release the thread-safe function exactly once.
+        /// Release the thread-safe function, once, from the JavaScript thread.
         ///
-        /// The gate is dropped *before* the release call: Node may run the
-        /// finalizer synchronously from here, and the finalizer takes the same
-        /// gate.
+        /// It must not run anywhere else: the handle is created, released and
+        /// finalized by the environment's thread, and a producer thread doing it
+        /// could race the finalizer (which would free the handle underneath it).
+        /// The release waits for in-flight pushes to return first.
         fn releaseDispatcher(self: *Self) void {
-            const io = self.operationIo();
-            self.dispatcher_gate.lockUncancelable(io);
-            const release_now = self.dispatcher_live;
-            self.dispatcher_live = false;
-            self.dispatcher_gate.unlock(io);
+            // Stop new pushes and wake producers waiting on the queue first.
+            self.closeDispatcher();
+            // A push that already returned `napi_closing`, or a finalizer that
+            // already ran, owns the handle's fate now: releasing it again would
+            // touch an engine-owned (possibly freed) handle.
+            if (!self.claimDispatcherRelease()) return;
 
-            if (release_now and self.tsfn_raw != null) {
+            // Only then wait out the pushes that were admitted before the gate
+            // closed; they are non-blocking calls and cannot wait for us.
+            while ((self.dispatcher_word.load(.acquire) & dispatcher_active_mask) != 0) {
+                std.Thread.yield() catch {};
+            }
+            if (self.tsfn_raw != null) {
+                // May run the finalizer (and free this operation) before it
+                // returns; nothing may touch `self` afterwards.
                 _ = napi.napi_release_threadsafe_function(self.tsfn_raw, napi.napi_tsfn_release);
             }
         }
@@ -1598,31 +2093,35 @@ fn AsyncTaskOperation(
         fn dispatcherCallJs(inner_env: napi.napi_env, js_callback: napi.napi_value, context: ?*anyopaque, raw_data: ?*anyopaque) callconv(.c) void {
             const data: *DispatchData = @ptrCast(@alignCast(raw_data orelse return));
             const allocator = data.allocator;
-            const kind = data.kind;
-            const payload = data.payload;
-            allocator.destroy(data);
+
+            // The record's own reference keeps this operation alive even when
+            // the environment's finalizer already ran (Node finalizes first and
+            // only then drains the queue with a null environment).
+            const self = operationFromContext(context) orelse {
+                if (data.kind == .event) ownership.deinitValue(Event, data.payload, allocator);
+                allocator.destroy(data);
+                return;
+            };
+            // Everything below must finish before the reference is dropped:
+            // releasing it may free the operation.
+            defer {
+                if (data.kind == .event) self.releaseEventSlot();
+                self.recycleRecord(data);
+                self.dropOwner();
+            }
 
             // Node drains the queue with a null environment while shutting
             // down: release the queued payload natively and never touch JS.
             const env_alive = inner_env != null and js_callback != null;
 
-            switch (kind) {
+            switch (data.kind) {
                 .event => {
-                    if (payload) |event_payload| {
-                        defer {
-                            // Delivery and the null-environment drain both
-                            // release the event's own data.
-                            ownership.deinitValue(Event, event_payload.*, allocator);
-                            allocator.destroy(event_payload);
-                        }
-                        if (!env_alive) return;
-                        const self = operationFromContext(context) orelse return;
-                        self.dispatchEvent(inner_env, event_payload.*);
-                    }
+                    defer ownership.deinitValue(Event, data.payload, allocator);
+                    if (!env_alive) return;
+                    self.dispatchEvent(inner_env, data.payload);
                 },
                 .completion => {
                     if (!env_alive) return;
-                    const self = operationFromContext(context) orelse return;
                     self.dispatchCompletion(inner_env);
                 },
             }
@@ -1676,17 +2175,15 @@ fn AsyncTaskOperation(
 
         /// Native-only teardown for paths where JavaScript must not be touched.
         ///
-        /// `release_dispatcher` releases the thread-safe function so its queue
-        /// is drained (with a null environment) and its finalizer can drop the
-        /// dispatcher's reference. It must be false when the finalizer itself is
-        /// already running.
-        fn destroyNativeOnly(self: *Self, release_dispatcher: bool) void {
+        /// `retire_dispatcher` retires the dispatcher so producers stop pushing
+        /// and blocked producers wake up. The thread-safe function handle itself
+        /// is *not* released here: only the environment's thread may do that,
+        /// and the environment is exactly what these paths cannot trust. The
+        /// engine finalizes (and deletes) the handle on its own when the
+        /// environment goes away.
+        fn destroyNativeOnly(self: *Self, retire_dispatcher: bool) void {
             self.js_released.store(true, .release);
-            if (release_dispatcher) {
-                self.releaseDispatcher();
-            } else {
-                self.closeDispatcher();
-            }
+            if (retire_dispatcher) self.closeDispatcher();
         }
 
         /// Frees everything the operation owns natively.
@@ -1737,6 +2234,20 @@ fn AsyncTaskOperation(
                 self.completion = null;
                 allocator.destroy(record);
             }
+            // Records are only pooled while the operation lives; hand them back
+            // to the allocator that created them (and stop any producer that is
+            // still waiting for a slot).
+            self.queue_closed.store(true, .release);
+            self.lockRecords();
+            var pooled = self.free_records;
+            self.free_records = null;
+            self.unlockRecords();
+            while (pooled) |record| {
+                const next = record.next_free;
+                allocator.destroy(record);
+                pooled = next;
+            }
+            self.wakeEventProducers();
 
             if (self.descriptor_base) |base| {
                 self.descriptor_base = null;

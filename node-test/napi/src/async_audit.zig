@@ -169,6 +169,16 @@ fn echoBytes(input: []const u8) []const u8 {
     return input;
 }
 
+fn tinyEcho(input: u32) u32 {
+    return input + 1;
+}
+
+/// Cheapest possible threaded task, for allocation-baseline measurements over
+/// thousands of operations.
+pub fn asyncTinyThreadValue(input: u32) napi.Async(u32, .thread) {
+    return napi.Async(u32, .thread).from(input, tinyEcho);
+}
+
 /// The captured slice points at memory owned by the caller's argument scope;
 /// the task must run against its own copy.
 pub fn asyncEchoBytes(text: []const u8) napi.Async([]const u8, .thread) {
@@ -483,6 +493,114 @@ pub fn asyncLongThreadValue(input: u32) napi.Async(u32, .thread) {
 pub fn asyncMultiSignalTask(total: u32, signal: napi.AbortSignal) napi.Async(u32, .thread) {
     _ = signal;
     return napi.Async(u32, .thread).from(total, abortableRun);
+}
+
+// ---------------------------------------------------------------------------
+// H01/H05/H08/H10: regression probes for the second audit round
+// ---------------------------------------------------------------------------
+
+const SliceTask = napi.AsyncWithEvents(u32, SliceEvent, .thread);
+const SliceTaskSingle = napi.AsyncWithEvents(u32, SliceEvent, .single);
+
+/// Largest number of events one operation keeps in flight (H10).
+pub fn eventQueueLimit() u32 {
+    return @intCast(SliceTask.async_max_inflight_events);
+}
+
+/// Highest number of in-flight events observed since the last reset (H10).
+pub fn eventQueueHighWater() usize {
+    return SliceTask.asyncEventQueueHighWaterMark();
+}
+
+pub fn resetEventQueueHighWater() void {
+    SliceTask.asyncResetEventQueueHighWaterMark();
+}
+
+/// Emits `total` slice events with no listener at all; a listener that is
+/// explicitly `undefined` takes the same path.
+pub fn asyncSliceEventsNoListener(total: u32) SliceTask {
+    return SliceTask.from(total, sliceEventRun);
+}
+
+fn throwingEventRun(ctx: napi.AsyncContext(SliceEvent), total: u32) !u32 {
+    var buffer: [32]u8 = undefined;
+    const text = std.fmt.bufPrint(&buffer, "listener-failure", .{}) catch "listener-failure";
+    var index: u32 = 0;
+    while (index < total) : (index += 1) {
+        try ctx.emit(.{ .text = text, .index = index });
+    }
+    return total;
+}
+
+/// Single-runtime variant of `asyncThrowingEvents`: the event is delivered
+/// synchronously on the JavaScript thread.
+pub fn asyncThrowingEventsSingle(total: u32) SliceTaskSingle {
+    return SliceTaskSingle.from(total, throwingEventRun);
+}
+
+/// Emits one event and then throws from the runner: the runner error and a
+/// failing listener must not both be able to settle the promise.
+fn runnerFailureAfterEvent(ctx: napi.AsyncContext(SliceEvent), total: u32) !u32 {
+    _ = total;
+    var buffer: [32]u8 = undefined;
+    const text = std.fmt.bufPrint(&buffer, "runner-failure-event", .{}) catch "runner-failure-event";
+    try ctx.emit(.{ .text = text, .index = 0 });
+    return napi.Error.fromReason("runner failed after emitting");
+}
+
+pub fn asyncRunnerFailureAfterEvent() SliceTask {
+    return SliceTask.from(@as(u32, 1), runnerFailureAfterEvent);
+}
+
+/// Abortable emitters whose listener is expected to be slow on the JavaScript
+/// side: cancellation has to release a producer that is waiting for queue
+/// capacity (H10).
+fn abortableEventRun(ctx: napi.AsyncContext(SliceEvent), total: u32) !u32 {
+    var buffer: [32]u8 = undefined;
+    var index: u32 = 0;
+    while (index < total) : (index += 1) {
+        if (index % 64 == 0) try ctx.checkCancelled();
+        const text = std.fmt.bufPrint(&buffer, "slow-{d}", .{index}) catch continue;
+        try ctx.emit(.{ .text = text, .index = index });
+    }
+    try ctx.checkCancelled();
+    return total;
+}
+
+pub fn asyncAbortableSliceEvents(total: u32, signal: napi.AbortSignal) napi.AsyncWithEvents(u32, SliceEvent, .thread) {
+    _ = signal;
+    return napi.AsyncWithEvents(u32, SliceEvent, .thread).from(total, abortableEventRun);
+}
+
+/// Long-running threaded task whose promise stays pending until it finishes or
+/// is cancelled; used to keep an environment busy while it is torn down (H01).
+pub fn asyncAbandonedThreadValue(input: u32) napi.Async(u32, .thread) {
+    return napi.Async(u32, .thread).from(input, longRunner);
+}
+
+/// Long-running abortable task: the environment is torn down while both the
+/// task and its controller are still running (H01).
+pub fn asyncAbandonedAbortable(total: u32, signal: napi.AbortSignal) napi.Async(u32, .thread) {
+    _ = signal;
+    return napi.Async(u32, .thread).from(total, abortableRun);
+}
+
+var completed_operations: std.atomic.Value(u32) = .init(0);
+
+/// Counts threaded operations that ran to completion natively, so the spec can
+/// tell "the producer really finished" from "the process survived".
+pub fn completedThreadedOperations() u32 {
+    return completed_operations.load(.monotonic);
+}
+
+fn countedLongRunner(input: u32) u32 {
+    const value = longRunner(input);
+    _ = completed_operations.fetchAdd(1, .monotonic);
+    return value;
+}
+
+pub fn asyncCountedThreadValue(input: u32) napi.Async(u32, .thread) {
+    return napi.Async(u32, .thread).from(input, countedLongRunner);
 }
 
 // ---------------------------------------------------------------------------

@@ -76,6 +76,36 @@ fn execute(ctx: napi.AsyncContext(Progress), total: u32) !u32 {
 
 When an exported function returns `AsyncWithEvents`, declaration generation adds a trailing optional event listener parameter.
 
+Emitting without that listener (omitted, `undefined` or `null`) does not copy the
+event: nothing can observe it, so the producer keeps running at full speed.
+
+## Event delivery
+
+On a threaded runtime the event crosses a thread boundary, so it must own its
+data: `emit` deep-copies the event before queueing it. Delivery order is FIFO -
+every event emitted before the task returned is delivered before the Promise
+settles, and a listener exception therefore always precedes the settlement.
+
+One operation keeps at most 256 undelivered events (`max_inflight_events`).
+Beyond that the producer waits for the JavaScript side to drain the queue instead
+of growing memory without bound. The wait is native: it is released as the queue
+drains, when the task is cancelled, and when the environment shuts down, so it
+can never depend on the very thread that is waiting for the task's promise.
+
+Settlement reason priority, highest first:
+
+1. the exception the event listener threw (delivered exactly as thrown, including
+   primitives such as `42`, `"boom"`, `null` and `undefined`),
+2. the cancellation (`AbortError`),
+3. the runner's own error or a failed result conversion,
+4. a failure while cleaning up (for example a hostile `removeEventListener` that
+   throws),
+5. the task's result.
+
+A cleanup failure is always cleared from the environment - it never escapes as an
+uncaught Node-API callback exception - and it only becomes the rejection reason
+when the task itself had none.
+
 ## Scheduling
 
 Async descriptors expose:
@@ -141,14 +171,23 @@ napi.AbortSignal
 | `isAborted()`               | Read the signal's `aborted` property. |
 | `bind(context, callback)`   | Register a native abort callback.     |
 
-`bind` returns `*AbortRegistration`.
+`bind` returns `*AbortRegistration`. `bindOwned(owner, callback)` additionally
+lets the registration take a reference on the callback's context (`ContextOwner`
+with `retain`/`release`), so an abort that arrives while the context is being
+torn down observes an inactive registration instead of a freed one.
 
 ## `AbortRegistration`
 
-| Method           | Use                                                      |
-| ---------------- | -------------------------------------------------------- |
-| `requestAbort()` | Invoke the registered native callback.                   |
-| `release()`      | Remove the registration and delete the signal reference. |
+| Method               | Use                                                                            |
+| -------------------- | ------------------------------------------------------------------------------ |
+| `requestAbort()`     | Invoke the registered native callback.                                          |
+| `release()`          | Remove the registration and delete the signal reference (JavaScript thread).    |
+| `releaseWithoutJs()` | Detach without touching JavaScript, for teardown while the environment is gone. |
+| `isActive()`         | True while the registration may still deliver `abort`.                          |
+
+A registration is reference counted between the caller and its listener function,
+so it stays valid until both released it, whichever order that happens in.
+`releaseWithoutJs` never calls back into the environment.
 
 `Promise.RejectAbortError()` and async cancellation use the same `AbortError` shape.
 
