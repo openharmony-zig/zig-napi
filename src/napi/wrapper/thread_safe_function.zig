@@ -169,7 +169,14 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
                     const call_data: *CallData(Args) = @ptrCast(@alignCast(raw_data));
                     const allocator = call_data.allocator;
                     // Every path below releases the queued payload, including
-                    // the null-environment shutdown drain.
+                    // the null-environment shutdown drain, and the item carries
+                    // everything that release needs (its allocator and its own
+                    // error snapshot). The wrapper context, by contrast, may
+                    // already be gone: Node runs this TSFN's user finalizer -
+                    // which frees the wrapper - before it drains the queue with
+                    // a null environment (node_api.cc ThreadSafeFunction::
+                    // Finalize/EmptyQueueAndDelete), so `context` must not be
+                    // dereferenced before that drain is filtered out.
                     defer freeCallData(allocator, call_data);
 
                     if (inner_env == null or js_callback == null) return;

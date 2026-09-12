@@ -345,6 +345,18 @@ pub fn activeConversionFrame() ?*ConversionFrame {
     return current_frame;
 }
 
+/// The active conversion frame that still owns the resources it creates, if any.
+///
+/// A *committed* frame belongs to the native body that is running: a conversion
+/// started after the commit (a manual `Napi.from_napi_value*` inside the body)
+/// must not attribute its resources to that frame, because the frame will never
+/// roll back again. Callers that convert values start their own frame in that
+/// case.
+pub fn activeUncommittedConversionFrame() ?*ConversionFrame {
+    const frame = current_frame orelse return null;
+    return if (frame.committed) null else frame;
+}
+
 /// Record a resource the caller just created.
 ///
 /// With no active frame (a `Reference`/TSFN created by user code, outside any
@@ -523,6 +535,41 @@ test "nested conversion frames only release their own resources" {
 test "resources created outside a conversion stay with their owner" {
     var recorder = RollbackRecorder{};
     try std.testing.expect(activeConversionFrame() == null);
+    try std.testing.expect(activeUncommittedConversionFrame() == null);
     try trackCustom(&recorder, RollbackRecorder.undo);
     try std.testing.expectEqual(@as(usize, 0), recorder.released);
+}
+
+test "a committed frame does not adopt conversions started after it" {
+    var frame = ConversionFrame{};
+    frame.start(std.testing.allocator);
+    defer frame.end();
+
+    try std.testing.expect(activeUncommittedConversionFrame() == &frame);
+    frame.commit();
+    // The frame belongs to the running body now: a conversion started here must
+    // install its own frame instead of handing its resources to one that will
+    // never roll back.
+    try std.testing.expect(activeConversionFrame() == &frame);
+    try std.testing.expect(activeUncommittedConversionFrame() == null);
+}
+
+test "a resource that could not be registered stays with its creator" {
+    // The first allocation of the bookkeeping list fails: the caller is told,
+    // keeps ownership of the resource it just created, and the frame stays
+    // usable for the registrations that follow.
+    var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
+    var recorder = RollbackRecorder{};
+    var frame = ConversionFrame{};
+    frame.start(failing.allocator());
+    defer frame.end();
+
+    try std.testing.expectError(error.OutOfMemory, trackCustom(&recorder, RollbackRecorder.undo));
+
+    // A failed registration leaves the frame consistent: the allocator recovers
+    // and the next resource is recorded and rolled back normally.
+    failing.fail_index = std.math.maxInt(usize);
+    try trackCustom(&recorder, RollbackRecorder.undo);
+    frame.rollbackUncommitted();
+    try std.testing.expectEqual(@as(usize, 1), recorder.released);
 }

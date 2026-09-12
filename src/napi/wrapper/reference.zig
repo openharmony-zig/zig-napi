@@ -15,14 +15,18 @@ pub fn Reference(comptime T: type) type {
         /// copy.
         ///
         /// Ownership: the handle is owned by whoever created it. Copying a
-        /// `Reference` copies the handle, not the ownership, and every copy
-        /// keeps its own `taken` flag: releasing through one copy
-        /// (`Unref`/`Delete`) deletes the underlying reference for all of them,
-        /// so a stale alias afterwards fails with "Ref value has been deleted"
-        /// only if it was itself marked taken. Keep exactly one owner per
-        /// created reference and pass the reference (not a copy) to it; when a
-        /// reference has to be shared, store the single owner and hand out
-        /// borrowed `T` values read through `GetValue`.
+        /// `Reference` copies the handle, not the ownership, and the `taken`
+        /// flag is per copy: releasing through one copy (`Unref`/`Delete`)
+        /// deletes the underlying reference for *every* copy, while the other
+        /// copies still report `taken == false` and will hand the deleted handle
+        /// to N-API. Reading such an alias is undefined behaviour in the engine,
+        /// not a detectable error - `taken`/`isTaken()` only describe this copy
+        /// and cannot see another copy's release.
+        ///
+        /// Preconditions for safe use: keep exactly one owner per created
+        /// reference, release it only after every alias is gone, and share the
+        /// referenced value by reading borrowed `T` values with `GetValue`
+        /// instead of copying the handle around.
         pub const is_napi_reference = true;
         pub const referenced_type = T;
 

@@ -950,7 +950,32 @@ pub const Napi = struct {
     }
 
     /// Fallible conversion that allocates every native copy through `allocator`.
+    ///
+    /// The conversion is a transaction over the JavaScript resources it creates
+    /// (strong references, thread-safe functions). Inside an argument conversion
+    /// the active frame is reused, so nested and recursive conversions stay part
+    /// of the same transaction and a failure anywhere still releases everything
+    /// the outer conversion created. Anywhere else - a standalone conversion, or
+    /// a manual conversion inside a native body whose own frame is already
+    /// committed - a local frame is installed, and it is committed when the
+    /// conversion succeeded. The commit hands the created resources to the
+    /// caller: a manual conversion that returns a `Reference` gives its caller a
+    /// reference to release, and a conversion that fails halfway releases the
+    /// resources it had created up to that point instead of leaking them.
     pub fn from_napi_value_with_allocator(env: napi.napi_env, raw: napi.napi_value, comptime T: type, allocator: std.mem.Allocator) anyerror!T {
+        if (helper.activeUncommittedConversionFrame() != null) {
+            return Napi.from_napi_value_inner(env, raw, T, allocator);
+        }
+
+        var frame = helper.ConversionFrame{};
+        frame.start(allocator);
+        defer frame.end();
+        const value = try Napi.from_napi_value_inner(env, raw, T, allocator);
+        frame.commit();
+        return value;
+    }
+
+    fn from_napi_value_inner(env: napi.napi_env, raw: napi.napi_value, comptime T: type, allocator: std.mem.Allocator) anyerror!T {
         const infos = @typeInfo(T);
         if (comptime helper.isDts(T)) {
             if (comptime !@hasField(T, "value")) {
