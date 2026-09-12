@@ -751,3 +751,186 @@ nativeOnlyTest("a throwing callback does not break later deliveries", (t) => {
     t.deepEqual(output.thrown, ["callback boom"]);
   }
 });
+
+nativeOnlyTest("a manual conversion inside a native body releases what it created", (t) => {
+  const result = runIsolated(
+    `
+    const collect = async () => {
+      for (let index = 0; index < 10; index += 1) {
+        global.gc();
+        await new Promise((resolve) => setTimeout(resolve, 2));
+      }
+    };
+    (async () => {
+      // Same helper as the automatic-conversion regression: the object is only
+      // reachable through the reference the conversion created for it.
+      const attempt = (create, invoke) => {
+        const object = create();
+        const ref = new WeakRef(object);
+        try {
+          invoke(object);
+        } catch (error) {
+          if (!error) throw error;
+        }
+        return ref;
+      };
+
+      b.resetNativeCallCount();
+      const refs = [];
+      for (let index = 0; index < 100; index += 1) {
+        refs.push(
+          attempt(
+            () => ({ index }),
+            (object) => b.manualNestedConversion({ reference: object, count: "bad" }),
+          ),
+        );
+      }
+
+      await collect();
+      console.log(
+        JSON.stringify({
+          alive: refs.filter((ref) => ref.deref() !== undefined).length,
+          calls: b.nativeCallCount(),
+        }),
+      );
+    })();
+    `,
+    ["--expose-gc"],
+  );
+
+  t.is(result.signal, null, result.stderr);
+  t.is(result.status, 0, result.stderr);
+  // The struct conversion creates the reference and then fails on the next
+  // field; the transaction around the manual conversion releases it.
+  t.deepEqual(JSON.parse(result.stdout.trim()), { alive: 0, calls: 0 });
+});
+
+nativeOnlyTest("an inner committed reference survives a failing outer conversion", (t) => {
+  const result = runIsolated(
+    `
+    const collect = async () => {
+      for (let index = 0; index < 10; index += 1) {
+        global.gc();
+        await new Promise((resolve) => setTimeout(resolve, 2));
+      }
+    };
+    (async () => {
+      let thrown = null;
+      let weak;
+      // The object is created in its own scope so that, once the stored
+      // reference is released, nothing else keeps it alive.
+      (() => {
+        const object = {
+          get x() {
+            // Reenters another exported function, which takes ownership of a
+            // reference to this object and commits it.
+            b.storeReference(this);
+            return 1;
+          },
+          y: 2,
+        };
+        weak = new WeakRef(object);
+
+        try {
+          // The getter runs while the first argument is converted; the second
+          // argument is rejected afterwards.
+          b.translatePoint(object, "bad", 2);
+        } catch (error) {
+          thrown = error.name;
+        }
+      })();
+
+      await collect();
+      const stored = b.storedReferenceIsSet();
+      const aliveWhileStored = weak.deref() !== undefined;
+      const released = b.releaseStoredReference();
+      await collect();
+      console.log(
+        JSON.stringify({
+          thrown,
+          stored,
+          aliveWhileStored,
+          released,
+          aliveAfterRelease: weak.deref() !== undefined,
+          calls: b.nativeCallCount(),
+        }),
+      );
+    })();
+    `,
+    ["--expose-gc"],
+  );
+
+  t.is(result.signal, null, result.stderr);
+  t.is(result.status, 0, result.stderr);
+  // The rejected outer call must not release a reference that another, already
+  // committed call owns.
+  t.deepEqual(JSON.parse(result.stdout.trim()), {
+    thrown: "TypeError",
+    stored: true,
+    aliveWhileStored: true,
+    released: true,
+    aliveAfterRelease: false,
+    calls: 0,
+  });
+});
+
+nativeOnlyTest("a manual conversion hands its reference to the caller", (t) => {
+  const result = runIsolated(
+    `
+    const collect = async () => {
+      for (let index = 0; index < 10; index += 1) {
+        global.gc();
+        await new Promise((resolve) => setTimeout(resolve, 2));
+      }
+    };
+    (async () => {
+      let weak;
+      (() => {
+        const object = { kept: true };
+        weak = new WeakRef(object);
+        b.manualStoredReference(object);
+      })();
+
+      await collect();
+      const stored = b.storedReferenceIsSet();
+      const aliveWhileStored = weak.deref() !== undefined;
+      b.releaseStoredReference();
+      await collect();
+      console.log(
+        JSON.stringify({ stored, aliveWhileStored, aliveAfterRelease: weak.deref() !== undefined }),
+      );
+    })();
+    `,
+    ["--expose-gc"],
+  );
+
+  t.is(result.signal, null, result.stderr);
+  t.is(result.status, 0, result.stderr);
+  // A successful manual conversion commits its resources to the caller, exactly
+  // like a successful argument conversion commits them to the native body.
+  t.deepEqual(JSON.parse(result.stdout.trim()), {
+    stored: true,
+    aliveWhileStored: true,
+    aliveAfterRelease: false,
+  });
+});
+
+test("a custom native deinit runs next to the resource rollback", (t) => {
+  const baseline = bindings.activeBytes();
+  const baselineAllocations = bindings.activeAllocations();
+  bindings.resetNativeCallCount();
+
+  for (let index = 0; index < 50; index += 1) {
+    // The struct conversion allocates its string and creates a strong reference
+    // for the `reference` field; the second argument is then rejected. The
+    // reference is released by the transaction and the string by the custom
+    // `deinit`, each exactly once.
+    t.throws(() => bindings.nativeHolderThenRejected({ text: "hello", reference: {} }, "bad"), {
+      name: "TypeError",
+    });
+  }
+
+  t.is(bindings.nativeCallCount(), 0, "the native body must not run for a rejected argument");
+  t.is(bindings.activeBytes(), baseline);
+  t.is(bindings.activeAllocations(), baselineAllocations);
+});

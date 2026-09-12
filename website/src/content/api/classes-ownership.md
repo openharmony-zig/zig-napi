@@ -60,10 +60,18 @@ pub fn remember(reference: napi.ObjectRef) void {
 
 `napi.Reference(T)` is a value type that holds the reference *handle*, not the
 ownership. Copying one copies the handle: releasing through one copy
-(`Unref`/`Delete`) deletes the reference for all of them, and the other copies
-only fail safely if they were marked taken themselves. Keep exactly one owner
-per created reference and share borrowed values read through `GetValue(env)`
-instead of the handle.
+(`Unref`/`Delete`) deletes the reference for all of them, while the other copies
+still hold the deleted handle and will pass it to N-API. That is undefined
+behaviour in the engine, not a reported error: `taken`/`isTaken()` describe one
+copy only and cannot see another copy's release. Keep exactly one owner per
+created reference, release it only after every alias is gone, and share the
+value by reading borrowed `T` values with `GetValue(env)` instead of copying the
+handle around.
+
+A manual conversion (`Napi.from_napi_value*`, `NapiValue.As(T)`) inside a native
+body follows the same rule: it is its own transaction, so a successful
+conversion hands the created reference to the caller (release it yourself) and a
+conversion that fails halfway releases what it had already created.
 
 ## `Class`
 

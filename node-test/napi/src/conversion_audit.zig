@@ -443,6 +443,47 @@ pub fn releaseStoredReference(env: napi.Env) bool {
     return true;
 }
 
+/// A manual conversion inside a native body, where the body never goes through
+/// the automatic argument conversion: the struct conversion creates a reference
+/// for `reference` and then fails on `count`. The conversion transaction must
+/// release the reference it created before the failure, even though the frame of
+/// this exported function is already committed.
+const ManualHolder = struct {
+    reference: napi.ObjectRef,
+    count: i32,
+};
+
+pub fn manualNestedConversion(value: napi.NapiValue) !i32 {
+    const holder = try value.As(ManualHolder);
+    return holder.count;
+}
+
+/// The same manual conversion, but successful: the reference belongs to the
+/// caller of the conversion from here on, exactly like an automatically
+/// converted parameter.
+pub fn manualStoredReference(value: napi.NapiValue) !void {
+    stored_reference = try value.As(napi.ObjectRef);
+}
+
+/// A converted struct whose custom `deinit` releases its own native buffer while
+/// the same conversion created a strong reference. On a rejected call the
+/// transaction releases the reference and the native cleanup then runs the
+/// custom `deinit`; neither may touch what the other owns.
+const NativeHolder = struct {
+    text: []u8,
+    reference: napi.ObjectRef,
+
+    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+        allocator.free(self.text);
+    }
+};
+
+pub fn nativeHolderThenRejected(holder: NativeHolder, tail: i32) i32 {
+    _ = holder;
+    native_calls += 1;
+    return tail;
+}
+
 pub fn ownedPairReturn() OwnedPair {
     const allocator = napi.globalAllocator();
     return .{

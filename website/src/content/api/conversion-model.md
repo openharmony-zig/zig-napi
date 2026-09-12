@@ -117,6 +117,23 @@ Releasing them is the body's job: `Unref()`/`Delete()` for a reference, the
 final `release()`/`abort()` for a TSFN. See [Ownership](./classes-ownership) and
 [Functions](./callback-functions).
 
+Manual conversions (`Napi.from_napi_value*`, `NapiValue.As(T)`) are
+transactions too:
+
+- inside an automatic argument conversion they join that conversion, so a
+  failure anywhere still releases everything the outer conversion created,
+- anywhere else - a standalone conversion, or a manual conversion inside a
+  native body whose own transaction is already committed - they run in their own
+  transaction. It is committed when the conversion succeeds, which hands the
+  created resources to the caller, and it releases them if the conversion fails
+  halfway instead of leaking what it had already created.
+
+One consequence of the ordering: a custom `deinit` of a converted value (a
+struct that releases its own native memory) runs *after* the resource rollback,
+during the ordinary native cleanup. It must only release native memory it owns -
+never a reference or TSFN the conversion created, which the transaction releases
+itself and the body owns after the commit.
+
 ## TypeScript Output
 
 `generateTypeDefinition` follows the same conversion model. It emits interfaces for object-like structs, tuples for tuple structs, `const enum` for Zig enums, union types for `union(enum)`, `ExternalObject<T>` for `napi.External(T)`, and an `AbortSignal` interface when an API references `napi.AbortSignal`.
