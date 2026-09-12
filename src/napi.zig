@@ -49,6 +49,16 @@ pub const JsRangeError = err.JsRangeError;
 pub const Function = function.Function;
 pub const CallbackInfo = callback_info.CallbackInfo;
 pub const Worker = worker.Worker;
+/// `Worker` with explicitly borrowed data: the worker never releases it, the
+/// caller keeps it alive until `OnComplete` returned.
+pub const WorkerBorrowed = worker.WorkerBorrowed;
+/// Fallible `Worker`/`WorkerBorrowed`: creation failures are returned (creation
+/// through `Worker`/`WorkerBorrowed` follows the documented OOM panic policy).
+pub const tryWorker = worker.tryWorker;
+pub const tryWorkerBorrowed = worker.tryWorkerBorrowed;
+/// Transfer mode of the `data` field; declare it on a named init struct:
+/// `pub const data_transfer: napi.WorkerDataTransfer = .borrowed;`
+pub const WorkerDataTransfer = worker.DataTransfer;
 pub const ThreadSafeFunction = thread_safe_function.ThreadSafeFunction;
 pub const ThreadSafeFunctionMode = thread_safe_function.ThreadSafeFunctionMode;
 pub const ThreadSafeFunctionReleaseMode = thread_safe_function.ThreadSafeFunctionReleaseMode;
