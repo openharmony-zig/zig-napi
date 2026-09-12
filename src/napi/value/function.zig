@@ -180,9 +180,26 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                     // what they capture themselves.
                     const frame_allocator = GlobalAllocator.capture();
 
+                    // Argument conversion is a transaction. Converting a
+                    // parameter may *create* a JavaScript resource - a strong
+                    // reference for `napi.Reference(T)`/`napi.ObjectRef`, an
+                    // active thread-safe function for a TSFN pointer - and none
+                    // of those may survive a call that never reached its body
+                    // (audit H04). The frame releases them before the native
+                    // cleanup runs and is committed once the body is about to be
+                    // entered: from that point on the resources belong to the
+                    // body (a TSFN is routinely handed to another thread).
+                    var conversion = helper.ConversionFrame{};
+                    conversion.start(frame_allocator);
+                    defer conversion.end();
+
                     var napi_params: std.meta.ArgsTuple(value_type) = undefined;
                     var initialized_params: usize = 0;
                     defer cleanupArgs(&napi_params, initialized_params, frame_allocator);
+                    // Registered after the native cleanup so it runs *before* it:
+                    // a rollback handle may live inside memory the cleanup frees
+                    // (for example a slice of references).
+                    defer conversion.rollbackUncommitted();
 
                     if (comptime has_env) {
                         napi_params[0] = Env.from_raw(inner_env);
@@ -213,11 +230,13 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                         null;
 
                     if (@typeInfo(return_info) == .error_union) {
+                        conversion.commit();
                         const ret = @call(.auto, value, napi_params) catch |err| {
                             return throwAnyAndUndefined(inner_env, err);
                         };
                         return completeReturn(inner_env, ret, event_listener, abort_signal, frame_allocator);
                     } else {
+                        conversion.commit();
                         const ret = @call(.auto, value, napi_params);
                         return completeReturn(inner_env, ret, event_listener, abort_signal, frame_allocator);
                     }

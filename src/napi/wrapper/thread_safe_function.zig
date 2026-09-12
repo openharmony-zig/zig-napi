@@ -8,6 +8,7 @@ const NapiError = @import("./error.zig");
 const String = @import("../value/string.zig").String;
 const GlobalAllocator = @import("../util/allocator.zig");
 const ownership = @import("../util/async_ownership.zig");
+const helper = @import("../util/helper.zig");
 const options = @import("../options.zig");
 
 const ThreadSafeFunctionCallModeRaw = if (options.selectedNapiVersion().isAtLeast(.v4))
@@ -60,12 +61,47 @@ pub const ThreadSafeFunctionCallVariant = enum {
 /// The item owns its payload and records the allocator that must release it, so
 /// it can be released even when the JavaScript environment is already gone and
 /// the dispatcher runs with a null environment.
+///
+/// An error payload is stored as an `ErrorSnapshot`: the error that was handed
+/// to `Err` borrows its message and code from the caller (often a stack buffer
+/// that is reused right after the call), so the text is copied into memory owned
+/// by the queue item before the call is queued.
 fn CallData(comptime Args: type) type {
     return struct {
         allocator: std.mem.Allocator,
         args: ?*Args,
-        err: ?*NapiError.Error,
+        err: ?*ownership.ErrorSnapshot,
     };
+}
+
+/// Build the JavaScript error object delivered in the error-first slot.
+///
+/// Unlike `NapiError.Error.to_napi_error`, every N-API status is checked instead
+/// of asserted: a queued call has no caller to report a failed allocation to,
+/// and an uninitialized handle must never reach the engine. Any failure falls
+/// back to `undefined`, which leaves the error slot empty instead of invalid.
+fn createErrorValue(inner_env: napi.napi_env, err: NapiError.Error) ?napi.napi_value {
+    const text = switch (err) {
+        inline else => |inner| .{
+            .code = inner.custom_status orelse if (inner.status) |status| status.ToString() else "Error",
+            .message = inner.message,
+        },
+    };
+
+    var code_value: napi.napi_value = undefined;
+    if (napi.napi_create_string_utf8(inner_env, text.code.ptr, text.code.len, &code_value) != napi.napi_ok) return null;
+
+    var message_value: napi.napi_value = undefined;
+    if (napi.napi_create_string_utf8(inner_env, text.message.ptr, text.message.len, &message_value) != napi.napi_ok) return null;
+
+    var result: napi.napi_value = undefined;
+    const status = switch (err) {
+        .JsError => napi.napi_create_error(inner_env, code_value, message_value, &result),
+        .JsTypeError => napi.napi_create_type_error(inner_env, code_value, message_value, &result),
+        .JsRangeError => napi.napi_create_range_error(inner_env, code_value, message_value, &result),
+    };
+    if (status != napi.napi_ok) return null;
+    return result;
 }
 
 pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime ThreadSafeFunctionCalleeHandled: anytype, comptime MaxQueueSize: anytype) type {
@@ -140,23 +176,35 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
                     const raw_context = context orelse return;
                     const self: *Self = @ptrCast(@alignCast(raw_context));
 
+                    const undefined_value = (Undefined.create(Env.from_raw(inner_env)) catch return).raw;
+
+                    // The error-first variant delivers a failure as a
+                    // single-argument call. The remaining argument slots are
+                    // *omitted* instead of being passed as native null handles:
+                    // a native null is not JavaScript `undefined` and reaching
+                    // the engine with one crashes the process (audit H03).
+                    if (self.thread_safe_function_call_variant) {
+                        if (call_data.err) |snapshot| {
+                            var argv = [1]napi.napi_value{
+                                createErrorValue(inner_env, snapshot.value()) orelse undefined_value,
+                            };
+                            var ret: napi.napi_value = null;
+                            _ = napi.napi_call_function(inner_env, undefined_value, js_callback, argv.len, &argv, &ret);
+                            return;
+                        }
+                    }
+
                     const args_len = if (@typeInfo(Args) == .@"struct" and @typeInfo(Args).@"struct".is_tuple) @typeInfo(Args).@"struct".fields.len else 1;
                     const call_variant = if (self.thread_safe_function_call_variant) 1 else 0;
 
                     const argv = allocator.alloc(napi.napi_value, args_len + call_variant) catch return;
                     defer allocator.free(argv);
-                    @memset(argv, null);
+                    // Filled with JavaScript `undefined` up front, so a slot that
+                    // no payload reaches can never be a native null.
+                    @memset(argv, undefined_value);
 
-                    const undefined_value = Undefined.New(Env.from_raw(inner_env));
-
-                    if (self.thread_safe_function_call_variant) {
-                        if (call_data.err) |param| {
-                            argv[0] = param.to_napi_error(Env.from_raw(inner_env));
-                            var ret: napi.napi_value = null;
-                            _ = napi.napi_call_function(inner_env, undefined_value.raw, js_callback, args_len + call_variant, argv.ptr, &ret);
-                            return;
-                        }
-                        argv[0] = Null.New(Env.from_raw(inner_env)).raw;
+                    if (call_variant == 1) {
+                        argv[0] = (Null.create(Env.from_raw(inner_env)) catch return).raw;
                     }
 
                     var conversion_error: ?NapiError.Error = null;
@@ -165,13 +213,13 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
                             inline for (@typeInfo(Args).@"struct".fields, 0..) |field, i| {
                                 argv[i + call_variant] = Napi.to_napi_value(inner_env, @field(actual_args.*, field.name), null) catch |err| blk: {
                                     conversion_error = NapiError.mapAnyError(err);
-                                    break :blk undefined_value.raw;
+                                    break :blk undefined_value;
                                 };
                             }
                         } else {
                             argv[call_variant] = Napi.to_napi_value(inner_env, actual_args.*, null) catch |err| blk: {
                                 conversion_error = NapiError.mapAnyError(err);
-                                break :blk undefined_value.raw;
+                                break :blk undefined_value;
                             };
                         }
                     }
@@ -180,16 +228,13 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
                         // Never pass an invalid handle to JavaScript: report the
                         // conversion failure through the error slot when the
                         // callee accepts one, otherwise as undefined values.
-                        if (self.thread_safe_function_call_variant) {
-                            argv[0] = err.to_napi_error(Env.from_raw(inner_env));
+                        if (call_variant == 1) {
+                            argv[0] = createErrorValue(inner_env, err) orelse undefined_value;
                         }
-                    }
-                    for (argv) |*slot| {
-                        if (slot.* == null) slot.* = undefined_value.raw;
                     }
 
                     var ret: napi.napi_value = null;
-                    _ = napi.napi_call_function(inner_env, undefined_value.raw, js_callback, args_len + call_variant, argv.ptr, &ret);
+                    _ = napi.napi_call_function(inner_env, undefined_value, js_callback, args_len + call_variant, argv.ptr, &ret);
                 }
             };
 
@@ -229,7 +274,31 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
 
             self.tsfn_raw = tsfn_raw;
 
+            // Promoting a JavaScript function to a TSFN creates an active
+            // thread-safe function. While an argument conversion is running the
+            // promotion belongs to that conversion: if a later argument fails,
+            // the TSFN is aborted so it cannot keep the environment (and the
+            // JavaScript function it captured) alive after a call that never
+            // reached its body. Once the body runs, the TSFN belongs to the body
+            // and is never rolled back - it is usually handed to another thread,
+            // which is why the conversion only aborts on failure.
+            helper.trackCustom(@ptrCast(self), releaseUncommitted) catch |err| {
+                self.abort() catch {};
+                return err;
+            };
+
             return self;
+        }
+
+        /// Rollback action for a TSFN that a failing conversion created.
+        ///
+        /// The conversion is still running, so the wrapper was never handed to
+        /// user code and no other thread can have released it: aborting here is
+        /// the only release the TSFN ever gets.
+        fn releaseUncommitted(context: ?*anyopaque) void {
+            const raw_context = context orelse return;
+            const self: *Self = @ptrCast(@alignCast(raw_context));
+            self.abort() catch {};
         }
 
         pub fn deinit(self: *Self) void {
@@ -245,8 +314,12 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
                 ownership.deinitValue(Args, actual_args.*, allocator);
                 allocator.destroy(actual_args);
             }
-            if (data.err) |actual_err| {
-                allocator.destroy(actual_err);
+            if (data.err) |snapshot| {
+                // The snapshot owns a copy of the error text; releasing it here
+                // covers delivery, queue-full, closing and the null-environment
+                // drain alike.
+                snapshot.deinit();
+                allocator.destroy(snapshot);
             }
             allocator.destroy(data);
         }
@@ -272,6 +345,16 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
                 );
             }
             return error.Closing;
+        }
+
+        /// Allocator that releases the payload of a queued call.
+        ///
+        /// A handle whose creation failed never recorded an allocator (there was
+        /// no construction to record it), so it falls back to the operation
+        /// allocator of the calling thread - the same allocator the default
+        /// conversion path uses for its own copies.
+        fn payloadAllocator(self: *const Self) std.mem.Allocator {
+            return if (self.failed) GlobalAllocator.globalAllocator() else self.allocator;
         }
 
         pub fn acquire(self: *const Self) !void {
@@ -316,17 +399,32 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
             return self.closed;
         }
 
-        /// Queue a successful call. Ownership of `args` moves into the queued
-        /// item and is released after the JavaScript callback ran (or when the
-        /// queue is drained during environment shutdown).
+        /// Queue a successful call.
+        ///
+        /// Ownership of `args` moves into the queued item on every path -
+        /// including a full queue, a closed TSFN or an allocation failure - and
+        /// is released after the JavaScript callback ran (or when the queue is
+        /// drained during environment shutdown). `error.OutOfMemory` therefore
+        /// means "not queued", never "the caller still owns the payload".
         pub fn Ok(self: *const Self, args: Args, mode: ThreadSafeFunctionMode) !void {
-            const args_data = self.allocator.create(Args) catch @panic("OOM");
+            if (self.failed or self.tsfn_raw == null) {
+                // The call was never queued, but `Ok` took ownership of the
+                // payload: release it here so the caller's job ends with this
+                // call on the failure path too.
+                ownership.deinitValue(Args, args, self.payloadAllocator());
+                return self.notCreatedError();
+            }
+
+            const args_data = self.allocator.create(Args) catch |err| {
+                ownership.deinitValue(Args, args, self.allocator);
+                return err;
+            };
             args_data.* = args;
 
-            const data = self.allocator.create(CallData(Args)) catch {
+            const data = self.allocator.create(CallData(Args)) catch |err| {
                 ownership.deinitValue(Args, args_data.*, self.allocator);
                 self.allocator.destroy(args_data);
-                @panic("OOM");
+                return err;
             };
             data.* = CallData(Args){ .allocator = self.allocator, .args = args_data, .err = null };
 
@@ -334,16 +432,32 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
         }
 
         /// Queue a failed call. The error is released after the JavaScript
-        /// callback ran.
+        /// callback ran, and the text of the error is copied first: the caller's
+        /// message and code are borrowed slices that may be overwritten (or go
+        /// out of scope) long before the JavaScript thread dispatches the call.
+        ///
+        /// With `ThreadSafeFunctionCalleeHandled = false` there is no error slot
+        /// to deliver the failure to; the callback runs with the queued argument
+        /// slots left as JavaScript `undefined` (the error is not reported to
+        /// JavaScript at all).
         pub fn Err(self: *const Self, err: NapiError.Error, mode: ThreadSafeFunctionMode) !void {
-            const actual_err = self.allocator.create(NapiError.Error) catch @panic("OOM");
-            actual_err.* = err;
+            if (self.failed or self.tsfn_raw == null) return self.notCreatedError();
 
-            const data = self.allocator.create(CallData(Args)) catch {
-                self.allocator.destroy(actual_err);
-                @panic("OOM");
+            const snapshot = self.allocator.create(ownership.ErrorSnapshot) catch |alloc_err| {
+                // Without a slot for the snapshot the borrowed text cannot be
+                // copied, so the failure must not be queued at all.
+                return alloc_err;
             };
-            data.* = CallData(Args){ .allocator = self.allocator, .args = null, .err = actual_err };
+            // `capture` never retains borrowed text: an allocation failure
+            // inside it degrades to a bounded static error instead.
+            snapshot.* = ownership.ErrorSnapshot.capture(self.allocator, err);
+
+            const data = self.allocator.create(CallData(Args)) catch |alloc_err| {
+                snapshot.deinit();
+                self.allocator.destroy(snapshot);
+                return alloc_err;
+            };
+            data.* = CallData(Args){ .allocator = self.allocator, .args = null, .err = snapshot };
 
             try self.callThreadSafeFunction(data, mode);
         }

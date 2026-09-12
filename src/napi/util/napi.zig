@@ -275,6 +275,21 @@ fn valueMatchesType(env: napi.napi_env, raw: napi.napi_value, comptime T: type) 
 }
 
 pub const Napi = struct {
+    /// One argument-conversion transaction (see `helper.ConversionFrame`).
+    ///
+    /// Conversion code that *creates* a JavaScript resource - a strong
+    /// reference, a thread-safe function, a wrapped instance - must hand it to
+    /// the active frame with `trackResource`, so a later conversion failure
+    /// releases it instead of leaking it. `Function`'s exported callbacks
+    /// already install a frame around their argument conversion; any other
+    /// entry point that converts arguments (for example a class constructor)
+    /// installs its own with `start` / `commit` / `end`.
+    pub const ConversionFrame = helper.ConversionFrame;
+    pub const TrackedResource = helper.TrackedResource;
+    pub const trackConversionResource = helper.trackResource;
+    pub const trackConversionReference = helper.trackReference;
+    pub const trackConversionCustom = helper.trackCustom;
+
     /// Legacy alias-name based ownership tracker. Kept for the pre-existing
     /// `deinit_napi_value`/`deinit_napi_value_with_state` entry points; new code
     /// should use `Owned` values and `deinit_napi_value_with_allocator`.
@@ -1035,7 +1050,20 @@ pub const Napi = struct {
                                                 max_queue_size = @field(temp_instance, "max_queue_size");
                                             }
                                         }
-                                        return ThreadSafeFunction(args_type, return_type, thread_safe_function_call_variant, max_queue_size).from_raw(env, raw);
+                                        // A function that cannot be promoted is a
+                                        // failed argument, not a handle the native
+                                        // body could use: report the recorded
+                                        // creation error instead of passing the
+                                        // failure handle on.
+                                        return ThreadSafeFunction(args_type, return_type, thread_safe_function_call_variant, max_queue_size).tryFrom_raw(env, raw) catch |err| {
+                                            if (err != error.OutOfMemory and NapiError.last_error == null) {
+                                                NapiError.last_error = NapiError.Error.withCodeAndMessage(
+                                                    "ERR_NAPI_TSFN_NOT_CREATED",
+                                                    "ThreadSafeFunction could not be created",
+                                                );
+                                            }
+                                            return err;
+                                        };
                                     }
 
                                     @compileError("Unsupported type: " ++ @typeName(T));
