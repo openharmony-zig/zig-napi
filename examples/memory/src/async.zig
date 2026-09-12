@@ -185,8 +185,10 @@ fn worker_execute(value: u32) u32 {
     return value + 1;
 }
 
-pub fn memory_worker(env: napi.Env, value: u32) napi.Promise {
+pub fn memory_worker(env: napi.Env, value: u32) !napi.Promise {
     const worker = napi.Worker(env, .{ .data = value, .Execute = worker_execute });
+    // `AsyncQueue` reports promise-creation and queueing failures instead of
+    // leaving a pending promise behind.
     return worker.AsyncQueue();
 }
 

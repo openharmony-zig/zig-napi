@@ -96,5 +96,16 @@ pub fn build(b: *std.Build) !void {
         target,
         optimize,
         &.{.{ "counting", counting_allocator }},
+
+    // Dedicated regression addon for the async/abort/TSFN/runtime audit
+    // findings. Kept separate from lib.zig so the audit exports can evolve
+    // without touching the shared example module.
+    try addNodeAddon(
+        b,
+        napi,
+        "async_audit",
+        "napi/src/async_audit.zig",
+        target,
+        optimize,
     );
 }

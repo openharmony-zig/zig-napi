@@ -125,7 +125,7 @@ pub fn bigint_to_i64(value: napi.BigInt) !i64 {
 }
 
 pub fn manual_resolved_promise(env: napi.Env) !napi.Promise {
-    var promise = napi.Promise.New(env);
+    var promise = try napi.Promise.New(env);
     try promise.Resolve(@as(i32, 42));
     return promise;
 }

@@ -11,14 +11,30 @@ const GlobalAllocator = @import("./util/allocator.zig");
 const AbortSignalModule = @import("./abort_signal.zig");
 const AbortSignal = @import("./abort_signal.zig").AbortSignal;
 const AbortRegistration = @import("./abort_signal.zig").AbortRegistration;
+const ownership = @import("./util/async_ownership.zig");
 const options = @import("./options.zig");
 
-var threaded_runtime_mutex: std.atomic.Mutex = .unlocked;
-var threaded_runtime_initialized = false;
-var threaded_runtime_active_operations: usize = 0;
-var threaded_runtime_cleanup_registered = false;
-var threaded_runtime_cleanup_requested = false;
+/// Environments that may use the shared threaded runtime at the same time.
+const max_runtime_environments = 64;
+
+/// One environment that uses the shared threaded runtime.
+///
+/// The runtime itself is process wide, but its lifetime is tied to the set of
+/// environments that actually use it: closing one environment only stops new
+/// work for that environment, and the runtime is released once the last owner
+/// is gone.
+const RuntimeEnv = struct {
+    env: napi.napi_env,
+    active_operations: usize = 0,
+    closed: bool = false,
+    hook_registered: bool = false,
+};
+
+var runtime_mutex: std.atomic.Mutex = .unlocked;
+var runtime_initialized = false;
 var threaded_runtime: std.Io.Threaded = undefined;
+var runtime_envs: [max_runtime_environments]RuntimeEnv = undefined;
+var runtime_env_count: usize = 0;
 
 const use_wasm_emnapi_async_work = builtin.cpu.arch == .wasm32 and builtin.os.tag == .wasi;
 
@@ -76,87 +92,129 @@ fn singleIo() std.Io {
     return std.Io.Threaded.global_single_threaded.io();
 }
 
-fn deinitThreadedRuntimeLocked() void {
-    if (!threaded_runtime_initialized) {
-        threaded_runtime_cleanup_requested = false;
-        return;
+fn lockRuntime() void {
+    while (!runtime_mutex.tryLock()) {
+        std.Thread.yield() catch {};
     }
+}
 
+fn unlockRuntime() void {
+    runtime_mutex.unlock();
+}
+
+fn findRuntimeEnvLocked(env_raw: napi.napi_env) ?*RuntimeEnv {
+    for (runtime_envs[0..runtime_env_count]) |*entry| {
+        if (entry.env == env_raw) return entry;
+    }
+    return null;
+}
+
+fn runtimeEnvIndexLocked(env_raw: napi.napi_env) ?usize {
+    for (runtime_envs[0..runtime_env_count], 0..) |entry, index| {
+        if (entry.env == env_raw) return index;
+    }
+    return null;
+}
+
+fn findOrCreateRuntimeEnvLocked(env_raw: napi.napi_env) !*RuntimeEnv {
+    if (findRuntimeEnvLocked(env_raw)) |entry| return entry;
+    if (runtime_env_count == runtime_envs.len) {
+        NapiError.last_error = NapiError.Error.withCodeAndMessage(
+            "ERR_NAPI_TOO_MANY_ENVIRONMENTS",
+            "Too many JavaScript environments are using the threaded async runtime",
+        );
+        return error.GenericFailure;
+    }
+    const entry = &runtime_envs[runtime_env_count];
+    entry.* = .{ .env = env_raw };
+    runtime_env_count += 1;
+    return entry;
+}
+
+fn removeRuntimeEnvLocked(index: usize) void {
+    const last = runtime_env_count - 1;
+    if (index != last) {
+        runtime_envs[index] = runtime_envs[last];
+    }
+    runtime_env_count = last;
+}
+
+fn maybeDeinitRuntimeLocked() void {
+    if (!runtime_initialized) return;
+    if (runtime_env_count != 0) return;
     threaded_runtime.deinit();
-    threaded_runtime_initialized = false;
-    threaded_runtime_cleanup_requested = false;
+    runtime_initialized = false;
     threaded_runtime = undefined;
 }
 
-fn threadedRuntimeCleanupHook(_: ?*anyopaque) callconv(.c) void {
-    while (!threaded_runtime_mutex.tryLock()) {
-        std.Thread.yield() catch {};
-    }
-    defer threaded_runtime_mutex.unlock();
-
-    threaded_runtime_cleanup_registered = false;
-    threaded_runtime_cleanup_requested = true;
-    if (threaded_runtime_active_operations == 0) {
-        deinitThreadedRuntimeLocked();
-    }
-}
-
-fn ensureThreadedRuntimeCleanupHookLocked(env_raw: napi.napi_env) !void {
-    if (threaded_runtime_cleanup_registered) return;
-
-    const status = napi.napi_add_env_cleanup_hook(env_raw, threadedRuntimeCleanupHook, null);
+fn ensureRuntimeEnvHookLocked(entry: *RuntimeEnv) !void {
+    if (entry.hook_registered) return;
+    const status = napi.napi_add_env_cleanup_hook(entry.env, runtimeEnvCleanupHook, @ptrCast(entry.env));
     if (status != napi.napi_ok) {
         return NapiError.Error.fromStatus(NapiError.Status.New(status));
     }
-    threaded_runtime_cleanup_registered = true;
+    entry.hook_registered = true;
+}
+
+/// Called when one environment is torn down. Other environments keep working.
+fn runtimeEnvCleanupHook(data: ?*anyopaque) callconv(.c) void {
+    const raw = data orelse return;
+    const env_raw: napi.napi_env = @ptrCast(@alignCast(raw));
+
+    lockRuntime();
+    defer unlockRuntime();
+
+    if (runtimeEnvIndexLocked(env_raw)) |index| {
+        runtime_envs[index].closed = true;
+        if (runtime_envs[index].active_operations == 0) {
+            removeRuntimeEnvLocked(index);
+        }
+    }
+    maybeDeinitRuntimeLocked();
 }
 
 fn acquireThreadedRuntime(env_raw: napi.napi_env) !std.Io {
-    while (!threaded_runtime_mutex.tryLock()) {
-        std.Thread.yield() catch {};
-    }
-    defer threaded_runtime_mutex.unlock();
+    lockRuntime();
+    defer unlockRuntime();
 
-    if (threaded_runtime_cleanup_requested) {
+    const entry = try findOrCreateRuntimeEnvLocked(env_raw);
+    if (entry.closed) {
         return NapiError.Error.fromStatus(NapiError.Status.Closing);
     }
+    try ensureRuntimeEnvHookLocked(entry);
 
-    try ensureThreadedRuntimeCleanupHookLocked(env_raw);
-
-    if (!threaded_runtime_initialized) {
+    if (!runtime_initialized) {
         threaded_runtime = std.Io.Threaded.init(GlobalAllocator.globalAllocator(), .{});
-        threaded_runtime_initialized = true;
+        runtime_initialized = true;
     }
 
-    threaded_runtime_active_operations += 1;
+    entry.active_operations += 1;
     return threaded_runtime.io();
 }
 
+/// The threaded runtime is only released once its last owner is gone, so an
+/// active operation always observes an initialized runtime.
 fn activeThreadedIo() std.Io {
-    while (!threaded_runtime_mutex.tryLock()) {
-        std.Thread.yield() catch {};
-    }
-    defer threaded_runtime_mutex.unlock();
+    lockRuntime();
+    defer unlockRuntime();
 
-    std.debug.assert(threaded_runtime_initialized);
-    std.debug.assert(threaded_runtime_active_operations > 0);
+    std.debug.assert(runtime_initialized);
     return threaded_runtime.io();
 }
 
-fn releaseThreadedRuntime() void {
-    while (!threaded_runtime_mutex.tryLock()) {
-        std.Thread.yield() catch {};
-    }
-    defer threaded_runtime_mutex.unlock();
+fn releaseThreadedRuntime(env_raw: napi.napi_env) void {
+    lockRuntime();
+    defer unlockRuntime();
 
-    if (!threaded_runtime_initialized or threaded_runtime_active_operations == 0) {
-        return;
+    const index = runtimeEnvIndexLocked(env_raw) orelse return;
+    const entry = &runtime_envs[index];
+    if (entry.active_operations > 0) {
+        entry.active_operations -= 1;
     }
-
-    threaded_runtime_active_operations -= 1;
-    if (threaded_runtime_active_operations == 0 and threaded_runtime_cleanup_requested) {
-        deinitThreadedRuntimeLocked();
+    if (entry.active_operations == 0 and entry.closed) {
+        removeRuntimeEnvLocked(index);
     }
+    maybeDeinitRuntimeLocked();
 }
 
 fn ioForRuntime(effective_runtime: EffectiveRuntime) std.Io {
@@ -305,20 +363,58 @@ fn AsyncTaskDescriptor(comptime Result: type, comptime Event: type, comptime run
 
         const Self = @This();
 
+        /// Capture `input` for an async task.
+        ///
+        /// The input is deep-copied into memory owned by the task, so the
+        /// caller keeps ownership of the original argument and can release it
+        /// as soon as the exported call returns. A copy failure produces an
+        /// error-bearing descriptor that rejects the returned promise instead
+        /// of running the task with an invalid placeholder; use `tryFrom` to
+        /// observe the failure synchronously.
         pub fn from(input: anytype, comptime run_fn: anytype) Self {
+            return tryFrom(input, run_fn) catch |err| {
+                const Input = @TypeOf(input);
+                validateTaskRunSignature(Input, Result, Event, run_fn);
+                return errorDescriptor(Input, run_fn, err);
+            };
+        }
+
+        pub fn tryFrom(input: anytype, comptime run_fn: anytype) !Self {
             const Input = @TypeOf(input);
             validateTaskRunSignature(Input, Result, Event, run_fn);
 
             const allocator = GlobalAllocator.globalAllocator();
             const Impl = AsyncTaskDescriptorImpl(Input, Result, Event, runtime, run_fn);
-            var impl = allocator.create(Impl) catch @panic("OOM");
+            const impl = try allocator.create(Impl);
+            errdefer allocator.destroy(impl);
+
             impl.* = .{
                 .base = .{
                     .allocator = allocator,
                     .schedule_fn = Impl.schedule,
-                    .destroy_fn = Impl.destroy,
+                    .destroy_fn = Impl.release,
                 },
-                .input = input,
+                .allocator = allocator,
+            };
+            impl.input = try ownership.cloneValue(Input, input, allocator);
+            impl.has_input = true;
+            return .{ .base = &impl.base };
+        }
+
+        fn errorDescriptor(comptime Input: type, comptime run_fn: anytype, err: anyerror) Self {
+            const allocator = GlobalAllocator.globalAllocator();
+            const Impl = AsyncTaskDescriptorImpl(Input, Result, Event, runtime, run_fn);
+            const impl = allocator.create(Impl) catch @panic("OOM");
+            const mapped = NapiError.last_error orelse NapiError.mapAnyError(err);
+            NapiError.clearLastError();
+            impl.* = .{
+                .base = .{
+                    .allocator = allocator,
+                    .schedule_fn = Impl.schedule,
+                    .destroy_fn = Impl.release,
+                },
+                .allocator = allocator,
+                .clone_error = mapped,
             };
             return .{ .base = &impl.base };
         }
@@ -335,16 +431,45 @@ fn AsyncTaskDescriptor(comptime Result: type, comptime Event: type, comptime run
             return try self.scheduleWithListenerAndSignal(env, null, signal);
         }
 
+        /// Consume the descriptor and start the task.
+        ///
+        /// A descriptor is single use. Once consumed, the handle is repointed
+        /// at a terminal state whose `schedule_fn` reports the error, so a
+        /// second `schedule` (or a `deinit` after scheduling) fails cleanly even
+        /// though the task already released the original state.
         pub fn scheduleWithListenerAndSignal(self: *Self, env: Env, listener: ?napi.napi_value, signal: ?AbortSignal) !Promise {
             const base = self.base;
-            return try base.schedule_fn(base, env.raw, listener, signal);
+            const result = base.schedule_fn(base, env.raw, listener, signal);
+            self.base = &consumed_descriptor_base;
+            return result;
         }
 
+        /// Release a descriptor that was never scheduled. Safe (no-op) after
+        /// the descriptor was consumed.
         pub fn deinit(self: *Self) void {
             self.base.destroy_fn(self.base);
         }
     };
 }
+
+/// Terminal state every consumed descriptor handle points at. It owns nothing
+/// and can be shared process wide: scheduling through it always fails and
+/// releasing it is a no-op.
+var consumed_descriptor_base: AsyncTaskDescriptorBase = .{
+    .allocator = std.heap.page_allocator,
+    .schedule_fn = scheduleConsumedDescriptor,
+    .destroy_fn = ignoreDescriptorRelease,
+};
+
+fn scheduleConsumedDescriptor(_: *AsyncTaskDescriptorBase, _: napi.napi_env, _: ?napi.napi_value, _: ?AbortSignal) anyerror!Promise {
+    NapiError.last_error = NapiError.Error.withCodeAndMessage(
+        "ERR_NAPI_ASYNC_DESCRIPTOR_CONSUMED",
+        "This async descriptor has already been scheduled",
+    );
+    return error.GenericFailure;
+}
+
+fn ignoreDescriptorRelease(_: *AsyncTaskDescriptorBase) void {}
 
 const AsyncTaskDescriptorBase = struct {
     allocator: std.mem.Allocator,
@@ -361,30 +486,75 @@ fn AsyncTaskDescriptorImpl(
 ) type {
     return struct {
         base: AsyncTaskDescriptorBase,
-        input: Input,
-        input_moved: bool = false,
+        allocator: std.mem.Allocator,
+        input: Input = undefined,
+        has_input: bool = false,
+        clone_error: ?NapiError.Error = null,
+        consumed: bool = false,
 
         const Self = @This();
 
-        fn schedule(base: *AsyncTaskDescriptorBase, env_raw: napi.napi_env, listener: ?napi.napi_value, signal: ?AbortSignal) !Promise {
+        fn schedule(base: *AsyncTaskDescriptorBase, env_raw: napi.napi_env, listener: ?napi.napi_value, signal: ?AbortSignal) anyerror!Promise {
             const self: *Self = @alignCast(@fieldParentPtr("base", base));
-            errdefer base.destroy_fn(base);
-            const operation = try AsyncTaskOperation(Input, Result, Event, runtime, run_fn).create(Env.from_raw(env_raw), self.input, listener, signal);
-            self.input_moved = true;
-            const promise = try operation.submit();
-            base.destroy_fn(base);
-            return promise;
+
+            if (self.consumed) {
+                NapiError.last_error = NapiError.Error.withCodeAndMessage(
+                    "ERR_NAPI_ASYNC_DESCRIPTOR_CONSUMED",
+                    "This async descriptor has already been scheduled",
+                );
+                return error.GenericFailure;
+            }
+            self.consumed = true;
+
+            if (self.clone_error) |clone_error| {
+                var promise = Promise.New(Env.from_raw(env_raw)) catch |err| {
+                    Self.release(base);
+                    return err;
+                };
+                promise.Reject(clone_error) catch {};
+                Self.release(base);
+                return promise;
+            }
+
+            // Ownership of the captured input moves into the operation, which
+            // releases it itself when creation fails.
+            const captured = self.input;
+            self.has_input = false;
+            const operation = AsyncTaskOperation(Input, Result, Event, runtime, run_fn).create(
+                Env.from_raw(env_raw),
+                captured,
+                listener,
+                signal,
+            ) catch |err| {
+                Self.release(base);
+                return err;
+            };
+            operation.descriptor_base = base;
+            return operation.submit();
         }
 
-        fn destroy(base: *AsyncTaskDescriptorBase) void {
+        /// Frees the captured input (when it was not handed to a task) and the
+        /// descriptor itself.
+        fn release(base: *AsyncTaskDescriptorBase) void {
             const self: *Self = @alignCast(@fieldParentPtr("base", base));
-            if (!self.input_moved) {
-                Napi.deinit_napi_value(Input, self.input);
+            if (self.has_input) {
+                self.has_input = false;
+                ownership.deinitValue(Input, self.input, self.allocator);
             }
             self.base.allocator.destroy(self);
         }
     };
 }
+
+/// Explicit lifecycle of one async task.
+pub const AsyncState = enum(u8) {
+    created,
+    queued,
+    running,
+    settling,
+    settled,
+    closed,
+};
 
 fn AsyncTaskOperation(
     comptime Input: type,
@@ -397,7 +567,8 @@ fn AsyncTaskOperation(
         allocator: std.mem.Allocator,
         env: napi.napi_env,
         promise: Promise,
-        input: Input,
+        descriptor_base: ?*AsyncTaskDescriptorBase = null,
+        input: Input = undefined,
         result: Result = if (Result == void) {} else undefined,
         err: ?NapiError.Error = null,
         listener_ref: ?napi.napi_ref = null,
@@ -407,37 +578,68 @@ fn AsyncTaskOperation(
         controller_future: ?std.Io.Future(void) = null,
         async_work: napi.napi_async_work = null,
         tsfn_raw: napi.napi_threadsafe_function = null,
+        /// True once a thread-safe function owns this operation's finalization.
+        tsfn_created: bool = false,
         state_mutex: std.Io.Mutex = .init,
         state_cond: std.Io.Condition = .init,
+        state: std.atomic.Value(u8) = std.atomic.Value(u8).init(@intFromEnum(AsyncState.created)),
         task_done: bool = false,
         cancel_requested: bool = false,
         cancel_dispatched: bool = false,
-        closed: bool = false,
         result_ready: bool = false,
         uses_threaded_runtime: bool = false,
+        settled: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+        js_released: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+        native_released: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 
         const Self = @This();
         const Context = AsyncContext(Event);
         const run_info = @typeInfo(@TypeOf(run_fn)).@"fn";
         const DispatchKind = enum { event, completion };
+
+        /// A queued item owns everything needed to release it, including when
+        /// the environment is already gone and the JS callback receives a null
+        /// environment.
         const DispatchData = struct {
             kind: DispatchKind,
+            allocator: std.mem.Allocator,
             payload: ?*Event = null,
         };
+
+        fn setState(self: *Self, new_state: AsyncState) void {
+            self.state.store(@intFromEnum(new_state), .release);
+        }
+
+        fn getState(self: *const Self) AsyncState {
+            return @enumFromInt(self.state.load(.acquire));
+        }
 
         fn create(env: Env, input: Input, listener: ?napi.napi_value, signal: ?AbortSignal) !*Self {
             const allocator = GlobalAllocator.globalAllocator();
             const self = try allocator.create(Self);
             errdefer allocator.destroy(self);
+            // The caller hands the captured input over to the operation.
+            errdefer ownership.deinitValue(Input, input, allocator);
+
+            const promise = try Promise.New(env);
+            // A task that never starts must not leave the caller's promise
+            // pending forever.
+            errdefer |err| {
+                var rejectable = promise;
+                rejectable.Reject(NapiError.mapAnyError(err)) catch {};
+            }
 
             self.* = .{
                 .allocator = allocator,
                 .env = env.raw,
-                .promise = Promise.New(env),
+                .promise = promise,
                 .input = input,
-                .listener_ref = if (Event == void) null else try createOptionalCallbackRef(env.raw, listener),
             };
             errdefer releaseCallbackRef(env.raw, &self.listener_ref);
+
+            if (Event != void) {
+                self.listener_ref = try createOptionalCallbackRef(env.raw, listener);
+            }
 
             if (signal) |abort_signal| {
                 self.abort_registration = try abort_signal.bind(@ptrCast(self), requestAbortFromSignal);
@@ -447,19 +649,25 @@ fn AsyncTaskOperation(
         }
 
         fn submit(self: *Self) !Promise {
-            errdefer self.destroy(self.env);
+            errdefer |err| {
+                var rejectable = self.promise;
+                rejectable.Reject(NapiError.mapAnyError(err)) catch {};
+                self.destroyJs(self.env);
+            }
 
             const promise = self.promise;
             if (self.abort_registration != null and self.isAbortRequestedFromSignal()) {
                 self.cancel_token.cancel();
                 self.cancel_requested = true;
-                self.promise.RejectAbortError() catch {};
-                self.destroy(self.env);
+                self.dispatchCompletion(self.env);
                 return promise;
             }
 
             switch (effectiveRuntime(runtime)) {
-                .single => self.runSingle(),
+                .single => {
+                    self.setState(.running);
+                    self.runSingle();
+                },
                 .thread => {
                     if (comptime use_wasm_emnapi_async_work) {
                         try self.runWasmAsyncWork();
@@ -469,6 +677,7 @@ fn AsyncTaskOperation(
                     const io = try acquireThreadedRuntime(self.env);
                     self.uses_threaded_runtime = true;
                     try self.initThreadDispatcher();
+                    self.setState(.queued);
                     self.future = std.Io.concurrent(io, runTask, .{self}) catch |err| {
                         self.err = mapAnyError(err);
                         self.dispatchCompletion(self.env);
@@ -493,13 +702,20 @@ fn AsyncTaskOperation(
             const should_cancel = self.waitForTaskDoneOrAbort();
             if (self.future) |*future| {
                 if (should_cancel) {
+                    // Cancellation is cooperative: `cancel` waits for the task
+                    // to return, so nothing touches this operation afterwards.
                     future.cancel(io);
                     self.cancel_dispatched = true;
                 } else {
                     future.await(io);
                 }
             }
-            self.queueCompletion() catch {};
+            self.queueCompletion() catch {
+                // The completion channel is gone (the environment is shutting
+                // down). No JavaScript may run any more: only release native
+                // state, never settle a promise against a dead environment.
+                self.destroyNativeOnly(true);
+            };
         }
 
         fn runSingle(self: *Self) void {
@@ -562,6 +778,7 @@ fn AsyncTaskOperation(
                 return NapiError.Error.fromStatus(NapiError.Status.New(create_status));
             }
             self.async_work = async_work;
+            self.setState(.queued);
 
             const queue_status = napi.napi_queue_async_work(self.env, async_work);
             if (queue_status != napi.napi_ok) {
@@ -573,6 +790,7 @@ fn AsyncTaskOperation(
 
         fn wasmAsyncWorkExecute(_: napi.napi_env, data: ?*anyopaque) callconv(.c) void {
             const self: *Self = @ptrCast(@alignCast(data));
+            self.setState(.running);
             self.runTaskWithIo(singleIo(), .thread);
         }
 
@@ -585,17 +803,12 @@ fn AsyncTaskOperation(
                 _ = napi.napi_delete_async_work(inner_env, self.async_work);
                 self.async_work = null;
             }
-            self.queueCompletion() catch {
-                self.dispatchCompletion(inner_env);
-            };
+            self.dispatchCompletion(inner_env);
         }
 
         fn isAbortRequestedFromSignal(self: *Self) bool {
             if (self.abort_registration) |registration| {
-                var signal_value: napi.napi_value = undefined;
-                const ref_status = napi.napi_get_reference_value(self.env, registration.signal_ref, &signal_value);
-                if (ref_status != napi.napi_ok or signal_value == null) return false;
-                return AbortSignal.from_raw(self.env, signal_value).isAborted() catch false;
+                return registration.isSignalAborted();
             }
             return false;
         }
@@ -691,7 +904,7 @@ fn AsyncTaskOperation(
                     errdefer self.allocator.destroy(payload);
 
                     const data = try self.allocator.create(DispatchData);
-                    data.* = .{ .kind = .event, .payload = payload };
+                    data.* = .{ .kind = .event, .allocator = self.allocator, .payload = payload };
                     errdefer self.allocator.destroy(data);
 
                     const status = napi.napi_call_threadsafe_function(self.tsfn_raw, @ptrCast(data), napi.napi_tsfn_nonblocking);
@@ -705,29 +918,81 @@ fn AsyncTaskOperation(
         fn dispatchEvent(self: *Self, env_raw: napi.napi_env, event: Event) void {
             if (Event == void or self.listener_ref == null) return;
 
-            var callback: napi.napi_value = undefined;
+            var callback: napi.napi_value = null;
             const get_ref_status = napi.napi_get_reference_value(env_raw, self.listener_ref.?, &callback);
-            if (get_ref_status != napi.napi_ok) return;
+            if (get_ref_status != napi.napi_ok or callback == null) return;
 
             const event_value = Napi.to_napi_value(env_raw, event, null) catch return;
             const undefined_value = Undefined.New(Env.from_raw(env_raw));
             const argv = [1]napi.napi_value{event_value};
-            var ignored: napi.napi_value = undefined;
+            var ignored: napi.napi_value = null;
             _ = napi.napi_call_function(env_raw, undefined_value.raw, callback, argv.len, &argv, &ignored);
         }
 
         fn queueCompletion(self: *Self) !void {
             const data = try self.allocator.create(DispatchData);
-            data.* = .{ .kind = .completion };
+            data.* = .{ .kind = .completion, .allocator = self.allocator };
             errdefer self.allocator.destroy(data);
 
+            // The dispatcher queue is created unbounded, so a failure here
+            // means the environment is shutting down.
             const status = napi.napi_call_threadsafe_function(self.tsfn_raw, @ptrCast(data), napi.napi_tsfn_nonblocking);
             if (status != napi.napi_ok) {
                 return NapiError.Error.fromStatus(NapiError.Status.New(status));
             }
         }
 
+        const Settlement = struct {
+            value: ?napi.napi_value = null,
+            reject: bool = false,
+        };
+
+        fn settlementFor(self: *Self, env_raw: napi.napi_env) Settlement {
+            if (self.cancel_dispatched or self.cancel_requested) {
+                const value = AbortSignalModule.abortErrorValue(Env.from_raw(env_raw)) catch {
+                    return .{
+                        .value = NapiError.Error.withCodeAndMessage("AbortError", "AbortError").to_napi_error(Env.from_raw(env_raw)),
+                        .reject = true,
+                    };
+                };
+                return .{ .value = value, .reject = true };
+            }
+            if (self.err) |err| {
+                return .{ .value = err.to_napi_error(Env.from_raw(env_raw)), .reject = true };
+            }
+            if (comptime Result == void) {
+                return .{ .value = Undefined.New(Env.from_raw(env_raw)).raw };
+            }
+            if (!self.result_ready) {
+                return .{
+                    .value = NapiError.Error.withCodeAndMessage("ERR_NAPI_ASYNC_NO_RESULT", "Async task did not produce a result").to_napi_error(Env.from_raw(env_raw)),
+                    .reject = true,
+                };
+            }
+            if (comptime NapiError.isResult(Result)) {
+                switch (self.result) {
+                    .ok => |payload| {
+                        const value = Napi.to_napi_value(env_raw, payload, null) catch |err| {
+                            return .{ .value = NapiError.mapAnyError(err).to_napi_error(Env.from_raw(env_raw)), .reject = true };
+                        };
+                        return .{ .value = value };
+                    },
+                    .err => |err| return .{ .value = err.to_napi_error(Env.from_raw(env_raw)), .reject = true },
+                }
+            }
+            const value = Napi.to_napi_value(env_raw, self.result, null) catch |err| {
+                return .{ .value = NapiError.mapAnyError(err).to_napi_error(Env.from_raw(env_raw)), .reject = true };
+            };
+            return .{ .value = value };
+        }
+
+        /// Settle the promise at most once and release the operation.
         fn dispatchCompletion(self: *Self, env_raw: napi.napi_env) void {
+            if (self.settled.swap(true, .acq_rel)) return;
+            self.setState(.settling);
+
+            // Wait for background producers: after this point nothing else
+            // touches the operation.
             if (self.controller_future) |*controller_future| {
                 controller_future.await(self.operationIo());
                 self.controller_future = null;
@@ -738,35 +1003,32 @@ fn AsyncTaskOperation(
             }
 
             const promise = self.promise;
-            var settled_value: ?napi.napi_value = null;
-            var should_reject = false;
-
-            if (self.cancel_dispatched or self.cancel_requested) {
-                settled_value = AbortSignalModule.abortErrorValue(Env.from_raw(env_raw));
-                should_reject = true;
-            } else if (self.err) |err| {
-                settled_value = err.to_napi_error(Env.from_raw(env_raw));
-                should_reject = true;
-            } else if (Result == void) {
-                settled_value = Undefined.New(Env.from_raw(env_raw)).raw;
-            } else {
-                settled_value = Napi.to_napi_value(env_raw, self.result, null) catch null;
+            var settlement = self.settlementFor(env_raw);
+            if (settlement.value == null) {
+                // Never leave the caller's promise pending: a missing
+                // settlement value is itself a failure.
+                settlement = .{
+                    .value = NapiError.Error.withCodeAndMessage("ERR_NAPI_ASYNC_NO_RESULT", "Async task did not produce a result").to_napi_error(Env.from_raw(env_raw)),
+                    .reject = true,
+                };
             }
+            self.setState(.settled);
 
-            self.destroy(env_raw);
+            self.destroyJs(env_raw);
 
-            if (settled_value) |value| {
-                const status = if (should_reject)
-                    napi.napi_reject_deferred(env_raw, promise.deferred, value)
-                else
-                    napi.napi_resolve_deferred(env_raw, promise.deferred, value);
-                _ = status;
+            if (settlement.value) |value| {
+                var settle_target = promise;
+                if (settlement.reject) {
+                    settle_target.rejectRaw(value) catch {};
+                } else {
+                    settle_target.resolveRaw(value) catch {};
+                }
             }
         }
 
         fn initThreadDispatcher(self: *Self) !void {
             const resource_name = String.New(Env.from_raw(self.env), "ZigAsyncTask");
-            var dispatcher_fn: napi.napi_value = undefined;
+            var dispatcher_fn: napi.napi_value = null;
             const create_fn_status = napi.napi_create_function(
                 self.env,
                 "zigAsyncTask",
@@ -787,7 +1049,7 @@ fn AsyncTaskOperation(
                 resource_name.raw,
                 0,
                 1,
-                null,
+                @ptrCast(self),
                 dispatcherFinalize,
                 @ptrCast(self),
                 dispatcherCallJs,
@@ -797,65 +1059,143 @@ fn AsyncTaskOperation(
                 return NapiError.Error.fromStatus(NapiError.Status.New(create_status));
             }
             self.tsfn_raw = tsfn_raw;
+            self.tsfn_created = true;
         }
 
         fn dispatcherNoop(inner_env: napi.napi_env, _: napi.napi_callback_info) callconv(.c) napi.napi_value {
             return Undefined.New(Env.from_raw(inner_env)).raw;
         }
 
-        fn dispatcherFinalize(_: napi.napi_env, _: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {}
+        /// Final owner of the operation: runs after every producer stopped and
+        /// the queue was drained, including when the environment is shutting
+        /// down. Never touches JavaScript.
+        fn dispatcherFinalize(_: napi.napi_env, data: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
+            const raw = data orelse return;
+            const self: *Self = @ptrCast(@alignCast(raw));
+            // The dispatcher already ran its final drain; never release it again.
+            self.tsfn_raw = null;
+            self.releaseNative();
+            self.js_released.store(true, .release);
+            self.allocator.destroy(self);
+        }
 
-        fn dispatcherCallJs(inner_env: napi.napi_env, _: napi.napi_value, context: ?*anyopaque, raw_data: ?*anyopaque) callconv(.c) void {
-            const self: *Self = @ptrCast(@alignCast(context));
-            const data: *DispatchData = @ptrCast(@alignCast(raw_data));
-            const allocator = self.allocator;
+        fn dispatcherCallJs(inner_env: napi.napi_env, js_callback: napi.napi_value, context: ?*anyopaque, raw_data: ?*anyopaque) callconv(.c) void {
+            const data: *DispatchData = @ptrCast(@alignCast(raw_data orelse return));
+            const allocator = data.allocator;
+            const kind = data.kind;
+            const payload = data.payload;
+            allocator.destroy(data);
 
-            switch (data.kind) {
+            // Node drains the queue with a null environment while shutting
+            // down: release the queued payload natively and never touch JS.
+            const env_alive = inner_env != null and js_callback != null;
+
+            switch (kind) {
                 .event => {
-                    defer allocator.destroy(data);
-                    if (Event != void and data.payload != null) {
-                        const payload = data.payload.?;
-                        defer allocator.destroy(payload);
-                        self.dispatchEvent(inner_env, payload.*);
+                    if (payload) |event_payload| {
+                        defer allocator.destroy(event_payload);
+                        if (!env_alive) return;
+                        const self = operationFromContext(context) orelse return;
+                        self.dispatchEvent(inner_env, event_payload.*);
                     }
                 },
                 .completion => {
-                    allocator.destroy(data);
+                    if (!env_alive) return;
+                    const self = operationFromContext(context) orelse return;
                     self.dispatchCompletion(inner_env);
-                    return;
                 },
             }
         }
 
-        fn destroy(self: *Self, env_raw: napi.napi_env) void {
-            if (self.closed) return;
-            self.closed = true;
-            const should_release_threaded_runtime = self.uses_threaded_runtime;
-            self.uses_threaded_runtime = false;
+        fn operationFromContext(context: ?*anyopaque) ?*Self {
+            const raw = context orelse return null;
+            return @ptrCast(@alignCast(raw));
+        }
+
+        /// JavaScript-thread teardown: releases references and the dispatcher,
+        /// then native state.
+        fn destroyJs(self: *Self, env_raw: napi.napi_env) void {
+            if (self.js_released.swap(true, .acq_rel)) return;
 
             releaseCallbackRef(env_raw, &self.listener_ref);
             if (self.abort_registration) |registration| {
                 registration.release();
                 self.abort_registration = null;
             }
-            if (self.tsfn_raw != null) {
-                _ = napi.napi_release_threadsafe_function(self.tsfn_raw, napi.napi_tsfn_release);
-                self.tsfn_raw = null;
-            }
             if (self.async_work != null) {
                 _ = napi.napi_delete_async_work(env_raw, self.async_work);
                 self.async_work = null;
             }
-            var deinit_state = Napi.DeinitState{};
-            Napi.deinit_napi_value_with_state(Input, self.input, &deinit_state);
+
+            const tsfn = self.tsfn_raw;
+            self.tsfn_raw = null;
+            self.releaseNative();
+
+            // The dispatcher finalizer owns the operation memory; release last
+            // and touch nothing afterwards.
+            if (tsfn != null) {
+                _ = napi.napi_release_threadsafe_function(tsfn, napi.napi_tsfn_release);
+            }
+        }
+
+        /// Native-only teardown for paths where JavaScript must not be touched.
+        ///
+        /// `release_dispatcher` releases the thread-safe function so its queue
+        /// is drained (with a null environment) and its finalizer can reclaim
+        /// this operation. It must be false when the finalizer itself is
+        /// already running.
+        fn destroyNativeOnly(self: *Self, release_dispatcher: bool) void {
+            self.js_released.store(true, .release);
+            const tsfn = if (release_dispatcher) self.tsfn_raw else null;
+            if (release_dispatcher) self.tsfn_raw = null;
+            self.releaseNative();
+            if (tsfn != null) {
+                _ = napi.napi_release_threadsafe_function(tsfn, napi.napi_tsfn_release);
+            }
+        }
+
+        /// Frees everything the operation owns natively. Idempotent, callable
+        /// from any thread.
+        fn releaseNative(self: *Self) void {
+            if (self.native_released.swap(true, .acq_rel)) return;
+
+            const allocator = self.allocator;
+            const env_raw = self.env;
+            const should_release_runtime = self.uses_threaded_runtime;
+            self.uses_threaded_runtime = false;
+            self.setState(.closed);
+
+            // Dispose owned result state first: a borrowed result may alias the
+            // captured input, which is released right after this.
             if (comptime Result != void) {
                 if (self.result_ready) {
-                    Napi.deinit_napi_value_with_state(Result, self.result, &deinit_state);
+                    self.result_ready = false;
+                    ownership.disposeOwnedParts(Result, self.result, allocator);
                 }
             }
-            self.allocator.destroy(self);
-            if (should_release_threaded_runtime) {
-                releaseThreadedRuntime();
+            ownership.deinitValue(Input, self.input, allocator);
+
+            // Native-only paths must still detach the abort registration: it
+            // points back at this operation and would otherwise call into freed
+            // memory when the event fires later.
+            if (self.abort_registration) |registration| {
+                registration.releaseWithoutJs();
+                self.abort_registration = null;
+            }
+
+            if (self.descriptor_base) |base| {
+                self.descriptor_base = null;
+                base.destroy_fn(base);
+            }
+
+            if (should_release_runtime) {
+                releaseThreadedRuntime(env_raw);
+            }
+
+            // Without a thread-safe function there is no finalizer that could
+            // own this memory.
+            if (!self.tsfn_created) {
+                allocator.destroy(self);
             }
         }
     };
