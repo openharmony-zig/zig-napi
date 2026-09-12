@@ -472,18 +472,20 @@ test "a failing conversion rolls back every resource it created" {
 
 test "a committed conversion keeps its resources" {
     var recorder = RollbackRecorder{};
-    var frame = ConversionFrame{};
-    frame.start(std.testing.allocator);
-    defer frame.end();
+    {
+        var frame = ConversionFrame{};
+        frame.start(std.testing.allocator);
+        defer frame.end();
 
-    try trackCustom(&recorder, RollbackRecorder.undo);
-    frame.commit();
-    frame.rollbackUncommitted();
-    try std.testing.expectEqual(@as(usize, 0), recorder.released);
+        try trackCustom(&recorder, RollbackRecorder.undo);
+        frame.commit();
+        frame.rollbackUncommitted();
+        try std.testing.expectEqual(@as(usize, 0), recorder.released);
 
-    // A resource created by the committed body belongs to the body.
-    try trackCustom(&recorder, RollbackRecorder.undo);
-    frame.end();
+        // A resource created by the committed body belongs to the body.
+        try trackCustom(&recorder, RollbackRecorder.undo);
+    }
+    // Neither the rollback nor the teardown may release what was committed.
     try std.testing.expectEqual(@as(usize, 0), recorder.released);
 }
 
