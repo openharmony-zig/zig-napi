@@ -25,10 +25,11 @@ const audit = loadAddon("classes_audit");
 // combination is flaky for reasons outside this addon - the runtime's promise
 // wrap finalizer (`Capability`) can trap during teardown - so those tests are
 // native only, like the async audit spec's child process tests.
-const isWasi = process.env.NAPI_RS_FORCE_WASI === "true" || process.env.NAPI_RS_FORCE_WASI === "error";
+const isWasi =
+  process.env.NAPI_RS_FORCE_WASI === "true" || process.env.NAPI_RS_FORCE_WASI === "error";
 const nativeOnlyTest = isWasi ? test.skip : test;
 
-/// FNV-1a over the UTF-8 bytes of `text`; the fixtures use ASCII payloads.
+// FNV-1a over the UTF-8 bytes of `text`; the fixtures use ASCII payloads.
 function fnv1a(text) {
   let hash = 2166136261;
   for (const byte of Buffer.from(text, "utf8")) {
@@ -504,7 +505,11 @@ test("borrowed worker data is released by its owner in OnComplete", async (t) =>
 test("a worker released from its own completion keeps its payload alive", async (t) => {
   const payload = "on-complete-payload";
   t.is(await audit.workerDeinitInOnComplete(payload), payload.length);
-  t.is(audit.workerOnCompletePayload(), payload, "OnComplete reads the captured copy after asking for the release");
+  t.is(
+    audit.workerOnCompletePayload(),
+    payload,
+    "OnComplete reads the captured copy after asking for the release",
+  );
 });
 
 test("queueing, releasing and cancelling a running worker stay safe", async (t) => {
