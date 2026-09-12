@@ -8,37 +8,84 @@ const GlobalAllocator = @import("./util/allocator.zig");
 
 pub const AbortCallback = *const fn (?*anyopaque) void;
 
+/// Owner of the context an abort callback receives.
+///
+/// `retain`/`release` bracket a single callback invocation so the context
+/// (usually an async operation) cannot be destroyed while its abort callback is
+/// running: `deactivate` marks the registration inactive under the same mutex,
+/// which makes the pair a two-way handshake - either the callback takes its
+/// reference first and the owner waits for it, or the callback observes the
+/// inactive registration and never runs.
+pub const ContextOwner = struct {
+    context: ?*anyopaque = null,
+    retain: ?*const fn (?*anyopaque) void = null,
+    release: ?*const fn (?*anyopaque) void = null,
+};
+
 /// A single `abort` listener owned by native code.
 ///
 /// Registrations never touch the signal object's wrap slot or its `onabort`
 /// property: each one installs its own native listener with
-/// `addEventListener("abort", ...)` and removes it again on `release()`. The
-/// registration memory is owned by that listener function, so a signal-like
-/// object that retains the listener and invokes it after `release()` observes
-/// an inactive registration instead of freed memory.
+/// `addEventListener("abort", ...)` and removes it again on `release()`.
+///
+/// The registration memory is reference counted, because two independent owners
+/// can outlive each other: the native caller (`release`/`releaseWithoutJs`) and
+/// the JavaScript listener function (its `napi_wrap` finalizer). Whichever is
+/// left last frees it, so a native caller never dereferences a registration a
+/// collected listener already released, and a signal-like object that retained
+/// the listener can still call it after `release()` - it observes an inactive
+/// registration instead of freed memory.
 pub const AbortRegistration = struct {
     env: napi.napi_env,
     allocator: std.mem.Allocator,
-    /// Strong reference to the listener function; keeps the owned memory and
-    /// the JS callback alive while this registration is active.
+    /// Strong reference to the listener function; keeps the JS callback alive
+    /// while this registration is active.
     listener_ref: napi.napi_ref = null,
     /// Strong reference to the signal object, used to remove the listener.
     signal_ref: napi.napi_ref = null,
-    callback_context: ?*anyopaque = null,
+    owner: ContextOwner = .{},
     callback: ?AbortCallback = null,
-    active: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    /// Guards `active` against a listener invocation that is already running.
+    mutex: std.Io.Mutex = .init,
+    active: bool = false,
+    /// Set by the native owner exactly once (guarded by `mutex`).
+    native_released: bool = false,
+    /// One reference for the native caller, one for the listener function.
+    ref_count: std.atomic.Value(usize) = std.atomic.Value(usize).init(1),
 
     const Self = @This();
 
     /// Invoked from the JS `abort` event. Safe to call after `release()`.
     pub fn requestAbort(self: *Self) void {
-        if (!self.isActive()) return;
-        const callback = self.callback orelse return;
-        callback(self.callback_context);
+        const io = registrationIo();
+        self.mutex.lockUncancelable(io);
+        if (!self.active) {
+            self.mutex.unlock(io);
+            return;
+        }
+        const owner = self.owner;
+        const callback = self.callback;
+        // Take the owner's reference *before* releasing the lock: `deactivate`
+        // clears `active` under the same lock, so from here on the owner cannot
+        // be destroyed underneath the callback.
+        if (owner.context != null) {
+            if (owner.retain) |retain_context| retain_context(owner.context);
+        }
+        self.mutex.unlock(io);
+
+        if (callback) |actual_callback| actual_callback(owner.context);
+
+        if (owner.context != null) {
+            if (owner.release) |release_context| release_context(owner.context);
+        }
     }
 
     pub fn isActive(self: *const Self) bool {
-        return self.active.load(.acquire);
+        const io = registrationIo();
+        const mutable: *Self = @constCast(self);
+        mutable.mutex.lockUncancelable(io);
+        defer mutable.mutex.unlock(io);
+        return self.active;
     }
 
     /// Current value of the signal object, or null when it is no longer alive.
@@ -56,8 +103,8 @@ pub const AbortRegistration = struct {
 
     /// Remove the listener and drop every native reference.
     ///
-    /// Must run on the environment's JavaScript thread. The registration memory
-    /// itself is released when the listener function is finalized.
+    /// Must run on the environment's JavaScript thread (it calls
+    /// `removeEventListener`) and only while that environment is still alive.
     pub fn release(self: *Self) void {
         self.deactivate(true);
     }
@@ -65,29 +112,51 @@ pub const AbortRegistration = struct {
     /// Detach without touching JavaScript.
     ///
     /// Used when the environment is already shutting down (for example while a
-    /// thread-safe function drains with a null environment): the listener is
-    /// marked inactive, native state is separated from JS state, and every
-    /// remaining reference is left for the environment to reclaim.
+    /// thread-safe function drains with a null environment) and from native-only
+    /// teardown: the listener is marked inactive and the native reference is
+    /// dropped, but no `napi_delete_reference` and no JavaScript call happens -
+    /// both are invalid once the environment is going away. The remaining
+    /// references are reclaimed by the environment.
     pub fn releaseWithoutJs(self: *Self) void {
         self.deactivate(false);
     }
 
     fn deactivate(self: *Self, allow_js: bool) void {
-        if (!self.active.swap(false, .acq_rel)) return;
+        const io = registrationIo();
+        self.mutex.lockUncancelable(io);
+        const was_active = self.active;
+        self.active = false;
+        const first_release = !self.native_released;
+        self.native_released = true;
+        self.mutex.unlock(io);
 
-        if (allow_js) {
+        if (first_release and allow_js and was_active) {
             removeEventListener(self);
         }
-        if (self.listener_ref != null) {
-            _ = napi.napi_delete_reference(self.env, self.listener_ref);
-            self.listener_ref = null;
+        if (first_release and allow_js) {
+            if (self.listener_ref != null) {
+                _ = napi.napi_delete_reference(self.env, self.listener_ref);
+                self.listener_ref = null;
+            }
+            if (self.signal_ref != null) {
+                _ = napi.napi_delete_reference(self.env, self.signal_ref);
+                self.signal_ref = null;
+            }
         }
-        if (self.signal_ref != null) {
-            _ = napi.napi_delete_reference(self.env, self.signal_ref);
-            self.signal_ref = null;
-        }
+        if (first_release) self.dropRef();
+    }
+
+    fn dropRef(self: *Self) void {
+        if (self.ref_count.fetchSub(1, .acq_rel) == 1) self.allocator.destroy(self);
     }
 };
+
+/// Condition-variable-free lock io for the registration handshake. The mutex is
+/// only ever held across a few instructions (never across a JavaScript call), so
+/// the single threaded io is enough for the futex wake-ups.
+fn registrationIo() std.Io {
+    return std.Io.Threaded.global_single_threaded.io();
+}
 
 pub const AbortSignal = struct {
     pub const is_napi_abort_signal = true;
@@ -128,6 +197,15 @@ pub const AbortSignal = struct {
     /// Foreign wraps, `onabort` handlers and other listeners are left untouched,
     /// and a failure at any step rolls the registration back.
     pub fn bind(self: Self, callback_context: ?*anyopaque, callback: AbortCallback) !*AbortRegistration {
+        return self.bindOwned(.{ .context = callback_context }, callback);
+    }
+
+    /// Register `callback` with a reference-counted context owner.
+    ///
+    /// As long as `owner.retain`/`owner.release` are provided, the callback can
+    /// never observe a context that its owner already destroyed: see
+    /// `ContextOwner`.
+    pub fn bindOwned(self: Self, owner: ContextOwner, callback: AbortCallback) !*AbortRegistration {
         const env = self.env;
         if (self.raw == null) {
             return invalidSignal("Expected an AbortSignal-like object, got null");
@@ -152,10 +230,11 @@ pub const AbortSignal = struct {
             .env = env,
             .allocator = allocator,
         };
-        // Before the listener function exists we own the memory directly; after
-        // `napi_wrap` succeeds the listener's finalizer owns it instead.
-        var listener_owns_registration = false;
-        errdefer if (!listener_owns_registration) allocator.destroy(registration);
+        // One reference for the caller, one for the listener function's wrap
+        // finalizer. Until `napi_wrap` succeeds only the caller's reference
+        // exists, so the rollback below can destroy the allocation directly.
+        var listener_owns_reference = false;
+        errdefer if (!listener_owns_reference) allocator.destroy(registration);
 
         var listener: napi.napi_value = null;
         const create_status = napi.napi_create_function(
@@ -174,7 +253,8 @@ pub const AbortSignal = struct {
         if (wrap_status != napi.napi_ok) {
             return NapiError.Error.fromStatus(NapiError.Status.New(wrap_status));
         }
-        listener_owns_registration = true;
+        listener_owns_reference = true;
+        _ = registration.ref_count.fetchAdd(1, .monotonic);
 
         errdefer if (registration.listener_ref != null) {
             _ = napi.napi_delete_reference(env, registration.listener_ref);
@@ -184,6 +264,10 @@ pub const AbortSignal = struct {
             _ = napi.napi_delete_reference(env, registration.signal_ref);
             registration.signal_ref = null;
         };
+        // Runs before the reference cleanup above (errdefers unwind in reverse):
+        // the caller's reference is dropped, the listener keeps its own until it
+        // is collected.
+        errdefer registration.releaseWithoutJs();
 
         var listener_ref: napi.napi_ref = null;
         const listener_ref_status = napi.napi_create_reference(env, listener, 1, &listener_ref);
@@ -199,7 +283,7 @@ pub const AbortSignal = struct {
         }
         registration.signal_ref = signal_ref;
 
-        registration.callback_context = callback_context;
+        registration.owner = owner;
         registration.callback = callback;
 
         const event_name = String.New(Env.from_raw(env), "abort");
@@ -210,7 +294,14 @@ pub const AbortSignal = struct {
             return NapiError.Error.fromStatus(NapiError.Status.New(call_status));
         }
 
-        registration.active.store(true, .release);
+        // Last: a listener that fires while `addEventListener` runs (a hostile
+        // signal-like object can do that) must be ignored, not delivered to a
+        // context the caller has not received yet.
+        const io = registrationIo();
+        registration.mutex.lockUncancelable(io);
+        registration.native_released = false;
+        registration.active = true;
+        registration.mutex.unlock(io);
         return registration;
     }
 };
@@ -269,11 +360,18 @@ fn onAbortEvent(env: napi.napi_env, info: napi.napi_callback_info) callconv(.c) 
     return Undefined.New(Env.from_raw(env)).raw;
 }
 
+/// The listener function was collected (or the environment is being torn down).
+///
+/// Only the listener's own reference is dropped here: the native owner may still
+/// hold one, and the memory is freed by whichever reference is released last.
 fn finalizeRegistration(_: napi.napi_env, data: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
     const raw = data orelse return;
     const registration: *AbortRegistration = @ptrCast(@alignCast(raw));
-    registration.active.store(false, .release);
-    registration.allocator.destroy(registration);
+    const io = registrationIo();
+    registration.mutex.lockUncancelable(io);
+    registration.active = false;
+    registration.mutex.unlock(io);
+    registration.dropRef();
 }
 
 pub fn abortErrorValue(env: Env) !napi.napi_value {
