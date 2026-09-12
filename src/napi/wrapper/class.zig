@@ -10,6 +10,55 @@ const Buffer = @import("./buffer.zig").Buffer;
 const ArrayBuffer = @import("./arraybuffer.zig").ArrayBuffer;
 const options = @import("../options.zig");
 
+/// Ownership policy for the converted `init`/factory arguments of a class.
+///
+/// A class declares the policy with a declaration, never with a field:
+///
+/// ```zig
+/// const Summary = struct {
+///     length: usize,
+///     pub const arg_ownership: napi.ArgOwnership = .transient;
+///
+///     pub fn init(text: []const u8) Summary {
+///         return .{ .length = text.len };
+///     }
+/// };
+/// ```
+pub const ArgOwnership = enum {
+    /// Default. The converted arguments are owned by the instance: they stay
+    /// alive until the instance is finalized, which is what makes storing one
+    /// of them in a field - or a sub-slice of one - safe.
+    retained,
+    /// The converted arguments are released as soon as `init`/the factory
+    /// returned, exactly like the arguments of an exported function.
+    ///
+    /// This is an explicit opt out of the alias safety above and it is only
+    /// correct for a constructor that copies scalars out of its arguments:
+    /// after the call returned, the type must not hold any pointer into them -
+    /// not in a field, not in a `napi.Owned`, not in a global. A constructor
+    /// that needs to keep data must deep-copy it
+    /// (`Napi.clone_napi_value`, `allocator.dupe`, `napi.Owned(T).clone`) or
+    /// allocate its own explicitly owned field. What it buys is exactly what an
+    /// exported function has: the wrapper retains nothing, so a large converted
+    /// argument does not stay alive for the lifetime of every instance.
+    transient,
+};
+
+/// Resolve the argument ownership policy of a class type.
+fn resolveArgOwnership(comptime T: type) ArgOwnership {
+    if (comptime @hasField(T, "arg_ownership")) {
+        @compileError("`arg_ownership` must be a declaration, not a field: declare " ++
+            "`pub const arg_ownership: napi.ArgOwnership = .transient;` on " ++ @typeName(T) ++
+            " - the policy has to be known at compile time.");
+    }
+
+    if (comptime @hasDecl(T, "arg_ownership")) {
+        return @field(T, "arg_ownership");
+    }
+
+    return .retained;
+}
+
 pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
     const type_info = @typeInfo(T);
 
@@ -26,6 +75,8 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
 
     const class_name = comptime helper.shortTypeName(T);
     const has_custom_deinit = @hasDecl(T, "deinit");
+    // Resolved once, from the `arg_ownership` declaration of the class.
+    const arg_ownership = comptime resolveArgOwnership(T);
 
     return struct {
         pub const WrappedType = T;
@@ -250,6 +301,18 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
             Napi.deinit_napi_value_with_allocator(V, value, allocator);
         }
 
+        /// Transaction around one callback's argument conversion.
+        ///
+        /// Converting an argument can *create* JavaScript resources - a strong
+        /// reference for `napi.Reference(T)`/`napi.ObjectRef`, an active thread
+        /// safe function for a TSFN pointer - and a callback that never reached
+        /// its native body must not leave them behind. Every class callback
+        /// installs its own frame (independent of a frame an outer conversion
+        /// may have left active) and commits it once the converted values are
+        /// handed to native code; until then a failure unwinds them together
+        /// with the native copies.
+        const Conversion = helper.ConversionFrame;
+
         /// Whether a field type can hold native memory that somebody has to
         /// release. This is a property of the *type*, decided at compile time;
         /// no runtime pointer or address range is ever inspected to decide
@@ -340,7 +403,8 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
         }
 
         /// Inputs converted for a user supplied `init` or factory are borrowed
-        /// by user code for the lifetime of the instance:
+        /// by user code for the lifetime of the instance (`.retained`, the
+        /// default policy):
         ///
         /// * storing one of them in a field is supported and safe - the wrapper
         ///   keeps the converted inputs alive until the instance is finalized
@@ -351,6 +415,10 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
         ///   (`Napi.clone_napi_value`, `allocator.dupe`, ...) or store it in an
         ///   explicitly owned field (`napi.Owned(T)`), whose `deinit` the
         ///   wrapper calls.
+        ///
+        /// A class that declares `arg_ownership = .transient` never reaches
+        /// this: its converted inputs are released as soon as the call returned,
+        /// so it must not have kept a pointer into them.
         fn retainBorrowedInputs(comptime V: type, instance: *InstanceData, value: V) !void {
             const allocator = instance.allocator;
             const stored = try allocator.create(V);
@@ -554,17 +622,35 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
             const allocator = instance.allocator;
             const ArgsTuple = std.meta.ArgsTuple(init_type);
 
+            // The constructor arguments are converted as one transaction: a
+            // conversion may create a JavaScript resource (a strong reference
+            // for `napi.ObjectRef`, an active thread-safe function for a TSFN
+            // pointer), and none of those may survive a construction that never
+            // reached `init`.
+            var conversion = Conversion{};
+            conversion.start(allocator);
+            defer conversion.end();
+
             var tuple_args: ArgsTuple = undefined;
             var initialized: usize = 0;
 
             inline for (init_params, 0..) |param, i| {
                 tuple_args[i] = Napi.from_napi_value_auto_with_allocator(env, args[i], param.type.?, allocator) catch |err| {
+                    // Unwind the created resources *before* the argument
+                    // cleanup: an undo handle may live inside memory the cleanup
+                    // frees. Committing is what suppresses the rollback.
+                    conversion.rollbackUncommitted();
                     releaseConvertedArgs(ArgsTuple, &tuple_args, initialized, allocator);
                     reportConversionFailure(env, err);
                     return false;
                 };
                 initialized = i + 1;
             }
+
+            // Ownership is handed to `init` on entry: from here on the created
+            // resources belong to the native body, which releases what it does
+            // not keep.
+            conversion.commit();
 
             const init_result = if (@typeInfo(@typeInfo(init_type).@"fn".return_type.?) == .error_union)
                 @call(.auto, init_fn, tuple_args) catch |err| {
@@ -581,12 +667,20 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
             };
 
             if (initialized > 0) {
-                retainBorrowedInputs(ArgsTuple, instance, tuple_args) catch {
-                    cleanupUnwrappedValue(value, allocator);
+                if (comptime arg_ownership == .transient) {
+                    // The class declared that it does not borrow its arguments:
+                    // they are released now, exactly like the arguments of an
+                    // exported function, instead of being retained until the
+                    // instance is finalized.
                     releaseConvertedArgs(ArgsTuple, &tuple_args, initialized, allocator);
-                    throwError(env, NapiError.Error.withStatus(NapiError.Status.GenericFailure));
-                    return false;
-                };
+                } else {
+                    retainBorrowedInputs(ArgsTuple, instance, tuple_args) catch {
+                        cleanupUnwrappedValue(value, allocator);
+                        releaseConvertedArgs(ArgsTuple, &tuple_args, initialized, allocator);
+                        throwError(env, NapiError.Error.withStatus(NapiError.Status.GenericFailure));
+                        return false;
+                    };
+                }
             }
 
             instance.value = value;
@@ -596,10 +690,18 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
         fn buildFromFields(env: napi.napi_env, args: []const napi.napi_value, instance: *InstanceData) bool {
             // Field construction transfers ownership of the converted values
             // to the fields; a failure rolls the successfully converted fields
-            // back before the shell is destroyed.
+            // back before the shell is destroyed, and the resources the
+            // conversions created are rolled back with them.
+            var conversion = Conversion{};
+            conversion.start(instance.allocator);
+            defer conversion.end();
+
             instance.value = undefined;
             inline for (fields, 0..) |field, i| {
                 const converted = Napi.from_napi_value_auto_with_allocator(env, args[i], field.type, instance.allocator) catch |err| {
+                    // Resources created by the conversions are released first,
+                    // then the native copies that were already installed.
+                    conversion.rollbackUncommitted();
                     rollbackFields(instance, i);
                     reportConversionFailure(env, err);
                     return false;
@@ -607,6 +709,10 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                 @field(instance.value, field.name) = converted;
                 instance.owned_fields[i] = true;
             }
+
+            // Every field is converted and installed: the instance owns the
+            // values and the resources the conversions created.
+            conversion.commit();
             return true;
         }
 
@@ -780,14 +886,24 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                         var tuple_args: ArgsTuple = undefined;
                         var initialized: usize = 0;
 
+                        // The factory arguments are converted as one
+                        // transaction; see `Conversion`.
+                        var conversion = Conversion{};
+                        conversion.start(allocator);
+                        defer conversion.end();
+
                         inline for (params, 0..) |param, i| {
                             tuple_args[i] = Napi.from_napi_value_auto_with_allocator(env, args_raw[i], param.type.?, allocator) catch |err| {
+                                conversion.rollbackUncommitted();
                                 releaseConvertedArgs(ArgsTuple, &tuple_args, initialized, allocator);
                                 reportConversionFailure(env, err);
                                 return null;
                             };
                             initialized = i + 1;
                         }
+
+                        // The body owns the resources as soon as it is entered.
+                        conversion.commit();
 
                         const result = if (@typeInfo(factory_fn_info.@"fn".return_type.?) == .error_union)
                             @call(.auto, factory_fn, tuple_args) catch |err| {
@@ -802,12 +918,18 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                             return null;
                         };
 
-                        keep_alive = makeKeepAlive(ArgsTuple, tuple_args, allocator) catch {
-                            cleanupUnwrappedValue(value, allocator);
+                        if (comptime arg_ownership == .transient) {
+                            // See `ArgOwnership.transient`: nothing is retained,
+                            // so nothing has to be released at finalization.
                             releaseConvertedArgs(ArgsTuple, &tuple_args, initialized, allocator);
-                            throwError(env, NapiError.Error.withStatus(NapiError.Status.GenericFailure));
-                            return null;
-                        };
+                        } else {
+                            keep_alive = makeKeepAlive(ArgsTuple, tuple_args, allocator) catch {
+                                cleanupUnwrappedValue(value, allocator);
+                                releaseConvertedArgs(ArgsTuple, &tuple_args, initialized, allocator);
+                                throwError(env, NapiError.Error.withStatus(NapiError.Status.GenericFailure));
+                                return null;
+                            };
+                        }
                     }
 
                     const instance = InstanceData.create(allocator) catch {
@@ -842,6 +964,10 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
 
         // Helper function to check if a declaration is a const field
         fn isConstDecl(comptime decl_name: []const u8) bool {
+            // Wrapper configuration, not part of the exported class: it must
+            // not become a static property (or a type declaration) of the
+            // JavaScript class.
+            if (comptime isWrapperDeclaration(decl_name)) return false;
             if (!@hasDecl(T, decl_name)) return false;
             const decl_type = @TypeOf(@field(T, decl_name));
             const decl_type_info = @typeInfo(decl_type);
@@ -879,6 +1005,15 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                 @compileError("Class methods must use `self: *" ++ @typeName(T) ++ "` or `self: " ++ @typeName(T) ++ "`");
             }
             return true;
+        }
+
+        /// Declarations that configure the wrapper instead of describing the
+        /// exported class. They are skipped by the class metadata scan, so they
+        /// never become a JavaScript static property or a method; the
+        /// declaration generator filters the same names out of the type
+        /// metadata.
+        fn isWrapperDeclaration(comptime decl_name: []const u8) bool {
+            return std.mem.eql(u8, decl_name, "arg_ownership");
         }
 
         fn define_class(env: napi.napi_env) !napi.napi_value {
@@ -960,10 +1095,22 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                             }
                         }
 
+                        // The value is converted as a transaction of its own:
+                        // a setter that never installs its value must not leave
+                        // a JavaScript resource the conversion created behind.
+                        var conversion = Conversion{};
+                        conversion.start(instance.allocator);
+                        defer conversion.end();
+
                         const new_value = Napi.from_napi_value_auto_with_allocator(setter_env, args_raw[0], field.type, instance.allocator) catch |err| {
+                            conversion.rollbackUncommitted();
                             reportConversionFailure(setter_env, err);
                             return null;
                         };
+
+                        // The field becomes the owner right before the value is
+                        // installed.
+                        conversion.commit();
 
                         if (instance.owned_fields[field_index] or comptime fieldOwnsItself(field.type)) {
                             // The wrapper installed the current value, or the
@@ -1075,6 +1222,18 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                                     var initialized_args: usize = 0;
                                     defer cleanupArgs(&tuple_args, initialized_args, allocator);
 
+                                    // Independent conversion frame: a method
+                                    // call may itself have been triggered from
+                                    // an outer conversion, and its resources
+                                    // belong to this call, not to that one.
+                                    var conversion = Conversion{};
+                                    conversion.start(allocator);
+                                    defer conversion.end();
+                                    // Registered after the native cleanup so the
+                                    // rollback runs *before* it: an undo handle
+                                    // may live inside memory the cleanup frees.
+                                    defer conversion.rollbackUncommitted();
+
                                     // Inject the receiver. Static methods do not
                                     // touch `this` at all: their `this` is the
                                     // constructor itself.
@@ -1100,6 +1259,10 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                                         };
                                         initialized_args = k + 1;
                                     }
+
+                                    // The method body owns every resource the
+                                    // conversion created from here on.
+                                    conversion.commit();
 
                                     if (@typeInfo(return_type) == .error_union) {
                                         const result = @call(.auto, method, tuple_args) catch |err| {

@@ -8,6 +8,9 @@ const detachArrayBuffer = require("../../transfer-arraybuffer");
 //   F06 static methods, factories, ClassWithoutInit construction
 //   F07 constructor rollback and setter replacement ownership
 //   F12 detached / invalidated backing stores
+//   H02 worker data is captured by default and borrowed explicitly
+//   H06 the runner's owned result is released on every completion path
+//   H11 explicit argument ownership for constructors and factories
 const path = require("path");
 const { spawnSync } = require("child_process");
 const { Worker } = require("worker_threads");
@@ -15,6 +18,25 @@ const test = require("ava");
 
 const loadAddon = require("../../load-addon");
 const audit = loadAddon("classes_audit");
+
+/// FNV-1a over the UTF-8 bytes of `text`; the fixtures use ASCII payloads.
+function fnv1a(text) {
+  let hash = 2166136261;
+  for (const byte of Buffer.from(text, "utf8")) {
+    hash = Math.imul(hash ^ byte, 16777619) >>> 0;
+  }
+  return hash;
+}
+
+function settlesWithin(promise, ms) {
+  return Promise.race([
+    promise.then(
+      (value) => ({ state: "resolved", value }),
+      (reason) => ({ state: "rejected", reason }),
+    ),
+    new Promise((resolve) => setTimeout(() => resolve({ state: "pending", reason: null }), ms)),
+  ]);
+}
 
 test("static methods do not unwrap their receiver", (t) => {
   t.is(audit.WidgetClass.twice(3), 6);
@@ -430,4 +452,276 @@ test("typed array element types and view lengths are validated", (t) => {
   t.throws(() => audit.typedArrayOverflow(new ArrayBuffer(16)));
   t.throws(() => audit.dataViewOverflow(new ArrayBuffer(16)), { instanceOf: RangeError });
   t.throws(() => audit.dataViewOverflow("nope"), { instanceOf: TypeError });
+});
+
+// ---------------------------------------------------------------------------
+// H02: worker data is captured by default, borrowed explicitly
+// ---------------------------------------------------------------------------
+
+test("a worker payload survives the call that produced it", async (t) => {
+  // 72 KiB, well above the small-string cache of any engine: the converting
+  // call scope frees its copy when the exported function returns.
+  const payload = "worker-capture-payload-".repeat(3200);
+  t.is(payload.length, 73600);
+  const promise = audit.workerCapturedChecksum(payload);
+
+  // Reuse the memory the released argument lived in before the runner reads its
+  // payload: without the capture the checksum would hash this churn.
+  const churn = [];
+  for (let i = 0; i < 64; i++) churn.push(Buffer.alloc(payload.length, 0x78));
+
+  t.is(await promise, fnv1a(payload));
+  t.is(churn.length, 64);
+  t.is(await audit.workerTryCapturedChecksum("fallible-capture"), fnv1a("fallible-capture"));
+});
+
+test("a worker struct payload captures its nested slices", async (t) => {
+  const text = "nested-slice-payload";
+  const promise = audit.workerCapturedStruct(text);
+  const churn = Buffer.alloc(4096, 0x79);
+  t.is(await promise, (fnv1a(text) ^ 7) >>> 0);
+  t.is(churn.length, 4096);
+});
+
+test("borrowed worker data is released by its owner in OnComplete", async (t) => {
+  // The worker must not release borrowed data; the caller does it once, in
+  // OnComplete. The allocation baseline is asserted in the GC test below - a
+  // second release would abort the process here.
+  for (let i = 0; i < 50; i++) {
+    t.is(await audit.workerBorrowedManual(4096), 4096);
+  }
+});
+
+test("a worker released from its own completion keeps its payload alive", async (t) => {
+  const payload = "on-complete-payload";
+  t.is(await audit.workerDeinitInOnComplete(payload), payload.length);
+  t.is(audit.workerOnCompletePayload(), payload, "OnComplete reads the captured copy after asking for the release");
+});
+
+test("queueing, releasing and cancelling a running worker stay safe", async (t) => {
+  // Two more `Queue` calls and two `deinit` calls while the work item is
+  // running: the queues are refused, the releases are deferred to the
+  // completion callback, and the promise still settles with the result.
+  t.is(await audit.workerQueueWhileRunning("queue-twice-payload"), "queue-twice-payload".length);
+
+  // A second promise for the same work item would settle twice.
+  t.is(await audit.workerAsyncQueueTwice("async-twice-payload"), "async-twice-payload".length);
+
+  const cancelled = await settlesWithin(audit.workerCancelCaptured("cancel-payload"), 5000);
+  t.not(cancelled.state, "pending", "a cancelled worker must settle its promise");
+  if (cancelled.state === "resolved") {
+    t.is(cancelled.value, "cancel-payload".length);
+  } else {
+    t.is(cancelled.reason.name, "AbortError");
+  }
+});
+
+// ---------------------------------------------------------------------------
+// H06: the runner's owned result is released on every completion path
+// ---------------------------------------------------------------------------
+
+test("a worker owned result is released after the promise resolves", async (t) => {
+  const size = 1024 * 1024;
+  const before = audit.activeBytes();
+  for (let i = 0; i < 4; i++) {
+    t.is((await audit.workerOwnedLargeAsync(size)).length, size);
+  }
+  // 4 MiB of runner allocated results: a missing release is unmissable, and the
+  // promise settlement states (32 bytes each) cannot hide it.
+  const delta = audit.activeBytes() - before;
+  t.true(delta < size, `owned results must be released after the conversion (delta ${delta})`);
+
+  // The small owned result of the first fixture still converts.
+  t.is(await audit.workerOwnedAsync("worker-owned-async-payload"), "worker-owned-result");
+});
+
+test("worker payloads and results return to their allocation baseline", (t) => {
+  // Every path that hands a payload to a worker, in one process with an
+  // explicit GC: the fire-and-forget `Queue` path (whose result no promise ever
+  // sees - the audit measured a permanent 100 * 19 byte increase there), the
+  // promise path, the borrowed/manual path, cancellation and a release from
+  // inside `OnComplete`. A missing release shows up as a positive delta, a
+  // second release as a negative one.
+  const binding = Object.keys(require.cache).find((key) => key.includes("classes_audit."));
+  t.truthy(binding, "the audit addon must be loaded before this test");
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--expose-gc",
+      "-e",
+      `
+      const audit = require(${JSON.stringify(binding)});
+      const settle = async () => {
+        for (let i = 0; i < 20; i++) {
+          global.gc();
+          await new Promise((resolve) => setTimeout(resolve, 5));
+        }
+      };
+      (async () => {
+        const base = audit.activeBytes();
+        const baseAllocations = audit.activeAllocations();
+
+        const runsBefore = audit.workerOwnedRuns();
+        for (let i = 0; i < 100; i++) audit.workerOwnedQueue("worker-queue-payload");
+        const deadline = Date.now() + 10000;
+        while (audit.workerOwnedRuns() - runsBefore < 100 && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 5));
+        }
+        const runs = audit.workerOwnedRuns() - runsBefore;
+
+        for (let i = 0; i < 100; i++) await audit.workerOwnedAsync("worker-owned-async-payload");
+        for (let i = 0; i < 100; i++) await audit.workerBorrowedManual(4096);
+        for (let i = 0; i < 20; i++) {
+          await audit.workerCapturedChecksum("captured-payload".repeat(64));
+          await audit.workerQueueWhileRunning("queue-twice-payload");
+          await audit.workerAsyncQueueTwice("async-twice-payload");
+          await audit.workerCancelCaptured("cancel-payload").catch(() => {});
+          await audit.workerDeinitInOnComplete("on-complete-payload");
+        }
+
+        await settle();
+        console.log(JSON.stringify({
+          runs,
+          delta: audit.activeBytes() - base,
+          allocationDelta: audit.activeAllocations() - baseAllocations,
+        }));
+      })();
+      `,
+    ],
+    { encoding: "utf8", timeout: 120000 },
+  );
+  t.is(result.signal, null, result.stderr);
+  t.is(result.status, 0, result.stderr);
+  const { runs, delta, allocationDelta } = JSON.parse(result.stdout.trim().split("\n").pop());
+  t.is(runs, 100, "every queued worker must have completed");
+  t.true(delta <= 2048, `native bytes still allocated after GC: ${delta}`);
+  t.true(delta >= -2048, `native bytes released more than once: ${delta}`);
+  t.true(allocationDelta <= 2, `native allocations still alive after GC: ${allocationDelta}`);
+});
+
+// ---------------------------------------------------------------------------
+// Setup failures: nothing is published and nothing is leaked
+// ---------------------------------------------------------------------------
+
+test("a worker that cannot be set up releases itself and publishes nothing", async (t) => {
+  const rejections = [];
+  const onUnhandled = (reason) => rejections.push(reason);
+  process.on("unhandledRejection", onUnhandled);
+
+  const before = audit.activeBytes();
+  const beforeAllocations = audit.activeAllocations();
+  try {
+    // Creation failure through the fallible entry point is reported instead of
+    // aborting the process.
+    t.true(audit.workerCreationFailure("creation-failure-payload"));
+    // A promise that cannot be created must not turn into an unhandled
+    // rejection, and the worker it belonged to is released.
+    t.true(audit.workerPromiseCreationFailure("promise-failure-payload"));
+  } finally {
+    // Unhandled rejections are reported on a later turn of the event loop.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    process.off("unhandledRejection", onUnhandled);
+  }
+
+  t.is(rejections.length, 0, `no unpublished promise may reject: ${rejections[0]}`);
+  t.is(audit.activeBytes() - before, 0, "a failed setup must not leak the worker or its payload");
+  t.is(audit.activeAllocations() - beforeAllocations, 0);
+});
+
+// ---------------------------------------------------------------------------
+// H11: explicit argument ownership for constructors and factories
+// ---------------------------------------------------------------------------
+
+test("transient constructor and factory arguments are released when the call returns", (t) => {
+  // 100 * 64 KiB of converted arguments: the audit measured a 6.26 MiB
+  // retention while the instances were alive. The default policy still retains
+  // them (see "borrowed init inputs stay alive"); the transient policy releases
+  // them as soon as `init`/the factory returned.
+  const text = "s".repeat(65536);
+  const before = audit.activeBytes();
+  const instances = [];
+  for (let i = 0; i < 100; i++) instances.push(new audit.SummaryClass(text));
+  const made = audit.SummaryClass.make(text);
+  const retained = audit.activeBytes() - before;
+
+  t.is(instances[0].lengthOf(), 65536);
+  t.is(instances[99].lengthOf(), 65536);
+  t.is(made.lengthOf(), 65536);
+  t.true(retained > 0, "the instances themselves are still alive");
+  t.true(retained < 64 * 1024, `100 transient instances retained ${retained} bytes of arguments`);
+});
+
+test("transient arguments are released on the failure paths too", (t) => {
+  const before = audit.activeBytes();
+  let thrown = 0;
+
+  // The large first argument converts, the second one fails: the converted
+  // first argument has to be released with the transaction.
+  for (let i = 0; i < 100; i++) {
+    try {
+      new audit.PartialSummaryClass("p".repeat(65536), "not a number");
+    } catch {
+      thrown++;
+    }
+    try {
+      audit.RefusingFactoryClass.make("p".repeat(65536), true);
+    } catch {
+      thrown++;
+    }
+  }
+
+  t.is(thrown, 200, "every invalid construction must throw");
+  t.is(audit.activeBytes() - before, 0, "transient arguments must be rolled back on failure");
+
+  // The successful factory path keeps only what the instance stores.
+  const made = audit.RefusingFactoryClass.make("factory-payload", false);
+  t.is(made.lengthOf(), "factory-payload".length);
+  t.true(audit.activeBytes() - before < 4096);
+});
+
+test("transient arguments and owned fields are released exactly once", (t) => {
+  const binding = Object.keys(require.cache).find((key) => key.includes("classes_audit."));
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--expose-gc",
+      "-e",
+      `
+      const audit = require(${JSON.stringify(binding)});
+      const settle = async () => {
+        for (let i = 0; i < 20; i++) {
+          global.gc();
+          await new Promise((resolve) => setTimeout(resolve, 5));
+        }
+      };
+      (async () => {
+        const base = audit.activeBytes();
+        const baseAllocations = audit.activeAllocations();
+        audit.resetFinalizedCount();
+        for (let round = 0; round < 100; round++) {
+          new audit.SummaryClass("s".repeat(65536));
+          audit.SummaryClass.make("f".repeat(65536));
+          new audit.OwnedTextClass("owned-field-payload");
+          audit.RefusingFactoryClass.make("factory-payload", false);
+        }
+        await settle();
+        console.log(JSON.stringify({
+          delta: audit.activeBytes() - base,
+          allocationDelta: audit.activeAllocations() - baseAllocations,
+          finalized: audit.finalizedCount(),
+        }));
+      })();
+      `,
+    ],
+    { encoding: "utf8", timeout: 60000 },
+  );
+  t.is(result.signal, null, result.stderr);
+  t.is(result.status, 0, result.stderr);
+  const { delta, allocationDelta, finalized } = JSON.parse(result.stdout.trim().split("\n").pop());
+  // 100 OwnedTextClass instances release through their own `deinit`; a missed
+  // release shows up as a positive delta, a double release as a negative one.
+  t.true(finalized >= 100, `finalized ${finalized} of 100`);
+  t.true(delta <= 2048, `native bytes still allocated after GC: ${delta}`);
+  t.true(delta >= -2048, `native bytes released more than once: ${delta}`);
+  t.is(allocationDelta, 0, "every native allocation must be released exactly once");
 });

@@ -93,6 +93,7 @@ Exports a Zig struct type as a JavaScript class with constructor initialization 
 | `pub fn staticMethod(...)`           | static method                                 |
 | static factory returning `T` or `*T` | static factory returning a class instance     |
 | `pub const value = ...`              | static readonly value                         |
+| `pub const arg_ownership = ...`      | wrapper configuration, not a class member      |
 | `pub fn deinit(self: *T)`            | called when the wrapped instance is finalized |
 
 ```zig
@@ -146,6 +147,39 @@ pub const CounterClass = napi.Class(Counter);
   - a type that has to own a resource clones it explicitly
     (`Napi.clone_napi_value`, `allocator.dupe`, ...) or stores it in an
     explicitly owned field (`napi.Owned(T)`), whose `deinit` the wrapper calls.
+- That retention is what costs: an instance keeps **every** converted argument
+  alive, so a constructor that only copies a scalar out of a large argument
+  (a 64 KiB string into a `length: usize`) holds the whole input until the
+  instance is collected. A class that does not borrow its arguments says so:
+
+  ```zig
+  const Summary = struct {
+      length: usize,
+
+      /// `init` copies a scalar; it keeps no pointer into its arguments.
+      pub const arg_ownership: napi.ArgOwnership = .transient;
+
+      pub fn init(text: []const u8) Summary {
+          return .{ .length = text.len };
+      }
+  };
+  ```
+
+  `.transient` releases the converted arguments as soon as `init` or the factory
+  returned - exactly like the arguments of an exported function - and applies to
+  `init` and factory calls alike (`.retained` is the default). It is an opt out
+  of alias safety and has one rule: after the call returned, the type must not
+  hold a pointer into its arguments, in a field, in a `napi.Owned`, or in a
+  global. Deep-copy what has to survive (`Napi.clone_napi_value`,
+  `allocator.dupe`, `napi.Owned(T).clone`) or allocate an explicitly owned field
+  in `init`. The declaration configures the wrapper and is not part of the
+  JavaScript class or its type declarations.
+- Converting an argument can create a JavaScript resource (a strong reference
+  for `napi.ObjectRef`/`napi.Reference(T)`, an active thread-safe function for a
+  TSFN pointer). Every callback converts its arguments as one transaction and
+  commits it once the values are handed to native code (`init`, a factory, a
+  method body, the field a setter installs); a call that fails before that
+  releases the resources it created together with the native copies.
 - A setter converts the new value first, and only then installs it. Ownership is
   never inferred from a pointer value:
   - a value the wrapper installed is released when it is replaced;

@@ -68,6 +68,9 @@ pub const AbortSignal = abort_signal.AbortSignal;
 pub const resolveRequestedRuntime = async.resolveRequestedRuntime;
 pub const Class = class.Class;
 pub const ClassWithoutInit = class.ClassWithoutInit;
+/// Policy for the converted `init`/factory arguments of a class; declare it on
+/// the class: `pub const arg_ownership: napi.ArgOwnership = .transient;`
+pub const ArgOwnership = class.ArgOwnership;
 pub const Buffer = buffer.Buffer;
 pub const ArrayBuffer = arraybuffer.ArrayBuffer;
 pub const TypedArray = typedarray.TypedArray;
