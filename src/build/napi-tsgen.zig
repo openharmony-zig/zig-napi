@@ -1030,6 +1030,9 @@ fn isIdentifierChar(ch: u8) bool {
 }
 
 fn emitType(state: *State, comptime T: type) ![]const u8 {
+    if (comptime @typeInfo(T) == .@"struct" and @hasDecl(T, "is_napi_owned")) {
+        return emitType(state, T.owned_payload_type);
+    }
     if (comptime isDtsType(T)) return T.ts_type;
     if (comptime isResultType(T)) return emitType(state, resultPayloadType(T));
 
@@ -1835,6 +1838,13 @@ fn emitSourceTypeExpr(state: *State, file_path: []const u8, type_expr: []const u
     if (std.mem.eql(u8, trimmed, "napi.DataView")) return "DataView";
 
     if (parseSingleArgTypeCall(trimmed)) |type_call| {
+        if (std.mem.eql(u8, type_call.callee, "Owned") or
+            std.mem.endsWith(u8, type_call.callee, ".Owned") or
+            std.mem.eql(u8, type_call.callee, "Result") or
+            std.mem.endsWith(u8, type_call.callee, ".Result"))
+        {
+            return emitSourceTypeExpr(state, file_path, type_call.arg, depth + 1);
+        }
         if (std.mem.eql(u8, type_call.callee, "napi.External") or
             std.mem.endsWith(u8, type_call.callee, ".External") or
             std.mem.eql(u8, type_call.callee, "External"))
