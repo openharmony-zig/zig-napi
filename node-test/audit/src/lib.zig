@@ -178,6 +178,74 @@ pub fn bindSignal(signal: napi.AbortSignal) !void {
     registration.release();
 }
 
+// Independent team-leader regressions for the second audit. These are separate
+// from the implementation agents' fixtures so integration checks exercise the
+// public APIs as a downstream addon would.
+var worker_completions: std.atomic.Value(u32) = .init(0);
+fn workerOwnedResult(_: u32) !napi.Owned([]u8) {
+    const allocator = counter.allocator();
+    return .init(try allocator.dupe(u8, "worker-owned-result"), allocator);
+}
+fn workerOwnedCompleted(_: u32) void {
+    _ = worker_completions.fetchAdd(1, .monotonic);
+}
+pub fn workerOwnedCompletions() u32 {
+    return worker_completions.load(.monotonic);
+}
+pub fn workerOwnedQueue(env: napi.Env) void {
+    napi.Worker(env, .{
+        .data = @as(u32, 0),
+        .Execute = workerOwnedResult,
+        .OnComplete = workerOwnedCompleted,
+    }).Queue();
+}
+fn delayedWorkerRead(input: []const u8) u32 {
+    for (0..2_000_000) |_| std.atomic.spinLoopHint();
+    return if (input.len == 0) 0 else input[0];
+}
+pub fn workerCapturedInput(env: napi.Env, input: []const u8) !napi.Promise {
+    return napi.Worker(env, .{ .data = input, .Execute = delayedWorkerRead }).AsyncQueue();
+}
+const ErrorTsfn = napi.ThreadSafeFunction(struct { u32 }, void, true, 0);
+const EmptyErrorTsfn = napi.ThreadSafeFunction(std.meta.Tuple(&.{}), void, true, 0);
+var tsfn_error_message: [12]u8 = "original msg".*;
+pub fn tsfnError(tsfn: *ErrorTsfn) !void {
+    @memcpy(&tsfn_error_message, "original msg");
+    try tsfn.Err(napi.Error.withReason(&tsfn_error_message), .NonBlocking);
+    @memset(&tsfn_error_message, 'x');
+    try tsfn.release(.Release);
+}
+pub fn tsfnEmptyError(tsfn: *EmptyErrorTsfn) !void {
+    @memcpy(&tsfn_error_message, "original msg");
+    try tsfn.Err(napi.Error.withReason(&tsfn_error_message), .NonBlocking);
+    @memset(&tsfn_error_message, 'x');
+    try tsfn.release(.Release);
+}
+pub fn referenceThenInvalid(env: napi.Env, reference: napi.ObjectRef, number: i32) !void {
+    _ = number;
+    var owned = reference;
+    try owned.Delete(env);
+}
+pub fn referenceNested(env: napi.Env, input: struct { reference: napi.ObjectRef, number: i32 }) !void {
+    var owned = input.reference;
+    try owned.Delete(env);
+}
+var saved_reference: ?napi.ObjectRef = null;
+pub fn saveReference(env: napi.Env, reference: napi.ObjectRef) !void {
+    if (saved_reference) |old| {
+        var mutable = old;
+        try mutable.Delete(env);
+    }
+    saved_reference = reference;
+}
+pub fn takeSavedReference(env: napi.Env) !napi.Object {
+    var reference = saved_reference orelse return error.NoSavedReference;
+    const value = try reference.GetValue(env);
+    try reference.Delete(env);
+    saved_reference = null;
+    return value;
+}
+
 comptime {
     napi.NODE_API_MODULE("audit", @This());
 }

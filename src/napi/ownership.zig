@@ -8,7 +8,8 @@
 //!   on the failure path. Inside the exported function the argument memory is
 //!   valid, but it must not be stored anywhere that outlives the call (a
 //!   background thread, an async descriptor, a global) unless it is deep-copied
-//!   with `Napi.clone_napi_value` or moved into an `Owned` value.
+//!   with `Napi.clone_napi_value` or `Owned.clone`. Merely wrapping a borrowed
+//!   argument in `Owned.init` does not transfer the call scope's ownership.
 //! * **Plain native returns are borrowed.** Whatever an exported function hands
 //!   back - a static literal, a sub-slice of one of its arguments, an alias of
 //!   caller memory - is copied into a JavaScript value and never freed by the
