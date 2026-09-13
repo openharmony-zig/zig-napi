@@ -26,6 +26,7 @@ const { test } = require("node:test");
 const assert = require("node:assert");
 
 const CHILD_FLAG = "--zig-napi-abi-child";
+const OOM_CHILD_FLAG = "--zig-napi-abi-oom-child";
 const nodeTestDir = path.resolve(__dirname, "..");
 const DEFAULT_TIMEOUT_MS = 240000;
 
@@ -40,6 +41,28 @@ function parseArg(name) {
   return match ? match.slice(prefix.length) : undefined;
 }
 
+/// Runs `call` and reports how it settled, or `{ kind: "hung" }` when it did
+/// not settle within `timeoutMs`. The timeout is cleared on settlement so a
+/// pending timer cannot keep the child alive.
+async function settlesWithin(call, timeoutMs) {
+  let timer;
+  try {
+    return await Promise.race([
+      Promise.resolve()
+        .then(call)
+        .then(
+          (value) => ({ kind: "resolved", value }),
+          (error) => ({ kind: "rejected", message: error && error.message }),
+        ),
+      new Promise((resolve) => {
+        timer = setTimeout(() => resolve({ kind: "hung" }), timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function artifactRoot() {
   return path.resolve(
     parseArg("artifact-root") ??
@@ -51,6 +74,15 @@ function artifactRoot() {
 // ---------------------------------------------------------------------------
 // Parent: run each flavor in a child with a deadline
 // ---------------------------------------------------------------------------
+
+/// Root of an out-of-memory build (`-Dwasi-max-memory-pages=520`, which makes
+/// the wasm heap exhaustible in a few MiB). Optional: the default artifacts
+/// have a 4 GiB maximum, so this only runs when the environment points at a
+/// small-memory build instead of allocating gigabytes to reach the limit.
+function oomArtifactRoot() {
+  const root = parseArg("oom-artifact-root") ?? process.env.ZIG_NAPI_WASM_OOM_ARTIFACT_ROOT;
+  return root ? path.resolve(root) : undefined;
+}
 
 function registerTests() {
   const root = artifactRoot();
@@ -101,6 +133,107 @@ function registerTests() {
       assert.match(output, /^ABI OK$/m, `child did not finish its checks:\n${output}`);
     });
   }
+
+  const oomRoot = oomArtifactRoot();
+  test(
+    "WASI worker allocation failure is reported, not trapped",
+    { skip: oomRoot ? false : "set ZIG_NAPI_WASM_OOM_ARTIFACT_ROOT to a -Dwasi-max-memory-pages build" },
+    () => {
+      const result = spawnSync(
+        process.execPath,
+        [__filename, OOM_CHILD_FLAG, oomRoot],
+        {
+          cwd: nodeTestDir,
+          encoding: "utf8",
+          timeout: DEFAULT_TIMEOUT_MS,
+          env: { ...process.env },
+        },
+      );
+      const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+      assert.strictEqual(
+        result.signal,
+        null,
+        `OOM child was killed by ${result.signal} (it never exited on its own):\n${output}`,
+      );
+      assert.strictEqual(result.status, 0, `OOM child failed:\n${output}`);
+      assert.match(output, /^OOM OK$/m, `OOM child did not finish:\n${output}`);
+    },
+  );
+}
+
+/// Child mode for the optional out-of-memory test: exhaust the heap of a
+/// small-memory build, then require that the worker allocator reports failure
+/// (0, the value `@emnapi/core` treats as "Failed to create async worker")
+/// instead of trapping, and that queued async work settles rather than hanging.
+async function oomChildMain() {
+  const root = process.argv[process.argv.indexOf(OOM_CHILD_FLAG) + 1];
+  const createRequireFromTest = require("node:module").createRequire(
+    path.join(nodeTestDir, "package.json"),
+  );
+  const {
+    createContext,
+    instantiateNapiModuleSync,
+    emnapiAsyncWorkPlugin,
+    emnapiTSFNPlugin,
+  } = createRequireFromTest("@napi-rs/wasm-runtime");
+  const { WASI } = require("node:wasi");
+
+  const artifact = path.join(root, "async_audit.wasm32-wasi.wasm");
+  const module = new WebAssembly.Module(fs.readFileSync(artifact));
+  const memoryImport = readMemoryImport(fs.readFileSync(artifact));
+  assert.ok(memoryImport.max < 4096, "the OOM artifact has a small maximum");
+
+  const { instance, napiModule } = instantiateNapiModuleSync(fs.readFileSync(artifact), {
+    context: createContext(),
+    wasi: new WASI({ version: "preview1", env: process.env }),
+    plugins: [emnapiAsyncWorkPlugin, emnapiTSFNPlugin],
+    // A growable memory: Zig's wasi allocator needs headroom, so
+    // `initial === maximum` would fail every allocation for the wrong reason.
+    asyncWorkPoolSize: 0,
+    overwriteImports(importObject) {
+      importObject.env = {
+        ...importObject.env,
+        ...importObject.napi,
+        ...importObject.emnapi,
+        memory: new WebAssembly.Memory({
+          initial: memoryImport.min + 8,
+          maximum: memoryImport.max,
+          shared: true,
+        }),
+      };
+      return importObject;
+    },
+  });
+  assert.ok(WebAssembly.Module.imports(module).length > 0, "module inspected");
+
+  const first = instance.exports.emnapi_async_worker_create(0, 0);
+  assert.notStrictEqual(first, 0, "a worker block fits before exhaustion");
+
+  const heap = [];
+  for (let index = 0; index < 8192; index += 1) {
+    const pointer = instance.exports.malloc(64 * 1024);
+    if (!pointer) break;
+    heap.push(pointer);
+  }
+  assert.ok(heap.length > 0, "the heap was exhausted");
+
+  assert.strictEqual(
+    instance.exports.emnapi_async_worker_create(0, 0),
+    0,
+    "allocation failure returns 0 instead of trapping",
+  );
+
+  // The call itself may throw while the heap is exhausted (the addon cannot
+  // even allocate the error object); what matters is that it does not hang.
+  const outcome = await settlesWithin(
+    () => napiModule.exports.asyncThreadValue(41),
+    30000,
+  );
+  assert.notStrictEqual(outcome.kind, "hung", "queued async work must settle, not hang");
+  console.log(`# async work after exhaustion: ${outcome.kind}`);
+
+  for (const pointer of heap) instance.exports.free(pointer);
+  console.log("OOM OK");
 }
 
 // ---------------------------------------------------------------------------
@@ -405,6 +538,11 @@ async function childMain() {
 
 if (process.argv.includes(CHILD_FLAG)) {
   childMain().catch((error) => {
+    console.error(error && error.stack ? error.stack : error);
+    process.exitCode = 1;
+  });
+} else if (process.argv.includes(OOM_CHILD_FLAG)) {
+  oomChildMain().catch((error) => {
     console.error(error && error.stack ? error.stack : error);
     process.exitCode = 1;
   });
