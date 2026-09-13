@@ -152,6 +152,12 @@ jobs:
       - name: WASI ABI acceptance (both flavors)
         run: node --test --test-timeout=300000 node-test/wasm/abi.test.cjs
 
+      # Several producers share one linear memory and allocate through the
+      # module's exported malloc/free from different worker instances, so this
+      # is the regression gate for the serialized allocator.
+      - name: WASI concurrent producer acceptance (both flavors)
+        run: node --test --test-timeout=300000 node-test/wasm/concurrency.test.cjs
+
       # Runs every test in the CLI package's test directory: the real npm-pack
       # smoke test today, plus generated-loader unit tests as they land there.
       - name: CLI package tests (generated loaders and real npm pack)

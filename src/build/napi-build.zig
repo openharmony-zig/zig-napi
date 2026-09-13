@@ -603,6 +603,23 @@ const wasi_threads_export_symbols = [_][]const u8{
 /// epilogue would break the switch.
 const emnapi_async_worker_init_asm = "src/sys/emnapi_async_worker_init.S";
 
+/// Locked C allocator entry points for threaded addons.
+///
+/// Every worker instance allocates through the module's exported `malloc` and
+/// `free`, and the allocator Zig's libc installs there (`BrkAllocator`, whose
+/// free lists are a plain global) is not synchronized, because Zig only builds
+/// single-threaded wasm. Two workers allocating at the same time therefore
+/// corrupt the shared heap. This unit redefines the allocator entry points
+/// around one shared spin lock; it has to be a separate object *without* libc,
+/// because a strong definition inside the same Zig compilation unit as libc is
+/// rejected as an exported-symbol collision. Zig's libc symbols are weak
+/// precisely so that a regular object can override them.
+///
+/// Only the threaded flavor links it: a single-threaded addon has one thread, so
+/// libc's allocator is already correct there and a second allocator instance
+/// would only add risk.
+const emnapi_alloc_source = "src/sys/emnapi_alloc.zig";
+
 fn linkWasiEmnapi(
     build: *std.Build,
     compile: *std.Build.Step.Compile,
@@ -613,14 +630,34 @@ fn linkWasiEmnapi(
     compile.root_module.addObjectFile(.{ .cwd_relative = archive.path });
 
     if (flavor.sharedMemory()) {
-        // The assembly lives in this package, not in the addon being built, so
-        // resolve it through the napi module's owning package.
+        // Both live in this package, not in the addon being built, so resolve
+        // them through the napi module's owning package.
         compile.root_module.addAssemblyFile(option.napi_module.owner.path(emnapi_async_worker_init_asm));
-        compile.root_module.export_symbol_names = &(wasi_common_export_symbols ++ wasi_threads_export_symbols);
+
+        const alloc_object = build.addObject(.{
+            .name = "emnapi-alloc",
+            .root_module = build.createModule(.{
+                .root_source_file = option.napi_module.owner.path(emnapi_alloc_source),
+                .target = compile.root_module.resolved_target,
+                .optimize = compile.root_module.optimize.?,
+            }),
+        });
+        compile.root_module.addObjectFile(alloc_object.getEmittedBin());
+
+        compile.root_module.export_symbol_names = &(wasi_common_export_symbols ++
+            wasi_threads_export_symbols ++
+            wasi_alloc_diagnostic_symbols);
     } else {
         compile.root_module.export_symbol_names = &wasi_common_export_symbols;
     }
 }
+
+/// Let a test prove the locked allocator is the one linked: libc's allocator
+/// would leave these at zero while the plugins allocate.
+const wasi_alloc_diagnostic_symbols = [_][]const u8{
+    "__emnapi_alloc_entries",
+    "__emnapi_alloc_spins",
+};
 
 /// napi-rs' `platformArchABI` for a target. WASI flavors use napi-rs' names
 /// rather than the Zig triple: the threaded flavor is `wasm32-wasi` and the
