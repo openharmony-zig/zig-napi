@@ -1,4 +1,5 @@
 const std = @import("std");
+const allocator = @import("./allocator.zig");
 
 /// Proves a native wrap pointer belongs to this addon before dereferencing it.
 /// A magic number inside untrusted `napi_unwrap` data is not such a proof: the
@@ -12,10 +13,19 @@ pub fn PayloadRegistry(comptime T: type) type {
             while (!mutex.tryLock()) std.atomic.spinLoopHint();
         }
 
+        /// The registry is reached from the worker threads of an emnapi build as
+        /// well, and those threads share one page allocator with this one: the
+        /// bookkeeping goes through the module's safe page allocator, so both
+        /// sides take the same lock. The spin lock above only orders the map
+        /// itself, it does not protect the allocator's global state.
+        fn pageAllocator() std.mem.Allocator {
+            return allocator.safePageAllocator();
+        }
+
         pub fn add(pointer: *T) !void {
             lock();
             defer mutex.unlock();
-            try pointers.put(std.heap.page_allocator, @intFromPtr(pointer), {});
+            try pointers.put(pageAllocator(), @intFromPtr(pointer), {});
         }
 
         pub fn contains(pointer: *anyopaque) bool {
@@ -29,7 +39,7 @@ pub fn PayloadRegistry(comptime T: type) type {
             defer mutex.unlock();
             _ = pointers.remove(@intFromPtr(pointer));
             if (pointers.count() == 0) {
-                pointers.deinit(std.heap.page_allocator);
+                pointers.deinit(pageAllocator());
                 pointers = .empty;
             }
         }

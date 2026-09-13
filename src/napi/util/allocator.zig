@@ -1,5 +1,106 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const root = @import("root");
+
+/// True when the shared page allocator state needs the module lock.
+const page_allocator_needs_lock = builtin.target.cpu.arch.isWasm();
+
+/// Serializes every access to the page allocator state of this module.
+///
+/// `std.heap.page_allocator` is `std.heap.BrkAllocator` on WebAssembly: the std
+/// aliases it for targets that claim to be single threaded, and a threaded
+/// WebAssembly target does not provide a page allocator at all. The break
+/// allocator keeps its free lists, its break pointer and its next-free
+/// addresses in one *global* with no synchronization - it assumes exclusive
+/// access to the target.
+///
+/// emnapi executes `napi_async_work` on real threads while Zig still reports
+/// the target as single threaded, so two threads reach that global at the same
+/// time: concurrent allocations can hand out memory that is still live and
+/// concurrent frees corrupt the free lists. The audit repro trapped inside
+/// `Allocator.destroy` with "memory access out of bounds" because the corrupted
+/// free list returned a block that a worker thread was still using.
+///
+/// One module-global lock protects the one global state. A lock per wrapper (a
+/// counting allocator, a registry) would not: every user of the same allocator
+/// has to serialize against every other user. `std.Thread.Mutex` is a no-op
+/// when `builtin.single_threaded` is true, which is exactly the case here, so
+/// this is an atomic spin lock.
+const PageLock = struct {
+    var mutex: std.atomic.Mutex = .unlocked;
+
+    fn lock() void {
+        while (!mutex.tryLock()) std.atomic.spinLoopHint();
+    }
+
+    fn unlock() void {
+        mutex.unlock();
+    }
+
+    fn alloc(_: *anyopaque, len: usize, alignment: std.mem.Alignment, ret_addr: usize) ?[*]u8 {
+        lock();
+        defer unlock();
+        return std.heap.page_allocator.rawAlloc(len, alignment, ret_addr);
+    }
+
+    fn resize(_: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, ret_addr: usize) bool {
+        lock();
+        defer unlock();
+        return std.heap.page_allocator.rawResize(memory, alignment, new_len, ret_addr);
+    }
+
+    fn remap(_: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
+        lock();
+        defer unlock();
+        return std.heap.page_allocator.rawRemap(memory, alignment, new_len, ret_addr);
+    }
+
+    fn free(_: *anyopaque, memory: []u8, alignment: std.mem.Alignment, ret_addr: usize) void {
+        lock();
+        defer unlock();
+        std.heap.page_allocator.rawFree(memory, alignment, ret_addr);
+    }
+
+    const vtable: std.mem.Allocator.VTable = .{
+        .alloc = alloc,
+        .resize = resize,
+        .remap = remap,
+        .free = free,
+    };
+};
+
+comptime {
+    // The lock above exists for exactly one allocator. If the std ever selects a
+    // different page allocator on WebAssembly, this check fails the build
+    // instead of silently locking nothing.
+    if (page_allocator_needs_lock) {
+        if (!builtin.single_threaded) {
+            @compileError("a threaded WebAssembly target has no BrkAllocator-based page allocator to lock");
+        }
+        if (std.heap.page_allocator.vtable != &std.heap.BrkAllocator.vtable) {
+            @compileError("the WebAssembly page allocator changed: re-check whether it still needs the module lock");
+        }
+    }
+}
+
+/// The page allocator of this target, safe to call from every thread.
+///
+/// On native targets this is `std.heap.page_allocator` itself: no lock, no
+/// wrapper, the fast path is untouched. On WebAssembly it is the same allocator
+/// behind one module-global lock, because emnapi runs native work on real
+/// threads while the std believes the target is single threaded.
+///
+/// Use it as the backing of a custom `napi_allocator` (and as the default):
+/// a custom allocator that takes its pages from `std.heap.page_allocator`
+/// directly brings back the shared, unsynchronized state this function
+/// serializes - and a lock of its own would not help, because it would not be
+/// the lock every other user of that state takes.
+pub fn safePageAllocator() std.mem.Allocator {
+    if (comptime page_allocator_needs_lock) {
+        return .{ .ptr = undefined, .vtable = &PageLock.vtable };
+    }
+    return std.heap.page_allocator;
+}
 
 pub const AllocatorManager = struct {
     allocator: std.mem.Allocator,
@@ -27,7 +128,9 @@ pub const AllocatorManager = struct {
 ///
 /// This allocator is the *default* for every thread, so it is reached
 /// concurrently: it must be safe to allocate and free from multiple threads at
-/// the same time (atomics, a lock, or a system allocator).
+/// the same time (atomics, a lock, or a system allocator). A custom allocator
+/// that takes its pages from `std.heap.page_allocator` is not: use
+/// `safePageAllocator()` as its backing.
 pub fn defaultAllocator() std.mem.Allocator {
     if (@hasDecl(root, "napi_allocator")) {
         const allocator = root.napi_allocator;
@@ -37,7 +140,7 @@ pub fn defaultAllocator() std.mem.Allocator {
         return allocator;
     }
 
-    return std.heap.page_allocator;
+    return safePageAllocator();
 }
 
 /// Operation allocator of the *current thread*.

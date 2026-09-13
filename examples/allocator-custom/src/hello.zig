@@ -3,7 +3,10 @@ const napi = @import("napi");
 const CountingAllocator = @import("counting_allocator.zig").CountingAllocator;
 const Stats = @import("counting_allocator.zig").Stats;
 
-var custom_allocator_state = CountingAllocator.init(std.heap.page_allocator);
+// `safePageAllocator()` is `std.heap.page_allocator` on native targets and the
+// same allocator behind one module lock on WebAssembly, where emnapi runs
+// native work on real threads next to the JavaScript thread.
+var custom_allocator_state = CountingAllocator.init(napi.safePageAllocator());
 pub const napi_allocator = custom_allocator_state.allocator();
 
 pub fn allocator_kind() []const u8 {

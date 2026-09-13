@@ -306,6 +306,7 @@ The wrapper stores a type tag, optional `size_hint`, and a finalizer. `dropWrapp
 
 ```zig
 napi.globalAllocator()
+napi.safePageAllocator()
 napi.setOperationAllocator(allocator)
 napi.resetOperationAllocator()
 ```
@@ -318,3 +319,22 @@ for scoped tests; applications should prefer a thread-safe root `napi_allocator`
 Long-lived resources retain the allocator that created them. An allocator and its
 backing state must outlive every allocation created through it, including async
 tasks and JavaScript finalizers.
+
+Every thread of an addon reaches its allocator - a worker runs `Execute` while
+the JavaScript thread converts arguments - so the allocator has to be thread
+safe. `std.heap.page_allocator` is not, on WebAssembly: there it is the break
+allocator, whose free lists live in one unsynchronized global, and emnapi runs
+`napi_async_work` on real worker threads while Zig still reports the target as
+single threaded. Concurrent use hands the same block to two threads and
+corrupts the free list (observed as wrong data and as a trap inside a later
+free). Use `napi.safePageAllocator()` as the backing of a custom allocator:
+
+```zig
+var counter = CountingAllocator.init(napi.safePageAllocator());
+pub const napi_allocator = counter.allocator();
+```
+
+On native targets it *is* `std.heap.page_allocator` (no lock, no wrapper). On
+WebAssembly it is the same allocator behind one module-global lock, which every
+user of that shared state has to take - a lock of your own would not be the same
+lock. The default allocator already uses it.

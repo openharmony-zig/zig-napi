@@ -60,7 +60,10 @@ const CountingAllocator = struct {
     }
 };
 
-var counter = CountingAllocator.init(std.heap.page_allocator);
+// Safe backing: this addon runs worker threads through emnapi, and the raw
+// page allocator keeps one unsynchronized global for every thread of the
+// WebAssembly instance.
+var counter = CountingAllocator.init(napi.safePageAllocator());
 pub const napi_allocator = counter.allocator();
 
 pub fn activeBytes() isize {

@@ -101,6 +101,23 @@ pub fn globalAllocator() std.mem.Allocator {
     return global_allocator.globalAllocator();
 }
 
+/// The page allocator of this target, safe to call from every thread.
+///
+/// Native targets get `std.heap.page_allocator` itself (no lock, no wrapper).
+/// WebAssembly gets the same allocator behind one module-global lock, because
+/// emnapi runs native work on real threads while Zig reports the target as
+/// single threaded - and the WebAssembly page allocator keeps its free lists in
+/// one unsynchronized global. Use it as the backing of a custom
+/// `napi_allocator`:
+///
+/// ```zig
+/// var counter = CountingAllocator.init(napi.safePageAllocator());
+/// pub const napi_allocator = counter.allocator();
+/// ```
+pub fn safePageAllocator() std.mem.Allocator {
+    return global_allocator.safePageAllocator();
+}
+
 /// Explicitly owned native value.
 ///
 /// Conversion results that were allocated natively (for example by

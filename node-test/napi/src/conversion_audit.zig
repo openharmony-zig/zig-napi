@@ -16,12 +16,15 @@ const counting = @import("counting");
 /// JavaScript tests are native-only for the same reason.
 const use_wasm_async_work = builtin.cpu.arch == .wasm32 and builtin.os.tag == .wasi;
 
-var counter = counting.CountingAllocator.init(std.heap.page_allocator);
+// Safe backing: under emnapi every thread of the WebAssembly instance shares
+// one unsynchronized page allocator global, so a counting allocator takes its
+// pages from the module's safe page allocator.
+var counter = counting.CountingAllocator.init(napi.safePageAllocator());
 pub const napi_allocator = counter.allocator();
 
 /// Second, independent accounting allocator used by the allocator-provenance
 /// tests. It is only ever reached through an explicit override.
-var alternate_counter = counting.CountingAllocator.init(std.heap.page_allocator);
+var alternate_counter = counting.CountingAllocator.init(napi.safePageAllocator());
 
 fn alternateAllocator() std.mem.Allocator {
     return alternate_counter.allocator();

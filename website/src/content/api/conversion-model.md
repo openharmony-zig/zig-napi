@@ -94,6 +94,14 @@ Conversions that allocate Zig memory use `napi.globalAllocator()`. String, array
 
 For addon-wide allocator control, export `pub const napi_allocator` from the addon root. For narrow tests or scoped operations, use `setOperationAllocator` and `resetOperationAllocator`.
 
+A root allocator is reached from every thread of the addon: a worker executes
+`Execute` while the JavaScript thread converts arguments. On WebAssembly
+`std.heap.page_allocator` is the break allocator, whose free lists are one
+unsynchronized global that emnapi's worker threads share with the JavaScript
+thread; a custom allocator (a counting wrapper, for example) must therefore take
+its pages from `napi.safePageAllocator()`, which is that allocator behind one
+module-global lock (and is `std.heap.page_allocator` itself on native targets).
+
 Converted arguments are call-scoped owned copies. Plain return values are
 borrowed and are not freed; return native heap allocations in `napi.Owned(T)`.
 Async captures clone native inputs and dispose owned results explicitly. A custom
