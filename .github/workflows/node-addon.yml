@@ -154,9 +154,38 @@ jobs:
 
       # Several producers share one linear memory and allocate through the
       # module's exported malloc/free from different worker instances, so this
-      # is the regression gate for the serialized allocator.
-      - name: WASI concurrent producer acceptance (both flavors)
+      # is the regression gate for the serialized allocator. It also drives the
+      # raw C allocator edges (overflow, class-limit requests, alignments) that
+      # have to return null instead of trapping.
+      - name: WASI concurrent producer and allocator acceptance (both flavors)
         run: node --test --test-timeout=300000 node-test/wasm/concurrency.test.cjs
+
+      # The allocator's checks behave differently per optimization mode: Debug
+      # and ReleaseSafe have the checked arithmetic and the header canary,
+      # ReleaseFast has neither. Build both and run the same acceptance.
+      - name: Build optimized WASI artifacts (ReleaseSafe and ReleaseFast)
+        run: |
+          for mode in ReleaseSafe ReleaseFast; do
+            dir="zig-out/opt-$(echo "$mode" | tr 'A-Z' 'a-z' | sed 's/releasesafe/release-safe/;s/releasefast/release-fast/')"
+            mkdir -p "$dir"
+            cd node-test
+            zig build -Doptimize="$mode" -Dtarget=wasm32-wasi -Dcpu=baseline+atomics+bulk_memory+mutable_globals --summary all
+            zig build -Doptimize="$mode" -Dtarget=wasm32-wasi --summary all
+            cp async_audit.wasm32-wasi.wasm audit.wasm32-wasi.wasm example.wasm32-wasi.wasm "$OLDPWD/$dir/"
+            cp async_audit.wasm32-wasip1.wasm audit.wasm32-wasip1.wasm example.wasm32-wasip1.wasm "$OLDPWD/$dir/"
+            cd ..
+          done
+          # Restore the default (Debug) artifacts for the steps that follow.
+          cd node-test
+          zig build -Dtarget=wasm32-wasi -Dcpu=baseline+atomics+bulk_memory+mutable_globals --summary all
+          zig build -Dtarget=wasm32-wasi --summary all
+
+      - name: WASI allocator acceptance in ReleaseSafe and ReleaseFast
+        run: |
+          for dir in zig-out/opt-release-safe zig-out/opt-release-fast; do
+            node --test --test-timeout=300000 node-test/wasm/concurrency.test.cjs --artifact-root="$PWD/$dir"
+            node --test --test-timeout=300000 node-test/wasm/abi.test.cjs --artifact-root="$PWD/$dir"
+          done
 
       # Runs every test in the CLI package's test directory: the real npm-pack
       # smoke test today, plus generated-loader unit tests as they land there.

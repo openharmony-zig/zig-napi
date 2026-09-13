@@ -219,21 +219,31 @@ wasiTest("the deferred settlement keeps a primitive thrown identity", (t) => {
 
 // Concurrent tasks that each produce progress events are the one case the
 // current emnapi 2 composition does not survive on the worker flavor: the
-// JavaScript thread-safe-function plugin allocates its queue nodes with the
-// module's exported `malloc` from *every* worker realm, and that allocator is
-// not thread safe (see CONTRACT-async.md, "ABI composition blockers"). It is
-// asserted on the threadless flavor, where the host owns the only realm, and
-// reported - not hidden - on the worker flavor.
-wasiTest("concurrent progress is ordered on the flavor that can run it", (t) => {
-  const threadless = flavors.filter((flavor) => !flavor.threaded);
-  if (threadless.length === 0) {
-    t.pass("no threadless artifact in this run");
-    return;
-  }
-  for (const flavor of threadless) {
-    const outcome = runScenario("concurrent_progress", flavor, 60000);
-    t.is(outcome.status, 0, `threadless concurrent progress must not crash: ${outcome.stderr.trim().slice(-400)}`);
-    t.true(outcome.payload.ordered, "every task must deliver its events in order");
-    t.is(outcome.payload.pending, 0, "every settlement must be delivered");
+// The JavaScript thread-safe-function plugin allocates its queue nodes with the
+// module's exported `malloc` from *every* worker realm. That allocator is
+// serialized now (`src/sys/emnapi_alloc.zig`, CONTRACT-abi.md), so concurrent
+// producers must stay ordered on the worker flavor as well: this test used to
+// run on the threadless flavor only and let the other flavor pass silently,
+// which hid the shared-heap corruption entirely.
+wasiTest("concurrent progress is ordered on both flavors", (t) => {
+  t.deepEqual(
+    flavors.map((flavor) => flavor.file).sort(),
+    ["async_audit.wasm32-wasi.wasm", "async_audit.wasm32-wasip1.wasm"],
+    "both flavors must be built; a missing artifact is a failure, not a skip",
+  );
+  for (const flavor of flavors) {
+    // Repeated: heap corruption from concurrent producers is timing dependent,
+    // so one clean round is not evidence.
+    for (let round = 1; round <= 3; round += 1) {
+      const label = `${flavor.file} round ${round}`;
+      const outcome = runScenario("concurrent_progress", flavor, 60000);
+      t.is(
+        outcome.status,
+        0,
+        `${label}: concurrent progress must not crash: ${outcome.stderr.trim().slice(-400)}`,
+      );
+      t.true(outcome.payload.ordered, `${label}: every task must deliver its events in order`);
+      t.is(outcome.payload.pending, 0, `${label}: every settlement must be delivered`);
+    }
   }
 });

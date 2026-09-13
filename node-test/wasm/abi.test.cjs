@@ -298,6 +298,11 @@ async function oomChildMain() {
   const memoryImport = readMemoryImport(fs.readFileSync(artifact));
   assert.ok(memoryImport.max < 4096, "the OOM artifact has a small maximum");
 
+  const smallMemory = new WebAssembly.Memory({
+    initial: memoryImport.min + 8,
+    maximum: memoryImport.max,
+    shared: true,
+  });
   const { instance, napiModule } = instantiateNapiModuleSync(fs.readFileSync(artifact), {
     context: createContext(),
     wasi: new WASI({ version: "preview1", env: process.env }),
@@ -310,11 +315,7 @@ async function oomChildMain() {
         ...importObject.env,
         ...importObject.napi,
         ...importObject.emnapi,
-        memory: new WebAssembly.Memory({
-          initial: memoryImport.min + 8,
-          maximum: memoryImport.max,
-          shared: true,
-        }),
+        memory: smallMemory,
       };
       return importObject;
     },
@@ -340,6 +341,30 @@ async function oomChildMain() {
 
   // The call itself may throw while the heap is exhausted (the addon cannot
   // even allocate the error object); what matters is that it does not hang.
+  // Requests at and just below the allocator's class limit must fail through
+  // the C ABI without the module ever asking the host for a gigabyte: this
+  // artifact's memory maxes out far below that, so `@wasmMemoryGrow` refuses
+  // immediately and the call returns null.
+  const GIB = 1 << 30;
+  const pagesBefore = smallMemory.buffer.byteLength / 65536;
+  for (const size of [GIB - 64 * 1024, GIB - 64 * 1024 - 16, GIB - 128 * 1024]) {
+    assert.strictEqual(
+      instance.exports.malloc(size),
+      0,
+      `malloc(${size}) just below the class limit must fail cleanly on a small heap`,
+    );
+  }
+  assert.strictEqual(
+    instance.exports.aligned_alloc(1 << 20, GIB - 128 * 1024),
+    0,
+    "aligned_alloc below the class limit must fail cleanly on a small heap",
+  );
+  assert.ok(
+    (smallMemory.buffer.byteLength / 65536) - pagesBefore < 64,
+    "a refused request must not grow the linear memory by its full size",
+  );
+  console.log("# class-limit requests fail cleanly on a small heap");
+
   const outcome = await settlesWithin(
     () => napiModule.exports.asyncThreadValue(41),
     30000,

@@ -135,8 +135,186 @@ async function childMain() {
     ? (count, listener) => addon.asyncThrowingEvents(count, listener)
     : (count, listener) => addon.asyncThrowingEventsSingle(count, listener);
 
-  const describe = (error) =>
-    error && error.stack ? error.stack.split("\n")[0] : String(error);
+  /// Raw allocator edge cases, straight against the exported C entry points.
+  /// Every one of these must report failure through its return value instead of
+  /// trapping, in Debug/ReleaseSafe (checked arithmetic, header asserts) and in
+  /// ReleaseFast (no checks at all) alike.
+  function assertAllocatorEdges(scope) {
+    const { malloc, free, calloc, realloc, aligned_alloc, posix_memalign, valloc, memalign } =
+      instance.exports;
+    const U32_MAX = 0xffffffff;
+
+    // Overflowing size requests: null, not a trap, and errno stays NOMEM.
+    assert.strictEqual(malloc(U32_MAX), 0, `${scope}: malloc(UINT32_MAX) must return null`);
+    assert.strictEqual(
+      calloc(U32_MAX, U32_MAX),
+      0,
+      `${scope}: calloc multiplication overflow must return null`,
+    );
+    assert.strictEqual(
+      calloc(U32_MAX, 2),
+      0,
+      `${scope}: calloc with an overflowing product must return null`,
+    );
+
+    // Requests near the allocator's big-class limit. `BrkAllocator` indexes a
+    // 15 entry table with `log2(pow2_pages)`, so anything that needs more than
+    // 2^14 pages (1 GiB) reads past it; the facade has to reject those before
+    // the allocator sees them. These return null immediately — the block they
+    // ask for is never attempted — so they are safe to run against a normal
+    // artifact.
+    const GIB = 1 << 30;
+    for (const size of [GIB, GIB - 4, GIB - 8, GIB - 4096, GIB + 1, 2 * GIB, U32_MAX - 16]) {
+      assert.strictEqual(
+        malloc(size),
+        0,
+        `${scope}: malloc(${size}) near the class limit must return null, not trap`,
+      );
+    }
+    assert.strictEqual(
+      realloc(malloc(64), GIB),
+      0,
+      `${scope}: realloc to the class limit must return null, not trap`,
+    );
+    assert.strictEqual(
+      calloc(1, GIB),
+      0,
+      `${scope}: calloc at the class limit must return null, not trap`,
+    );
+    // The alignment is part of the same rounding, so an alignment past the class
+    // limit is rejected for any size, including zero.
+    for (const alignment of [GIB + 1, 2 * GIB]) {
+      assert.strictEqual(
+        aligned_alloc(alignment, 0),
+        0,
+        `${scope}: aligned_alloc(${alignment}, 0) must return null, not trap`,
+      );
+      assert.strictEqual(
+        memalign(alignment, 0),
+        0,
+        `${scope}: memalign(${alignment}, 0) must return null, not trap`,
+      );
+    }
+    assert.strictEqual(
+      aligned_alloc(GIB, 16),
+      0,
+      `${scope}: aligned_alloc(1 GiB, 16) must return null instead of growing a GiB`,
+    );
+
+    // A live block whose payload must survive a failed realloc.
+    const payload = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]);
+    const block = malloc(payload.length);
+    assert.notStrictEqual(block, 0, `${scope}: a small malloc must succeed`);
+    new Uint8Array(memory.buffer, block >>> 0, payload.length).set(payload);
+    assert.strictEqual(
+      realloc(block, U32_MAX),
+      0,
+      `${scope}: realloc to UINT32_MAX must return null`,
+    );
+    assert.strictEqual(
+      realloc(block, U32_MAX - 8),
+      0,
+      `${scope}: realloc just below the limit must return null, not wrap`,
+    );
+    assert.deepStrictEqual(
+      Array.from(new Uint8Array(memory.buffer, block >>> 0, payload.length)),
+      Array.from(payload),
+      `${scope}: the original block keeps its payload after a failed realloc`,
+    );
+    // The block is still live and usable, so it can be grown normally.
+    const grown = realloc(block, 4096);
+    assert.notStrictEqual(grown, 0, `${scope}: the block is still valid`);
+    assert.deepStrictEqual(
+      Array.from(new Uint8Array(memory.buffer, grown >>> 0, payload.length)),
+      Array.from(payload),
+      `${scope}: realloc preserved the payload`,
+    );
+    free(grown);
+
+    // Alignments `Alignment` cannot represent must be rejected, not asserted.
+    for (const alignment of [0, 3, 6, 1000]) {
+      assert.strictEqual(
+        aligned_alloc(alignment, 16),
+        0,
+        `${scope}: aligned_alloc(${alignment}) must return null`,
+      );
+      assert.strictEqual(
+        memalign(alignment, 16),
+        0,
+        `${scope}: memalign(${alignment}) must return null`,
+      );
+    }
+    // A representable but absurd alignment is out of memory, not a trap.
+    assert.strictEqual(
+      aligned_alloc(1 << 30, 16),
+      0,
+      `${scope}: aligned_alloc(1<<30) must return null instead of trapping`,
+    );
+
+    // posix_memalign: EINVAL (22) for a non power of two or a too small
+    // alignment, and the caller's pointer must not be touched on failure.
+    const outPointer = malloc(8);
+    assert.notStrictEqual(outPointer, 0, `${scope}: scratch block for the out parameter`);
+    // A fresh view per access: the views detach when the heap grows, which the
+    // workloads above are allowed to do.
+    const readOut = () =>
+      new DataView(memory.buffer, outPointer >>> 0, 8).getUint32(0, true);
+    const writeOut = (value) =>
+      new DataView(memory.buffer, outPointer >>> 0, 8).setUint32(0, value, true);
+    // wasi-libc numbers errno in the WASI space: EINVAL is 28 there, not the 22
+    // Linux/musl use, and the C contract is about the symbol, not the number.
+    const WASI_EINVAL = 28;
+    // Invalid: not a power of two, or below `sizeof(void*)` (4 on wasm32).
+    for (const alignment of [1, 2, 3, 6, 24, 1000]) {
+      writeOut(0xdeadbeef);
+      const status = posix_memalign(outPointer >>> 0, alignment, 16);
+      assert.strictEqual(
+        status,
+        WASI_EINVAL,
+        `${scope}: posix_memalign(${alignment}) must be EINVAL (${WASI_EINVAL})`,
+      );
+      assert.strictEqual(
+        readOut(),
+        0xdeadbeef,
+        `${scope}: posix_memalign must not write the out parameter on failure`,
+      );
+    }
+    // `sizeof(void*)` is 4 on wasm32, so alignment 4 *is* a valid
+    // `posix_memalign` request (it is what the ABI's minimum resolves to) and
+    // must succeed rather than be rejected with the invalid ones above.
+    writeOut(0xdeadbeef);
+    assert.strictEqual(
+      posix_memalign(outPointer >>> 0, 4, 16),
+      0,
+      `${scope}: posix_memalign(4, 16) is valid on wasm32 (sizeof(void*) == 4)`,
+    );
+    const aligned4 = readOut();
+    assert.notStrictEqual(aligned4, 0xdeadbeef, `${scope}: the out parameter is written`);
+    assert.notStrictEqual(aligned4, 0, `${scope}: posix_memalign(4) returned a block`);
+    assert.strictEqual(aligned4 % 4, 0, `${scope}: posix_memalign(4) honours the alignment`);
+    free(aligned4);
+
+    const okStatus = posix_memalign(outPointer >>> 0, 32, 16);
+    assert.strictEqual(okStatus, 0, `${scope}: a valid posix_memalign succeeds`);
+    const allocated = readOut();
+    assert.notStrictEqual(allocated, 0xdeadbeef, `${scope}: the out parameter is written`);
+    assert.notStrictEqual(allocated, 0, `${scope}: posix_memalign returned a block`);
+    assert.strictEqual(allocated % 32, 0, `${scope}: posix_memalign honours the alignment`);
+    free(allocated);
+    free(outPointer);
+
+    // valloc is page aligned (64 KiB on wasm), not 16 bytes.
+    const pageAligned = valloc(64);
+    assert.notStrictEqual(pageAligned, 0, `${scope}: valloc must succeed`);
+    assert.strictEqual(
+      (pageAligned >>> 0) % 65536,
+      0,
+      `${scope}: valloc must be page aligned`,
+    );
+    free(pageAligned);
+  }
+
+  assertAllocatorEdges(flavorName);
 
   // Warm up the pool so the first measured round is not paying for start-up.
   await produce(8, () => {});
@@ -295,24 +473,28 @@ async function childMain() {
     `allocation count went backwards: ${curve[1].allocations} -> ${curve[2].allocations}`,
   );
 
-  // 8. The environment still works after all of that.
+  // 8. The environment still works after all of that. Both flavors link the
+  //    hardened allocator; only the threaded one compiles the lock in, so only
+  //    it counts entries.
   assert.strictEqual(await produce(4, () => {}), 4, "events still flow after the stress");
+  for (const name of ["__emnapi_alloc_entries", "__emnapi_alloc_spins"]) {
+    assert.strictEqual(
+      typeof instance.exports[name],
+      "function",
+      `${name} must be linked in both flavors`,
+    );
+  }
   if (flavor.sharedMemory) {
     assert.strictEqual(await addon.asyncThreadValue(41), 42, "worker tasks still run");
-    for (const name of ["__emnapi_alloc_entries", "__emnapi_alloc_spins"]) {
-      assert.strictEqual(
-        typeof instance.exports[name],
-        "function",
-        `${name} is only linked into the threaded flavor`,
-      );
-    }
+    assert.ok(
+      instance.exports.__emnapi_alloc_entries() > 0,
+      "the threaded flavor must count its locked entries",
+    );
   } else {
-    // The single-threaded flavor keeps libc's allocator, so the serialized
-    // replacements must not be linked there at all.
     assert.strictEqual(
-      typeof instance.exports.__emnapi_alloc_entries,
-      "undefined",
-      "the single-threaded flavor must not link the locked allocator",
+      instance.exports.__emnapi_alloc_entries(),
+      0,
+      "the single-threaded flavor compiles the lock away, so nothing is counted",
     );
   }
 
