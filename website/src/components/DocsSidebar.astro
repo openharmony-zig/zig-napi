@@ -1,0 +1,52 @@
+---
+import type { MarkdownHeading } from "astro";
+
+import { apiDocGroups } from "../data/api-docs";
+import { apiHref } from "../lib/site-paths";
+
+interface Props {
+  activeId: string;
+  /** Depth 2-3 headings of the current document. */
+  headings: MarkdownHeading[];
+}
+
+const { activeId, headings } = Astro.props;
+---
+
+<aside class="docs-sidebar">
+  <nav class="docs-nav" aria-label="API sections">
+    {apiDocGroups.map((group) => (
+      <div class="docs-nav-group">
+        <span class="docs-nav-title">{group.title}</span>
+        <ul class="docs-nav-list">
+          {group.docs.map((doc) => (
+            <li>
+              <a
+                class="docs-nav-link"
+                href={apiHref(doc.id)}
+                aria-current={doc.id === activeId ? "page" : undefined}
+              >
+                {doc.title}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </div>
+    ))}
+  </nav>
+
+  {headings.length > 0 && (
+    <nav class="docs-toc" aria-label="On this page">
+      <p class="docs-toc-title">On this page</p>
+      <ul class="docs-toc-list">
+        {headings.map((heading) => (
+          <li>
+            <a class={`docs-toc-link depth-${heading.depth}`} href={`#${heading.slug}`}>
+              {heading.text}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </nav>
+  )}
+</aside>

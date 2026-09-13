@@ -1,0 +1,25 @@
+---
+import { SITE } from "../consts";
+import { withBase } from "../lib/site-paths";
+---
+
+<footer class="foot">
+  <div class="mark">
+    <img src={withBase("logo/icon-256.png")} alt="" width="56" height="56" />
+    <span class="wm-name">{SITE.name}</span>
+    <span class="wm-line">{SITE.category}</span>
+  </div>
+  <div class="colophon">
+    <div class="links">
+      <a href={SITE.repository} target="_blank" rel="noreferrer">
+        GitHub
+      </a>{" "}
+      &middot;
+      <a href={withBase("api/")}>API Reference</a> &middot;
+      <a href={`${SITE.repository}/blob/main/LICENSE`} target="_blank" rel="noreferrer">
+        {SITE.license} License
+      </a>
+    </div>
+    <p class="ethos">Inspired by napi-rs and node-addon-api.</p>
+  </div>
+</footer>

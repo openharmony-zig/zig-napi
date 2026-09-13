@@ -1,0 +1,39 @@
+---
+import SiteFooter from "../components/SiteFooter.astro";
+import SiteHeader from "../components/SiteHeader.astro";
+import { SITE } from "../consts";
+import { withBase } from "../lib/site-paths";
+import BaseLayout from "../layouts/BaseLayout.astro";
+
+// A not-found page has no canonical URL of its own: point at the site root
+// and keep it out of search indexes.
+const canonical = new URL(withBase(), Astro.site ?? new URL(SITE.defaultOrigin)).href;
+---
+
+<BaseLayout
+  title={`Page not found · ${SITE.name}`}
+  description={`The requested page does not exist on the ${SITE.name} documentation site.`}
+  canonical={canonical}
+  noindex
+>
+  <SiteHeader section="home" />
+  <main id="main" tabindex="-1">
+    <span id="top"></span>
+    <div class="notfound">
+      <h1>Page not found</h1>
+      <p>
+        That address does not exist on this site. The API reference and the landing page are the two
+        entry points everything else hangs off.
+      </p>
+      <div class="hero-cta">
+        <a class="btn-ghost" href={withBase()}>
+          Home
+        </a>
+        <a class="btn-primary" href={withBase("api/")}>
+          API Reference
+        </a>
+      </div>
+    </div>
+  </main>
+  <SiteFooter />
+</BaseLayout>

@@ -1,0 +1,23 @@
+---
+import { getEntry, render } from "astro:content";
+
+import { getApiDoc } from "../../../data/api-docs";
+import { withBase } from "../../../lib/site-paths";
+import DocsLayout from "../../../layouts/DocsLayout.astro";
+
+/**
+ * Alias kept for links that were published as `/api/overview/` before the
+ * migration. The document itself lives at `/api/`, which is the canonical URL.
+ */
+const entry = await getEntry("api", "overview");
+if (!entry) throw new Error("Missing API overview document");
+
+const doc = getApiDoc("overview");
+const { Content, headings } = await render(entry);
+const site = Astro.site ?? new URL("https://openharmony-zig.github.io");
+const canonical = new URL(withBase("api/"), site).href;
+---
+
+<DocsLayout doc={doc} title={entry.data.title} headings={headings} canonical={canonical}>
+  <Content />
+</DocsLayout>

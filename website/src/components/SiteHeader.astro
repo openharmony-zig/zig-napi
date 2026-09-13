@@ -1,0 +1,28 @@
+---
+import { SITE } from "../consts";
+import { withBase } from "../lib/site-paths";
+
+interface Props {
+  /** Highlights the section the reader is currently inside. */
+  section?: "home" | "api";
+}
+
+const { section = "home" } = Astro.props;
+---
+
+<header class="site-header">
+  <div class="bar">
+    <a class="brand" href={withBase()}>
+      <img src={withBase("logo/icon-256.png")} alt="" width="28" height="28" />
+      <span>{SITE.name}</span>
+    </a>
+    <nav class="site-nav" aria-label="Primary navigation">
+      <a href={withBase("api/")} class={section === "api" ? "is-section" : undefined}>
+        API
+      </a>
+      <a href={SITE.repository} target="_blank" rel="noreferrer">
+        GitHub
+      </a>
+    </nav>
+  </div>
+</header>

@@ -1,0 +1,30 @@
+---
+import type { ApiDocMeta } from "../data/api-docs";
+import { apiHref } from "../lib/site-paths";
+
+interface Props {
+  previous?: ApiDocMeta;
+  next?: ApiDocMeta;
+}
+
+const { previous, next } = Astro.props;
+---
+
+<nav class="doc-pager" aria-label="API document navigation">
+  {previous ? (
+    <a class="doc-pager-link" href={apiHref(previous.id)}>
+      <span class="doc-pager-eyebrow">Previous</span>
+      <span class="doc-pager-title">{previous.title}</span>
+    </a>
+  ) : (
+    <span />
+  )}
+  {next ? (
+    <a class="doc-pager-link next" href={apiHref(next.id)}>
+      <span class="doc-pager-eyebrow">Next</span>
+      <span class="doc-pager-title">{next.title}</span>
+    </a>
+  ) : (
+    <span />
+  )}
+</nav>

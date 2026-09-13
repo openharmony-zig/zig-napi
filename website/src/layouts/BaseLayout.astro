@@ -1,0 +1,44 @@
+---
+import { LOCALE, SITE } from "../consts";
+import { withBase } from "../lib/site-paths";
+import "../styles/kami.css";
+
+interface Props {
+  /** Document title, without the site suffix. */
+  title: string;
+  description: string;
+  /** Overrides the canonical URL derived from the current route. */
+  canonical?: string;
+  noindex?: boolean;
+}
+
+const { title, description, canonical, noindex = false } = Astro.props;
+const site = Astro.site ?? new URL(SITE.defaultOrigin);
+const canonicalUrl = canonical ?? new URL(Astro.url.pathname, site).href;
+---
+
+<!doctype html>
+<html lang={LOCALE}>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonicalUrl} />
+    {noindex && <meta name="robots" content="noindex" />}
+    <meta name="generator" content={Astro.generator} />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content={SITE.name} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonicalUrl} />
+    <link rel="icon" type="image/png" sizes="256x256" href={withBase("logo/icon-256.png")} />
+    <link rel="apple-touch-icon" sizes="512x512" href={withBase("logo/icon-512.png")} />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">
+      Skip to content
+    </a>
+    <slot />
+  </body>
+</html>

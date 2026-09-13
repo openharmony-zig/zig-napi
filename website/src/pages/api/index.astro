@@ -1,0 +1,16 @@
+---
+import { getEntry, render } from "astro:content";
+
+import { getApiDoc } from "../../data/api-docs";
+import DocsLayout from "../../layouts/DocsLayout.astro";
+
+const entry = await getEntry("api", "overview");
+if (!entry) throw new Error("Missing API overview document");
+
+const doc = getApiDoc("overview");
+const { Content, headings } = await render(entry);
+---
+
+<DocsLayout doc={doc} title={entry.data.title} headings={headings}>
+  <Content />
+</DocsLayout>
