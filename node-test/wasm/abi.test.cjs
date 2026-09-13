@@ -2,8 +2,13 @@
 
 // WASI ABI acceptance for the built addon artifacts.
 //
-// Run with:  node --test node-test/wasm/abi.test.cjs
-//            node --test --test-timeout=300000 node-test/wasm/abi.test.cjs
+// Run with:  ZIG_NAPI_WASM_ARTIFACT_ROOT=<dir> \
+//              node --test --test-timeout=300000 node-test/wasm/abi.test.cjs
+//
+// Use the environment variable, not a flag: `node --test` does not forward an
+// extra `--artifact-root=` argument to the test file, so the run would silently
+// fall back to the default root. The flag exists for `node <file>` runs where
+// the script is the process entry point.
 //
 // Artifact root (where `<module>.<platformArchABI>.wasm` lives) is
 // `--artifact-root=<dir>` / `ZIG_NAPI_WASM_ARTIFACT_ROOT`, defaulting to

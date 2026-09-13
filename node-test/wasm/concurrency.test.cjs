@@ -2,7 +2,13 @@
 
 // Concurrency acceptance for the WASI addon artifacts.
 //
-//   node --test --test-timeout=300000 node-test/wasm/concurrency.test.cjs
+//   ZIG_NAPI_WASM_ARTIFACT_ROOT=<dir> \
+//     node --test --test-timeout=300000 node-test/wasm/concurrency.test.cjs
+//
+// Use the environment variable, not a flag: `node --test` does not forward an
+// extra `--artifact-root=` argument to the test file, so the run would silently
+// fall back to the default root. The flag exists for `node <file>` runs where
+// the script is the process entry point.
 //
 // The threaded flavor runs addon tasks on several JavaScript worker threads, and
 // those threads share one linear memory: the emnapi plugins allocate work
@@ -169,11 +175,16 @@ async function childMain() {
         `${scope}: malloc(${size}) near the class limit must return null, not trap`,
       );
     }
+    const reallocSource = malloc(64);
+    assert.notStrictEqual(reallocSource, 0, `${scope}: the realloc source block`);
     assert.strictEqual(
-      realloc(malloc(64), GIB),
+      realloc(reallocSource, GIB),
       0,
       `${scope}: realloc to the class limit must return null, not trap`,
     );
+    // The failed realloc keeps the old block alive, so release it here: the
+    // acceptance run must not leak a block on purpose.
+    free(reallocSource);
     assert.strictEqual(
       calloc(1, GIB),
       0,

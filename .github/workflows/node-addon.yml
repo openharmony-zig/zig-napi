@@ -180,11 +180,14 @@ jobs:
           zig build -Dtarget=wasm32-wasi -Dcpu=baseline+atomics+bulk_memory+mutable_globals --summary all
           zig build -Dtarget=wasm32-wasi --summary all
 
+      # The artifact root goes through the environment: `node --test` does not
+      # forward an extra `--artifact-root=` flag to the test file, so passing it
+      # there would silently run against the default (Debug) artifacts.
       - name: WASI allocator acceptance in ReleaseSafe and ReleaseFast
         run: |
           for dir in zig-out/opt-release-safe zig-out/opt-release-fast; do
-            node --test --test-timeout=300000 node-test/wasm/concurrency.test.cjs --artifact-root="$PWD/$dir"
-            node --test --test-timeout=300000 node-test/wasm/abi.test.cjs --artifact-root="$PWD/$dir"
+            ZIG_NAPI_WASM_ARTIFACT_ROOT="$PWD/$dir" node --test --test-timeout=300000 node-test/wasm/concurrency.test.cjs
+            ZIG_NAPI_WASM_ARTIFACT_ROOT="$PWD/$dir" node --test --test-timeout=300000 node-test/wasm/abi.test.cjs
           done
 
       # Runs every test in the CLI package's test directory: the real npm-pack
