@@ -554,6 +554,14 @@ test("napi.wasm configuration is validated before anything is generated", () => 
       { wasm: { initialMemory: 2048, maximumMemory: 1024 } },
       /must not exceed napi.wasm.maximumMemory/,
     ],
+    [
+      { wasm: { initialMemory: 128 } },
+      /needs at least 256 pages \(16777216 bytes\) because the Zig linker reserves a 16 MiB stack/,
+    ],
+    [
+      { wasm: { initialMemory: 2048, maximumMemory: 2048 } },
+      /leaves no room to grow; the Zig\/wasi-libc allocator grows linear memory/,
+    ],
     [{ wasm: { browser: { fs: "yes" } } }, /browser.fs must be a boolean/],
     [{ wasm: "wasm32" }, /napi.wasm must be an object/],
   ];
@@ -1232,7 +1240,10 @@ setTimeout(() => {
     ["-2", 4, true],
     ["Infinity", 4, true],
     ["1e9", 4, true],
-    ["1024", 1024, false],
+    ["64", 64, false],
+    // Each pooled worker instantiates the addon with its own memory, so the
+    // pool is capped instead of echoing a four-digit threadpool size.
+    ["1024", 4, true],
   ];
   for (const [value, expected, warns] of cases) {
     const result = spawnNode(probe, {

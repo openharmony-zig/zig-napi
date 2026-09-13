@@ -9,10 +9,9 @@
  * install (emnapi / @emnapi/core / @emnapi/runtime 2.0.0-alpha.5 and
  * @napi-rs/wasm-runtime 1.2.4).
  *
- * The build half needs the ABI work that links the emnapi v2 archives; the
- * assertions about the generated files do not. When the checkout does not have
- * the archive integration yet the test reports that precondition instead of
- * pretending to pass.
+ * The build half needs the ABI work that links the emnapi v2 archives
+ * (`src/build/napi-build.zig`): without it there is nothing to validate here,
+ * so the missing integration fails the test instead of skipping it.
  */
 
 const assert = require("node:assert/strict");
@@ -20,6 +19,7 @@ const childProcess = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { pathToFileURL } = require("node:url");
 const { after, test } = require("node:test");
 
 const packageDir = path.resolve(__dirname, "..");
@@ -56,13 +56,26 @@ function abiArchiveIntegrated() {
   }
 }
 
-/** Runtime packages of the repository install, for the scaffold's node_modules. */
+/**
+ * Runtime packages for the scaffold's `node_modules`. The `node-test` install
+ * is the one that carries emnapi / @emnapi/core / @emnapi/runtime 2.0.0-alpha.5
+ * with @napi-rs/wasm-runtime 1.2.4; the workspace root still links the 1.x
+ * versions, which could not load the generated loaders at all.
+ */
 function runtimePackagesRoot() {
   for (const candidate of [
     path.join(workspaceRoot, "node-test", "node_modules"),
     path.join(workspaceRoot, "node_modules"),
   ]) {
-    if (fs.existsSync(path.join(candidate, "emnapi", "lib", "wasm32-wasip1"))) {
+    if (
+      fs.existsSync(path.join(candidate, "emnapi", "lib", "wasm32-wasip1")) &&
+      fs.existsSync(path.join(candidate, "@emnapi", "core", "package.json")) &&
+      fs.existsSync(path.join(candidate, "@napi-rs", "wasm-runtime", "package.json"))
+    ) {
+      const version = JSON.parse(
+        fs.readFileSync(path.join(candidate, "@emnapi", "core", "package.json"), "utf8"),
+      ).version;
+      assert.match(version, /^2\./, `the runtime packages must be emnapi 2.x, found ${version}`);
       return candidate;
     }
   }
@@ -83,87 +96,115 @@ function extractPackedCli() {
     fs.existsSync(path.join(installed, "zig", "build.zig")),
     "the pack must bundle the Zig sources",
   );
-  // The installed package would have its dependencies next to it; linking the
-  // checkout's install keeps the test offline.
-  fs.symlinkSync(
-    path.join(workspaceRoot, "node_modules"),
-    path.join(installed, "node_modules"),
-    "dir",
+  // An installed package resolves its own dependencies from its own
+  // `node_modules`, so link the CLI package's install (which has the 3.9.1
+  // @napi-rs/cli this package depends on) rather than the workspace root.
+  const cliDependencies = path.join(packageDir, "node_modules");
+  assert.ok(
+    fs.existsSync(cliDependencies),
+    `the CLI package dependencies are not installed at ${cliDependencies}`,
   );
+  assert.ok(
+    fs.existsSync(path.join(cliDependencies, "@napi-rs", "cli", "package.json")),
+    "the CLI package must have its own @napi-rs/cli install",
+  );
+  fs.symlinkSync(cliDependencies, path.join(installed, "node_modules"), "dir");
   return path.join(installed, "bin", "zig-napi.js");
 }
 
-// Reported as a skip (not a silent pass) while the archive integration is
-// missing, and it starts running the moment that lands.
-const skipReason = abiArchiveIntegrated()
-  ? undefined
-  : "ABI archive integration pending: the checkout does not link the emnapi v2 basic archive yet";
+test("the packed CLI builds and loads both real WASI flavors", { timeout: 900_000 }, () => {
+  assert.ok(
+    abiArchiveIntegrated(),
+    "src/build/napi-build.zig does not link the emnapi v2 archive (libemnapi-basic-napi-rs.a), so a real WASI build cannot validate anything",
+  );
+  const runtimeRoot = runtimePackagesRoot();
+  assert.ok(runtimeRoot, "the repository install of emnapi 2.x / @napi-rs/wasm-runtime is missing");
 
-test(
-  "the packed CLI builds and loads a real threaded WASI addon",
-  { timeout: 900_000, skip: skipReason },
-  () => {
-    const runtimeRoot = runtimePackagesRoot();
-    assert.ok(
-      runtimeRoot,
-      "the repository install of emnapi 2.x / @napi-rs/wasm-runtime is missing",
+  const packedCli = extractPackedCli();
+  const project = path.join(scratchRoot, "packed addon");
+  run(process.execPath, [
+    packedCli,
+    "new",
+    project,
+    "--no-interactive",
+    "--no-enable-default-targets",
+    "--name",
+    "packed-addon",
+    "--addon",
+    "packed_addon",
+    "--targets",
+    "wasm32-wasip1-threads,wasm32-wasip1",
+  ]);
+  // The scaffold resolves its runtime packages like an installed project would.
+  fs.symlinkSync(runtimeRoot, path.join(project, "node_modules"), "dir");
+
+  const flavors = [
+    {
+      target: "wasm32-wasip1-threads",
+      platformArchABI: "wasm32-wasi",
+      suffix: "wasi",
+      threads: true,
+      extraFiles: ["wasi-worker.mjs", "wasi-worker-browser.mjs"],
+    },
+    {
+      target: "wasm32-wasip1",
+      platformArchABI: "wasm32-wasip1",
+      suffix: "wasip1",
+      threads: false,
+      extraFiles: ["packed_addon.wasip1-deferred.js", "packed_addon.wasip1-deferred.d.ts"],
+    },
+  ];
+  const builtWasmPaths = new Map();
+  for (const flavor of flavors) {
+    run(process.execPath, [packedCli, "build", "--cwd", project, "--target", flavor.target]);
+    const wasmPath = path.join(
+      project,
+      "zig-out",
+      "node",
+      `packed_addon.${flavor.platformArchABI}.wasm`,
     );
-
-    const packedCli = extractPackedCli();
-    const project = path.join(scratchRoot, "packed addon");
-    run(process.execPath, [
-      packedCli,
-      "new",
-      project,
-      "--no-interactive",
-      "--no-enable-default-targets",
-      "--name",
-      "packed-addon",
-      "--addon",
-      "packed_addon",
-      "--targets",
-      "wasm32-wasip1-threads",
-    ]);
-    // The scaffold resolves its runtime packages like an installed project would.
-    fs.symlinkSync(runtimeRoot, path.join(project, "node_modules"), "dir");
-
-    run(process.execPath, [
-      packedCli,
-      "build",
-      "--cwd",
-      project,
-      "--target",
-      "wasm32-wasip1-threads",
-    ]);
-
-    const wasmPath = path.join(project, "zig-out", "node", "packed_addon.wasm32-wasi.wasm");
     assert.ok(fs.existsSync(wasmPath), `${wasmPath} was not produced`);
+    builtWasmPaths.set(flavor.suffix, wasmPath);
     for (const fileName of [
-      "packed_addon.wasi.cjs",
-      "packed_addon.wasi.d.cts",
-      "packed_addon.wasi-browser.js",
-      "wasi-worker.mjs",
-      "wasi-worker-browser.mjs",
-      "browser.js",
+      `packed_addon.${flavor.suffix}.cjs`,
+      `packed_addon.${flavor.suffix}.d.cts`,
+      `packed_addon.${flavor.suffix}-browser.js`,
+      ...flavor.extraFiles,
     ]) {
       assert.ok(fs.existsSync(path.join(project, fileName)), `missing generated ${fileName}`);
     }
+  }
+  // Building one flavor must not delete the other configured flavor's files.
+  for (const flavor of flavors) {
+    assert.ok(
+      fs.existsSync(path.join(project, `packed_addon.${flavor.suffix}.cjs`)),
+      `the ${flavor.suffix} loader was removed by the other flavor's build`,
+    );
+  }
+  assert.ok(fs.existsSync(path.join(project, "browser.js")));
 
-    // The module must carry the exports the JS side drives threads and teardown
-    // through, and must not need unresolved pthread imports.
-    const inspect = [
+  // The module must carry the exports the JS side drives threads and teardown
+  // through, and must not need unresolved pthread imports.
+  const inspect = (wasmPath) =>
+    [
       'const fs = require("node:fs");',
       `const module = new WebAssembly.Module(fs.readFileSync(${JSON.stringify(wasmPath)}));`,
       "const exports = WebAssembly.Module.exports(module).map((entry) => entry.name);",
       "const imports = WebAssembly.Module.imports(module).map((entry) => entry.module + '.' + entry.name);",
       "process.stdout.write(JSON.stringify({ exports, imports }));",
     ].join("\n");
-    const inspected = JSON.parse(run(process.execPath, ["-e", inspect]).stdout);
-    for (const name of [
-      "emnapi_async_worker_create",
-      "emnapi_async_worker_init",
-      "napi_register_wasm_v1",
-    ]) {
+  for (const flavor of flavors) {
+    const inspected = JSON.parse(
+      run(process.execPath, ["-e", inspect(builtWasmPaths.get(flavor.suffix))]).stdout,
+    );
+    // The worker-pool entry points exist only where a pool can exist: a
+    // threadless build implements async work in the emnapi JS plugin on the
+    // event loop and never spawns a wasm worker.
+    const requiredExports = ["napi_register_wasm_v1", "emnapi_create_env", "emnapi_delete_env"];
+    if (flavor.threads) {
+      requiredExports.push("emnapi_async_worker_create", "emnapi_async_worker_init");
+    }
+    for (const name of requiredExports) {
       assert.ok(inspected.exports.includes(name), `the addon must export ${name}`);
     }
     assert.ok(
@@ -174,26 +215,65 @@ test(
       !inspected.imports.some((entry) => /pthread_|__wasi_thread_spawn/.test(entry)),
       `a Zig build must not leave unresolved thread imports: ${inspected.imports.join(", ")}`,
     );
+  }
 
-    // The generated loader must run the addon on the shared memory it allocates
-    // and let the process exit on its own.
+  // Each generated loader must run the addon on the memory it allocates, let
+  // the process exit on its own, and support explicit disposal followed by a
+  // fresh instance.
+  for (const flavor of flavors) {
     const load = [
-      'const addon = require("./packed_addon.wasi.cjs");',
+      `const loaderPath = "./packed_addon.${flavor.suffix}.cjs";`,
+      `const suffix = ${JSON.stringify(flavor.suffix)};`,
+      "const addon = require(loaderPath);",
       "if (addon.add(2, 3) !== 5) {",
-      '  throw new Error("add returned " + addon.add(2, 3));',
+      '  throw new Error(suffix + " add returned " + addon.add(2, 3));',
       "}",
-      'process.stdout.write("loaded");',
+      'if (!addon.hello().startsWith("hello from ")) {',
+      '  throw new Error(suffix + " hello returned " + addon.hello());',
+      "}",
+      'const dispose = addon[Symbol.for("napi.rs.wasi.dispose")];',
+      "dispose()",
+      "  .then(() => {",
+      "    delete require.cache[require.resolve(loaderPath)];",
+      "    const reloaded = require(loaderPath);",
+      "    if (reloaded.add(4, 5) !== 9) {",
+      '      throw new Error("the reinstantiated addon returned " + reloaded.add(4, 5));',
+      "    }",
+      '    return reloaded[Symbol.for("napi.rs.wasi.dispose")]();',
+      "  })",
+      '  .then(() => process.stdout.write("disposed"));',
     ].join("\n");
     const loaded = run(process.execPath, ["-e", load], { cwd: project, timeout: 120_000 });
-    assert.equal(loaded.stdout, "loaded");
+    assert.equal(loaded.stdout, "disposed", `${flavor.suffix}: ${loaded.stderr}`);
+  }
 
-    // Explicit disposal goes through the teardown handshake and still exits.
-    const dispose = [
-      'const addon = require("./packed_addon.wasi.cjs");',
-      'const dispose = addon[Symbol.for("napi.rs.wasi.dispose")];',
-      'dispose().then(() => process.stdout.write("disposed"));',
-    ].join("\n");
-    const disposed = run(process.execPath, ["-e", dispose], { cwd: project, timeout: 120_000 });
-    assert.equal(disposed.stdout, "disposed");
-  },
-);
+  // The deferred (workerd-safe) loader is generated for the threadless flavor
+  // and must instantiate a precompiled module, dispose it, and recreate it.
+  const deferred = [
+    // `-e` with --input-type=module: no require() next to top-level await.
+    'import fs from "node:fs";',
+    "const deferred = await import(" +
+      JSON.stringify(pathToFileURL(path.join(project, "packed_addon.wasip1-deferred.js")).href) +
+      ");",
+    "const bytes = fs.readFileSync(" +
+      JSON.stringify(path.join(project, "zig-out", "node", "packed_addon.wasm32-wasip1.wasm")) +
+      ");",
+    "const module = await WebAssembly.compile(bytes);",
+    "const instance = await deferred.createInstance(module);",
+    "if (instance.exports.add(1, 2) !== 3) {",
+    '  throw new Error("deferred add returned " + instance.exports.add(1, 2));',
+    "}",
+    "await instance.dispose();",
+    "const singleton = await deferred.instantiate(module);",
+    "if (singleton.add(6, 7) !== 13) {",
+    '  throw new Error("deferred singleton returned " + singleton.add(6, 7));',
+    "}",
+    "await deferred.dispose();",
+    'process.stdout.write("deferred-ok");',
+  ].join("\n");
+  const deferredResult = run(process.execPath, ["--input-type=module", "-e", deferred], {
+    cwd: project,
+    timeout: 120_000,
+  });
+  assert.equal(deferredResult.stdout, "deferred-ok", deferredResult.stderr);
+});

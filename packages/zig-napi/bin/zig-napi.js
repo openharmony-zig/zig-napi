@@ -78,7 +78,15 @@ function run(command, args, options = {}) {
     shell: false,
   });
   if (result.error) fail(result.error.message);
-  if (result.status !== 0) process.exit(result.status || 1);
+  if (result.status !== 0) {
+    // A linker failure caused by an explicitly configured memory shape is worth
+    // a hint: wasm-ld reports the number it could not satisfy, not where the
+    // number came from.
+    if (options.failureHint) {
+      console.error(`zig-napi: ${options.failureHint}`);
+    }
+    process.exit(result.status || 1);
+  }
 }
 
 function normalizePathForZig(value) {
@@ -704,6 +712,21 @@ function appendWasiMemoryBuildFlags(args, config, flavors) {
   args.push(...buildArgs);
 }
 
+/**
+ * The linker owns the lower bound of the imported memory (linked data plus the
+ * stack), so a configured `initialMemory` that is too small for the image fails
+ * inside wasm-ld. Turn that into a message that names the configuration the
+ * number came from.
+ */
+function wasiMemoryFailureHint(config, flavors) {
+  if (flavors.length === 0) return undefined;
+  const wasm = config?.wasm ?? {};
+  if (wasm.initialMemory === undefined && wasm.maximumMemory === undefined) {
+    return undefined;
+  }
+  return `the link failed while napi.wasm.initialMemory=${wasm.initialMemory ?? "default"}/${wasm.maximumMemory ?? "default"} (pages) was passed as -Dwasi-initial-memory-pages/-Dwasi-max-memory-pages; the initial memory must cover the linked image (data plus the 16 MiB default stack), so raise napi.wasm.initialMemory if wasm-ld reports the initial memory as too small`;
+}
+
 const EMNAPI_PACKAGES = ["emnapi", "@emnapi/core", "@emnapi/runtime"];
 
 /** Directory of an installed package resolved from the project, if any. */
@@ -858,7 +881,11 @@ async function commandBuild(flags, passthrough = []) {
   appendWasiMemoryBuildFlags(args, config, flavors);
   args.push(...passthrough);
   const emnapiEnv = flavors.length > 0 ? resolveWasiEmnapiEnv(cwd) : undefined;
-  run("zig", args, { cwd, env: emnapiEnv ? { ...process.env, ...emnapiEnv } : process.env });
+  run("zig", args, {
+    cwd,
+    env: emnapiEnv ? { ...process.env, ...emnapiEnv } : process.env,
+    failureHint: wasiMemoryFailureHint(config, flavors),
+  });
   await generateWasiBindingsWithConfig(cwd, flags, config, readDtsExportIdents(cwd));
 }
 

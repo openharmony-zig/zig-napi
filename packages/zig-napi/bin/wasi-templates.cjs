@@ -3,19 +3,39 @@
 /**
  * WASI flavor model and loader/worker generators for the zig-napi CLI.
  *
- * The generated files are faithful adaptations of the `@napi-rs/cli` 3.9.1
- * templates (`cli/src/api/templates/load-wasi-template.ts` and
- * `wasi-worker-template.ts`). Those modules are not exported from the
- * `@napi-rs/cli` public entry point, so the CLI keeps its own copy that is
- * pinned to the same runtime contract: emnapi 2.x contexts, the
- * `@napi-rs/wasm-runtime` plugins, and the `napi_prepare_wasm_env_cleanup` /
- * `napi_wasm_env_cleanup_pending` teardown handshake.
+ * The generated files are adaptations of napi-rs, which is MIT licensed:
+ *
+ *   napi-rs (https://github.com/napi-rs/napi-rs)
+ *   Copyright (c) 2020-present LongYinan
+ *   Adapted from `cli/src/api/templates/load-wasi-template.ts` and
+ *   `cli/src/api/templates/wasi-worker-template.ts` at
+ *   39bd1205e480a453a2da2601a760bde5a71ed016 (the `@napi-rs/cli` 3.9.1
+ *   sources), and from the `@napi-rs/wasm-runtime` 1.2.4 plugin contract.
+ *   Licensed under the MIT License; see this repository's LICENSE for the
+ *   full text and https://github.com/napi-rs/napi-rs/blob/main/LICENSE for
+ *   the upstream notice.
+ *
+ * The adapted sources stay local because those modules are not exported from
+ * the `@napi-rs/cli` public entry point. They are pinned to the same runtime
+ * contract: emnapi 2.x contexts, the `@napi-rs/wasm-runtime` plugins, and the
+ * `napi_prepare_wasm_env_cleanup` / `napi_wasm_env_cleanup_pending` teardown
+ * handshake. Local differences from upstream are marked in comments at the
+ * point of change (validated worker pools, process-wide exit listener
+ * registry, `zig-out/node` artifact fallback, scoped package names, no private
+ * Node.js symbol patching).
  */
 
 /** wasm page size in bytes, the unit `WebAssembly.Memory` is configured in. */
 const WASM_PAGE_SIZE = 65536;
 /** 4 GiB, the maximum a 32 bit wasm memory can address. */
 const MAX_WASM_PAGES = 65536;
+/**
+ * Floor for `napi.wasm.initialMemory`. Zig's wasi linker script reserves a
+ * 16 MiB stack inside the linear memory, and the linked image adds its data on
+ * top, so anything below that cannot be satisfied by the module the loader
+ * instantiates.
+ */
+const MIN_WASM_PAGES = 256;
 const DEFAULT_INITIAL_MEMORY = 4000;
 const DEFAULT_MAXIMUM_MEMORY = 65536;
 /** deferred (workerd) loader default: 64 MiB, headroom under workerd's isolate limit. */
@@ -159,6 +179,11 @@ function assertPageCount(value, field, fallback) {
       `napi.wasm.${field} must be between 1 and ${MAX_WASM_PAGES} pages (${MAX_WASM_PAGES * WASM_PAGE_SIZE} bytes)`,
     );
   }
+  if (value < MIN_WASM_PAGES) {
+    throw new WasiConfigError(
+      `napi.wasm.${field} is ${value} pages (${value * WASM_PAGE_SIZE} bytes); a WASI addon needs at least ${MIN_WASM_PAGES} pages (${MIN_WASM_PAGES * WASM_PAGE_SIZE} bytes) because the Zig linker reserves a 16 MiB stack inside the linear memory`,
+    );
+  }
   return value;
 }
 
@@ -196,6 +221,16 @@ function resolveWasmConfig(config) {
   if (initialMemory > maximumMemory) {
     throw new WasiConfigError(
       `napi.wasm.initialMemory (${initialMemory}) must not exceed napi.wasm.maximumMemory (${maximumMemory})`,
+    );
+  }
+  if (initialMemory === maximumMemory) {
+    // A wasm memory may always grow up to its maximum, but this build's
+    // allocator cannot: wasi-libc's sbrk and the Zig BrkAllocator extend the
+    // heap by growing linear memory beyond its current size, so an environment
+    // with no headroom traps on the first allocation past the initial size
+    // instead of failing a grow. Leave room explicitly.
+    throw new WasiConfigError(
+      `napi.wasm.initialMemory and napi.wasm.maximumMemory are both ${initialMemory} pages, which leaves no room to grow; the Zig/wasi-libc allocator grows linear memory on every allocation past the initial size, so set maximumMemory above initialMemory (for example ${initialMemory + MIN_WASM_PAGES})`,
     );
   }
   const browser = wasm.browser ?? {};
@@ -816,6 +851,14 @@ function memoryDeclaration({ threads, initialMemory, maximumMemory, name }) {
  * fractional, non-positive or absurd value would spawn an unbounded number of
  * workers, so an invalid value falls back to the flavor's default instead of
  * being used as-is.
+ *
+ * The bound is 64 for both hosts, not the `1024` a large `UV_THREADPOOL_SIZE`
+ * could ask for: every pooled worker instantiates the addon and reserves its
+ * own linear memory (hundreds of MiB with the default 4000 pages), so a
+ * four-digit pool exhausts the address space and the process before it is ever
+ * useful. Upstream leaves the value unbounded in Node; the browser already
+ * derives its pool from `hardwareConcurrency`, and this keeps both hosts in the
+ * same validated range.
  */
 function workerPoolValidationHelpers({ maxPoolSize }) {
   return `const __DEFAULT_ASYNC_WORK_POOL_SIZE = 4;
@@ -854,7 +897,7 @@ function instantiationMemoryHint({ threads, initialMemory, maximumMemory }) {
     " pages, maximum: " +
     maximumMemory +
     (threads ? " pages, shared: true)" : " pages)") +
-    "; the linked wasm must declare the same limits (zig-napi passes -Dinitial-memory/-Dmax-memory when the project build declares them)";
+    "; the linked wasm must declare the same limits (zig-napi passes -Dwasi-initial-memory-pages / -Dwasi-max-memory-pages from napi.wasm.initialMemory / maximumMemory)";
   return `
 function __annotateWasiInstantiationError(error) {
   if (error && typeof error.message === "string" && /memory|linkerror/i.test(error.message)) {
@@ -914,7 +957,7 @@ function createWasiNodeBinding(options) {
 `
     : "";
   const asyncWorkPoolSizeBinding = threads
-    ? `${workerPoolValidationHelpers({ maxPoolSize: 1024 })}const __asyncWorkPoolSize = (function () {
+    ? `${workerPoolValidationHelpers({ maxPoolSize: 64 })}const __asyncWorkPoolSize = (function () {
   const configured = Number(
     process.env.NAPI_RS_ASYNC_WORK_POOL_SIZE ?? process.env.UV_THREADPOOL_SIZE,
   );
@@ -2668,6 +2711,7 @@ module.exports = {
   DEFAULT_INITIAL_MEMORY,
   DEFAULT_MAXIMUM_MEMORY,
   MAX_WASM_PAGES,
+  MIN_WASM_PAGES,
   WASI_DISPOSE_SYMBOL,
   WASI_FLAVORS,
   WASI_ROLLBACK_REGISTRY_SYMBOL,
