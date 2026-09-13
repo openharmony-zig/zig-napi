@@ -631,6 +631,11 @@ test("a worker that cannot be set up releases itself and publishes nothing", asy
     // A promise that cannot be created must not turn into an unhandled
     // rejection, and the worker it belonged to is released.
     t.true(audit.workerPromiseCreationFailure("promise-failure-payload"));
+    // Setup rollback is synchronous. Measure it before yielding: on Node 24
+    // that yield can finalize unrelated objects from earlier tests, making a
+    // correct rollback appear as a negative allocation delta.
+    t.is(audit.activeBytes() - before, 0, "a failed setup must not leak the worker or its payload");
+    t.is(audit.activeAllocations() - beforeAllocations, 0);
   } finally {
     // Unhandled rejections are reported on a later turn of the event loop.
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -638,8 +643,6 @@ test("a worker that cannot be set up releases itself and publishes nothing", asy
   }
 
   t.is(rejections.length, 0, `no unpublished promise may reject: ${rejections[0]}`);
-  t.is(audit.activeBytes() - before, 0, "a failed setup must not leak the worker or its payload");
-  t.is(audit.activeAllocations() - beforeAllocations, 0);
 });
 
 // ---------------------------------------------------------------------------
