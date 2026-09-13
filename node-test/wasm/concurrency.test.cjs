@@ -307,7 +307,84 @@ async function childMain() {
     free(pageAligned);
   }
 
+  /// The Zig-side page allocator (`napi.safePageAllocator()`) is a *second*
+  /// `BrkAllocator` instance with the same big-class table, so it needs the same
+  /// guard. These probes drive it through the fixture's exports.
+  function assertZigPageAllocatorEdges(scope) {
+    const { zigPageAlloc, zigPagePattern, zigPageResize, zigPageRemap, zigPageFree } =
+      addon;
+    for (const name of ["zigPageAlloc", "zigPageResize", "zigPageRemap", "zigPageFree"]) {
+      assert.strictEqual(
+        typeof addon[name],
+        "function",
+        `${scope}: the fixture must export \`${name}\` to drive the Zig-side allocator`,
+      );
+    }
+
+    // Small round trip first: the guard must not disturb the working path. Only
+    // the first 4 KiB were written, so the payload check stays inside them.
+    const written = 4096;
+    let block = zigPageAlloc(written);
+    assert.notStrictEqual(block, 0, `${scope}: a 4 KiB Zig allocation must succeed`);
+    assert.ok(zigPagePattern(block, written), `${scope}: the block carries its pattern`);
+
+    let size = written;
+    if (zigPageResize(block, size, 8192)) {
+      size = 8192;
+      assert.ok(
+        zigPagePattern(block, written),
+        `${scope}: an in-place resize keeps the payload`,
+      );
+    }
+    // `remap` may legitimately refuse (the bump allocator only extends its last
+    // block); either outcome must leave a payload-carrying block behind.
+    const remapped = zigPageRemap(block, size, 8192);
+    if (remapped === 0) {
+      assert.ok(
+        zigPagePattern(block, written),
+        `${scope}: a refused remap leaves the block untouched`,
+      );
+    } else {
+      block = remapped;
+      size = 8192;
+      assert.ok(zigPagePattern(block, written), `${scope}: a remap keeps the payload`);
+    }
+
+    // Past the class limit: refusal, not a trap, and the live block survives.
+    const GIB = 1 << 30;
+    const ONE_PAGE = 64 * 1024;
+    for (const size of [GIB, GIB - ONE_PAGE + 1, GIB + 1, 2 * GIB, 0xffffffff]) {
+      assert.strictEqual(
+        zigPageAlloc(size),
+        0,
+        `${scope}: zigPageAlloc(${size}) past the class limit must return 0, not trap`,
+      );
+    }
+    assert.strictEqual(
+      zigPageResize(block, size, GIB),
+      false,
+      `${scope}: resize past the class limit must report "not resizable"`,
+    );
+    assert.ok(
+      zigPagePattern(block, written),
+      `${scope}: a refused resize leaves the block untouched`,
+    );
+    assert.strictEqual(
+      zigPageRemap(block, size, GIB),
+      0,
+      `${scope}: remap past the class limit must return 0, not trap`,
+    );
+    assert.ok(
+      zigPagePattern(block, written),
+      `${scope}: a refused remap leaves the block untouched`,
+    );
+
+    zigPageFree(block, size);
+    console.log(`# ${scope}: Zig-side page allocator guard and payload checks passed`);
+  }
+
   assertAllocatorEdges(flavorName);
+  assertZigPageAllocatorEdges(flavorName);
 
   // Warm up the pool so the first measured round is not paying for start-up.
   await produce(8, () => {});

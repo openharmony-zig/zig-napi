@@ -38,18 +38,33 @@ const PageLock = struct {
     }
 
     fn alloc(_: *anyopaque, len: usize, alignment: std.mem.Alignment, ret_addr: usize) ?[*]u8 {
+        // WebAssembly only: reject what the backing allocator cannot index
+        // before it reads past its class table. Native keeps the plain path.
+        if (comptime page_allocator_needs_lock) {
+            if (!wasmRequestFits(len, alignment)) return null;
+        }
         lock();
         defer unlock();
         return std.heap.page_allocator.rawAlloc(len, alignment, ret_addr);
     }
 
     fn resize(_: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, ret_addr: usize) bool {
+        if (comptime page_allocator_needs_lock) {
+            // Not resizable in place is the honest answer for a size the
+            // allocator cannot serve: the caller falls back to remap, which
+            // fails the same way, and the existing allocation stays valid.
+            if (!wasmRequestFits(new_len, alignment)) return false;
+        }
         lock();
         defer unlock();
         return std.heap.page_allocator.rawResize(memory, alignment, new_len, ret_addr);
     }
 
     fn remap(_: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
+        if (comptime page_allocator_needs_lock) {
+            // null leaves the old allocation in the caller's hands, untouched.
+            if (!wasmRequestFits(new_len, alignment)) return null;
+        }
         lock();
         defer unlock();
         return std.heap.page_allocator.rawRemap(memory, alignment, new_len, ret_addr);
@@ -81,6 +96,39 @@ comptime {
             @compileError("the WebAssembly page allocator changed: re-check whether it still needs the module lock");
         }
     }
+}
+
+/// Page size `std.heap.BrkAllocator` rounds its big requests to on WebAssembly.
+const wasm_bigpage_size: usize = @max(64 * 1024, std.heap.page_size_max);
+
+/// Number of entries in `std.heap.BrkAllocator`'s big-class table, i.e. the
+/// number of power-of-two page counts it can address.
+///
+/// `allocBigPages` indexes `big_frees` with `log2(pow2_pages)`, so a request
+/// that needs more pages than the last table entry reads past the end: an
+/// "index out of bounds" panic in Debug/ReleaseSafe and an out-of-bounds read in
+/// ReleaseFast. Derived from the pointer width rather than hardcoded, so a
+/// 64-bit WebAssembly target gets its own (much larger) bound instead of an
+/// assumption borrowed from wasm32: 15 entries on wasm32, i.e. at most
+/// `2^14 = 16384` pages = 1 GiB.
+const wasm_big_class_count: usize = std.math.log2_int(usize, std.math.maxInt(usize) / wasm_bigpage_size);
+const wasm_max_class_bytes: usize = (@as(usize, 1) << @intCast(wasm_big_class_count - 1)) * wasm_bigpage_size;
+
+/// Whether `BrkAllocator` can serve a request of this length and alignment
+/// without running off that table.
+///
+/// Mirrors the arithmetic of its `alloc`: the length grows by `@sizeOf(usize)`,
+/// the alignment can dominate it, and the result is rounded up to whole pages.
+/// The bound keeps one page of margin, because a request that lands exactly on
+/// the class limit rounds past it on the way to a page count.
+///
+/// `src/sys/emnapi_alloc.zig` derives the same bound for its own
+/// `BrkAllocator` instance. That file is a separate object compiled without
+/// libc and without this package's root module, so it cannot import this
+/// helper; the formula is duplicated there with the same note.
+fn wasmRequestFits(len: usize, alignment: std.mem.Alignment) bool {
+    const actual = @max(len +| @sizeOf(usize), alignment.toByteUnits());
+    return actual <= wasm_max_class_bytes - wasm_bigpage_size;
 }
 
 /// The page allocator of this target, safe to call from every thread.

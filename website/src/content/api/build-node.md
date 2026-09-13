@@ -108,6 +108,24 @@ so equal limits leave no headroom and every allocation after the linked image
 fails (the environment, then the worker blocks). The build rejects such option
 combinations with that explanation instead of emitting a loader that traps.
 
+### Single allocation limit
+
+On WebAssembly a single allocation is capped at **1 GiB − 64 KiB** (1 073 676 288
+bytes) in both allocators: the C `malloc`/`calloc`/`realloc` family the emnapi
+plugins call, and the Zig-side page allocator that addon code reaches through
+`napi.safePageAllocator()`. That is a wasm32 property, not a policy: the
+allocator behind both is a bump allocator whose biggest size class covers
+`2^14` pages of 64 KiB, and a request that rounds past it would index outside
+its table. Requests above the limit fail the normal way — `null` (or `ENOMEM`)
+for the C functions, an out-of-memory error for a Zig `Allocator` — instead of
+trapping, and a failed `realloc`/`remap` leaves the original block valid.
+
+The cap applies to the requested length, so a C allocation also spends a small
+header on top of it (16 bytes of alignment/header padding). It is independent
+of the total memory: the module can still import up to 4 GiB and serve many
+allocations that together exceed 1 GiB, as long as none of them alone asks for
+more than the cap. Multi-gigabyte single buffers need several allocations.
+
 ### What runs where
 
 Both flavors link `libemnapi-basic-napi-rs.a`, which leaves

@@ -4,6 +4,7 @@
 //! The addon uses a counting allocator so the JavaScript spec can assert that
 //! captured inputs, results and queued payloads are released exactly once.
 const std = @import("std");
+const builtin = @import("builtin");
 const napi = @import("napi");
 
 const CountingAllocator = struct {
@@ -646,6 +647,67 @@ pub fn queueThreadSafeFunctionAbandon(tsfn: *AuditTsfn, count: u32) !void {
 // ---------------------------------------------------------------------------
 
 pub fn runtimePing() void {}
+
+// ---------------------------------------------------------------------------
+// Zig-side page allocator probes
+//
+// The addon's own allocations go through `napi.safePageAllocator()`, which on
+// WebAssembly is a *different* `std.heap.BrkAllocator` instance than the C
+// `malloc` facade in `src/sys/emnapi_alloc.zig`. These exports drive that
+// instance directly so the JavaScript tests can check the class-limit guard and
+// the failure semantics of `resize`/`remap` (the old block must stay valid).
+//
+// They are WebAssembly probes: the guard they exercise only exists there, and
+// the pointers are returned as `u32`. On other targets they report 0.
+// ---------------------------------------------------------------------------
+
+const page_probe_pattern: u8 = 0xa5;
+
+fn pageProbeAvailable() bool {
+    return builtin.target.cpu.arch.isWasm();
+}
+
+/// Allocates `size` bytes from the Zig-side page allocator and writes a pattern
+/// into its first and last byte. Returns 0 when the allocator refuses — which
+/// is what a request past the class limit must do instead of trapping.
+pub fn zigPageAlloc(size: usize) u32 {
+    if (!pageProbeAvailable()) return 0;
+    const memory = napi.safePageAllocator().alloc(u8, size) catch return 0;
+    memory[0] = page_probe_pattern;
+    memory[memory.len - 1] = page_probe_pattern;
+    return @intCast(@intFromPtr(memory.ptr));
+}
+
+/// Whether the block still carries the pattern `zigPageAlloc` wrote.
+pub fn zigPagePattern(ptr: u32, size: usize) bool {
+    if (!pageProbeAvailable()) return false;
+    const memory: [*]u8 = @ptrFromInt(ptr);
+    return memory[0] == page_probe_pattern and memory[size - 1] == page_probe_pattern;
+}
+
+/// `Allocator.resize` to `new_size`. False means "not resizable in place", which
+/// is also the answer for a size the allocator cannot serve.
+pub fn zigPageResize(ptr: u32, old_size: usize, new_size: usize) bool {
+    if (!pageProbeAvailable()) return false;
+    const old: []u8 = @as([*]u8, @ptrFromInt(ptr))[0..old_size];
+    return napi.safePageAllocator().resize(old, new_size);
+}
+
+/// `Allocator.remap` to `new_size`. Returns 0 when the allocator refuses, in
+/// which case the caller still owns the old block untouched.
+pub fn zigPageRemap(ptr: u32, old_size: usize, new_size: usize) u32 {
+    if (!pageProbeAvailable()) return 0;
+    const old: []u8 = @as([*]u8, @ptrFromInt(ptr))[0..old_size];
+    const moved = napi.safePageAllocator().remap(old, new_size) orelse return 0;
+    return @intCast(@intFromPtr(moved.ptr));
+}
+
+/// Releases a block that `zigPageAlloc` or `zigPageRemap` returned.
+pub fn zigPageFree(ptr: u32, size: usize) void {
+    if (!pageProbeAvailable()) return;
+    const memory: []u8 = @as([*]u8, @ptrFromInt(ptr))[0..size];
+    napi.safePageAllocator().free(memory);
+}
 
 comptime {
     napi.NODE_API_MODULE("async_audit", @This());
