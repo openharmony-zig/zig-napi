@@ -51,7 +51,7 @@ function registerTests() {
   const root = artifactRoot();
   for (const flavor of FLAVORS) {
     test(`WASI ${flavor.name} concurrent producers (${flavor.platformArchABI})`, () => {
-      const artifact = path.join(root, `async_audit.${flavor.platformArchABI}.wasm`);
+      const artifact = path.join(root, `async_tasks.${flavor.platformArchABI}.wasm`);
       assert.ok(
         fs.existsSync(artifact),
         `missing artifact ${artifact}; build it with ` +
@@ -104,7 +104,7 @@ async function childMain() {
   const { WASI } = require("node:wasi");
   const { Worker } = require("node:worker_threads");
 
-  const artifact = path.join(root, `async_audit.${flavor.platformArchABI}.wasm`);
+  const artifact = path.join(root, `async_tasks.${flavor.platformArchABI}.wasm`);
   const memory = new WebAssembly.Memory({
     initial: 1024,
     maximum: 65536,

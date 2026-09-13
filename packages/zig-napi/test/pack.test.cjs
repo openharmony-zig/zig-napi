@@ -45,9 +45,9 @@ test(
           project,
           "--no-interactive",
           "--name",
-          "audit-addon",
+          "test-addon",
           "--addon",
-          "audit_addon",
+          "test_addon",
           "--targets",
           "aarch64-apple-darwin,wasm32-wasip1-threads",
         ],
@@ -83,7 +83,7 @@ test(
         [cli, "build", "--cwd", project, "--target", "wasm32-wasip1-threads"],
         tooling,
       );
-      const wasiLoad = `const a=require('./audit_addon.wasi.cjs');if(a.add(2,3)!==5)process.exit(1);`;
+      const wasiLoad = `const a=require('./test_addon.wasi.cjs');if(a.add(2,3)!==5)process.exit(1);`;
       run(process.execPath, ["-e", wasiLoad], project);
     } finally {
       fs.rmSync(scratch, { recursive: true, force: true });

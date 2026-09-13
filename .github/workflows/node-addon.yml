@@ -171,8 +171,8 @@ jobs:
             cd node-test
             zig build -Doptimize="$mode" -Dtarget=wasm32-wasi -Dcpu=baseline+atomics+bulk_memory+mutable_globals --summary all
             zig build -Doptimize="$mode" -Dtarget=wasm32-wasi --summary all
-            cp async_audit.wasm32-wasi.wasm audit.wasm32-wasi.wasm example.wasm32-wasi.wasm "$OLDPWD/$dir/"
-            cp async_audit.wasm32-wasip1.wasm audit.wasm32-wasip1.wasm example.wasm32-wasip1.wasm "$OLDPWD/$dir/"
+            cp async_tasks.wasm32-wasi.wasm contracts.wasm32-wasi.wasm example.wasm32-wasi.wasm "$OLDPWD/$dir/"
+            cp async_tasks.wasm32-wasip1.wasm contracts.wasm32-wasip1.wasm example.wasm32-wasip1.wasm "$OLDPWD/$dir/"
             cd ..
           done
           # Restore the default (Debug) artifacts for the steps that follow.
@@ -193,13 +193,13 @@ jobs:
       # Runs every test in the CLI package's test directory: the real npm-pack
       # smoke test today, plus generated-loader unit tests as they land there.
       - name: CLI package tests (generated loaders and real npm pack)
-        run: node --test packages/zig-napi/test/
+        run: node --test packages/zig-napi/test/*.test.cjs
 
       - name: Async event queue benchmark (both flavors)
         run: node node-test/wasm/queue-benchmark.cjs --flavor=both
 
       # The out-of-memory case needs an exhaustible heap. Building it rewrites
-      # the async_audit artifact, so it runs after every suite that loads the
+      # the async_tasks artifact, so it runs after every suite that loads the
       # default artifact, and the small build is copied out before the default
       # one is restored.
       - name: Build and run the worker out-of-memory acceptance
@@ -207,7 +207,7 @@ jobs:
           cd node-test
           zig build -Dtarget=wasm32-wasi -Dcpu=baseline+atomics+bulk_memory+mutable_globals -Dwasi-max-memory-pages=520 --summary all
           mkdir -p ../zig-out/oom-artifacts
-          cp async_audit.wasm32-wasi.wasm ../zig-out/oom-artifacts/
+          cp async_tasks.wasm32-wasi.wasm ../zig-out/oom-artifacts/
           zig build -Dtarget=wasm32-wasi -Dcpu=baseline+atomics+bulk_memory+mutable_globals --summary all
           cd ..
           ZIG_NAPI_WASM_OOM_ARTIFACT_ROOT="$PWD/zig-out/oom-artifacts" node --test --test-timeout=300000 node-test/wasm/abi.test.cjs

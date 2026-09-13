@@ -96,7 +96,7 @@ function flavorLoaders(suffix, binaries) {
   return binaries.map((binary) => path.join(artifactRoot, `${binary}.${suffix}-browser.js`));
 }
 
-const binaries = ["example", "async_audit"];
+const binaries = ["example", "async_tasks"];
 const wantedFlavors = {
   threads: { suffix: "wasi", isolated: true },
   wasip1: { suffix: "wasip1", isolated: false },
@@ -179,7 +179,7 @@ try {
       };
       check(crossOriginIsolated, "the threaded flavor requires cross-origin isolation");
       const example = (await import("/example.wasi-browser.js")).default;
-      const tasks = (await import("/async_audit.wasi-browser.js")).default;
+      const tasks = (await import("/async_tasks.wasi-browser.js")).default;
       check(example.add(2, 3) === 5, "sync export");
       check(example.roundtripStr("WASM 中文 🚀") === "WASM 中文 🚀", "UTF-8");
       check(
@@ -251,7 +251,7 @@ try {
       };
       check(!crossOriginIsolated, "the threadless flavor must not need cross-origin isolation");
       const example = (await import("/example.wasip1-browser.js")).default;
-      const tasks = (await import("/async_audit.wasip1-browser.js")).default;
+      const tasks = (await import("/async_tasks.wasip1-browser.js")).default;
       check(example.add(2, 3) === 5, "sync export");
       check(example.roundtripStr("WASM 中文 🚀") === "WASM 中文 🚀", "UTF-8");
       check(

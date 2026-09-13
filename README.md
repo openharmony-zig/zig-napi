@@ -206,6 +206,8 @@ Node.js matrix tests live in `node-test`. It mirrors the NAPI-RS example split w
 
 The Node addon CI runs those tests on Linux, macOS, and Windows for Node.js 12, 14, 16, 18, 20, 22, and 24. It also builds `wasm32-wasip1-threads` addons and runs `node-test` with `NAPI_RS_FORCE_WASI=error` to verify the napi-rs compatible wasm runtime path.
 
+See [node-test/README.md](node-test/README.md) for the addon list, the WASI flavor layout and the native/WASI test commands.
+
 ## Website
 
 The documentation website lives in `website` and builds as a standalone Vite site.

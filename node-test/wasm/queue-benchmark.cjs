@@ -85,7 +85,7 @@ async function runChild() {
   const { WASI } = require("node:wasi");
   const { Worker } = require("node:worker_threads");
 
-  const artifact = path.join(root, `async_audit.${flavor.platformArchABI}.wasm`);
+  const artifact = path.join(root, `async_tasks.${flavor.platformArchABI}.wasm`);
   const rootDir = path.parse(process.cwd()).root;
   const memory = new WebAssembly.Memory({
     initial: 1024,
@@ -129,7 +129,7 @@ async function runChild() {
     assert.strictEqual(
       typeof addon[name],
       "function",
-      `the fixture must export \`${name}()\` (node-test/napi/src/async_audit.zig) to prove the event queue is bounded`,
+      `the fixture must export \`${name}()\` (node-test/napi/src/async_tasks.zig) to prove the event queue is bounded`,
     );
   }
   const eventQueueLimit = addon.eventQueueLimit();
@@ -304,7 +304,7 @@ function main() {
 
   for (const flavor of selectFlavors()) {
     for (const mode of ["no-listener", "stalled-listener"]) {
-      const artifact = path.join(root, `async_audit.${FLAVOR_META[flavor].platformArchABI}.wasm`);
+      const artifact = path.join(root, `async_tasks.${FLAVOR_META[flavor].platformArchABI}.wasm`);
       assert.ok(fs.existsSync(artifact), `missing artifact ${artifact}`);
 
       const result = spawnSync(

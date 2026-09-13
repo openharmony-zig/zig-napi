@@ -37,8 +37,8 @@ fn addNodeAddonWith(
             .link_libc = true,
         },
     });
-    if (std.mem.eql(u8, name, "audit")) {
-        addon.root_module.addImport("audit_counting", b.createModule(.{
+    if (std.mem.eql(u8, name, "contracts")) {
+        addon.root_module.addImport("counting", b.createModule(.{
             .root_source_file = b.path("../examples/allocator-custom/src/counting_allocator.zig"),
         }));
         const example_async = b.createModule(.{
@@ -90,10 +90,13 @@ pub fn build(b: *std.Build) !void {
         target,
         optimize,
     );
-    try addNodeAddon(b, napi, "audit", "audit/src/lib.zig", target, optimize);
+    // Contract and resource-lifecycle fixtures: argument conversion, allocator
+    // ownership and worker/async resource release, all measured through a
+    // counting allocator.
+    try addNodeAddon(b, napi, "contracts", "napi/src/contracts.zig", target, optimize);
 
-    // Conversion/ownership regression addon. It uses its own counting allocator
-    // so the spec can assert that conversions return to their allocation
+    // Conversion and ownership fixtures. They use their own counting allocator
+    // so the specs can assert that conversions return to their allocation
     // baseline, including on the failure paths.
     const counting_allocator = b.createModule(.{
         .root_source_file = b.path("../examples/allocator-custom/src/counting_allocator.zig"),
@@ -101,8 +104,8 @@ pub fn build(b: *std.Build) !void {
     try addNodeAddonWith(
         b,
         napi,
-        "conversion_audit",
-        "napi/src/conversion_audit.zig",
+        "conversion",
+        "napi/src/conversion.zig",
         target,
         optimize,
         &.{.{ "counting", counting_allocator }},
@@ -110,21 +113,21 @@ pub fn build(b: *std.Build) !void {
     try addNodeAddonWith(
         b,
         napi,
-        "classes_audit",
-        "napi/src/classes_audit.zig",
+        "classes",
+        "napi/src/classes.zig",
         target,
         optimize,
         &.{.{ "counting", counting_allocator }},
     );
 
-    // Dedicated regression addon for the async/abort/TSFN/runtime audit
-    // findings. Kept separate from lib.zig so the audit exports can evolve
-    // without touching the shared example module.
+    // Dedicated async/abort/TSFN/runtime addon for the task ownership and
+    // shutdown contracts. Kept separate from lib.zig so these exports can
+    // evolve without touching the shared example module.
     try addNodeAddon(
         b,
         napi,
-        "async_audit",
-        "napi/src/async_audit.zig",
+        "async_tasks",
+        "napi/src/async_tasks.zig",
         target,
         optimize,
     );

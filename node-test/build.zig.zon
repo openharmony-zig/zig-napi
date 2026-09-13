@@ -10,6 +10,7 @@
         "package.json",
         "napi-compat-mode",
         "napi",
-        "audit",
+        "wasm",
+        "benchmarks",
     },
 }

@@ -22,10 +22,10 @@
     "binaryNames": [
       "compat_mode",
       "example",
-      "audit",
-      "conversion_audit",
-      "async_audit",
-      "classes_audit"
+      "contracts",
+      "conversion",
+      "async_tasks",
+      "classes"
     ],
     "packageName": "zig-napi-node-test",
     "targets": [
@@ -37,7 +37,7 @@
     "files": [
       "napi-compat-mode/__tests__/**/*.spec.js",
       "napi/__tests__/**/*.spec.js",
-      "audit/__tests__/**/*.spec.js"
+      "wasm/*.spec.js"
     ],
     "timeout": "30s",
     "workerThreads": false

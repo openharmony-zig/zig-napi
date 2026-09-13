@@ -92,7 +92,7 @@ function registerTests() {
   const root = artifactRoot();
   for (const flavor of FLAVORS) {
     test(`WASI ${flavor.name} ABI (${flavor.platformArchABI})`, () => {
-      for (const module of ["async_audit", "example", "audit"]) {
+      for (const module of ["async_tasks", "example", "contracts"]) {
         const artifact = path.join(root, `${module}.${flavor.platformArchABI}.wasm`);
         assert.ok(
           fs.existsSync(artifact),
@@ -211,7 +211,7 @@ function loadAddonChildMain(flavorValue) {
   const report = { kind: "load-addon" };
   try {
     report.flavor = loadAddon.wasiFlavor();
-    report.candidates = loadAddon.wasiCandidates("audit");
+    report.candidates = loadAddon.wasiCandidates("contracts");
     report.candidate = report.candidates[0];
   } catch (error) {
     report.error = error && error.message;
@@ -282,7 +282,7 @@ async function oomChildMain() {
     createRequireFromTest("@napi-rs/wasm-runtime");
   const { WASI } = require("node:wasi");
 
-  const artifact = path.join(root, "async_audit.wasm32-wasi.wasm");
+  const artifact = path.join(root, "async_tasks.wasm32-wasi.wasm");
   const module = new WebAssembly.Module(fs.readFileSync(artifact));
   const memoryImport = readMemoryImport(fs.readFileSync(artifact));
   assert.ok(memoryImport.max < 4096, "the OOM artifact has a small maximum");
@@ -442,7 +442,7 @@ async function childMain() {
   const artifact = (module) => path.join(root, `${module}.${flavor.platformArchABI}.wasm`);
 
   const bytesOf = (module) => fs.readFileSync(artifact(module));
-  const memoryImport = readMemoryImport(bytesOf("async_audit"));
+  const memoryImport = readMemoryImport(bytesOf("async_tasks"));
   assert.ok(memoryImport, "the addon imports its memory");
   assert.strictEqual(memoryImport.module, "env", "memory comes from the env module");
   assert.strictEqual(memoryImport.name, "memory", "import is named memory");
@@ -496,17 +496,17 @@ async function childMain() {
   // The memory kind is part of the ABI: the other kind must be rejected.
   assert.throws(
     () =>
-      load("async_audit", {
+      load("async_tasks", {
         memoryKind: flavor.sharedMemory ? "unshared" : "shared",
       }),
     /LinkError/,
     `flavor ${flavor.name} must reject the opposite memory kind`,
   );
 
-  const audit = load("audit", {
+  const contracts = load("contracts", {
     memoryKind: flavor.sharedMemory ? "shared" : "unshared",
   });
-  const { instance } = audit;
+  const { instance } = contracts;
   const exports = Object.keys(instance.exports);
 
   for (const required of [
@@ -527,7 +527,7 @@ async function childMain() {
       `${workerExport} is ${flavor.sharedMemory ? "required" : "not applicable"} for ${flavor.name}`,
     );
   }
-  const imports = WebAssembly.Module.imports(new WebAssembly.Module(bytesOf("audit")));
+  const imports = WebAssembly.Module.imports(new WebAssembly.Module(bytesOf("contracts")));
   const importedEnv = imports.filter((entry) => entry.module === "env").map((entry) => entry.name);
   assert.strictEqual(
     importedEnv.includes("_emnapi_spawn_worker"),
@@ -551,19 +551,19 @@ async function childMain() {
   }
 
   // Environment + UTF-8 + typed array surface through the C env ABI.
-  const auditExports = audit.napiModule.exports;
+  const contractsExports = contracts.napiModule.exports;
   const utf8 = "héllo wörld — ünïcode ✓";
-  assert.strictEqual(auditExports.string(utf8), utf8, "UTF-8 round trip");
+  assert.strictEqual(contractsExports.string(utf8), utf8, "UTF-8 round trip");
   const view = new Uint8Array([7, 9, 11]);
   assert.strictEqual(
-    auditExports.typedAfterCallback(view, () => {
+    contractsExports.typedAfterCallback(view, () => {
       view[0] = 42;
     }),
     42,
     "typed array views see the JavaScript write performed inside the callback",
   );
-  assert.strictEqual(auditExports.smallSigned(127), 127);
-  assert.strictEqual(auditExports.Class.make(5).value, 5);
+  assert.strictEqual(contractsExports.smallSigned(127), 127);
+  assert.strictEqual(contractsExports.Class.make(5).value, 5);
 
   const example = load("example", {
     memoryKind: flavor.sharedMemory ? "shared" : "unshared",
@@ -575,17 +575,17 @@ async function childMain() {
   // Async work: events are deep copied on the way out and have to arrive in
   // order. The threaded flavor produces them on a worker thread, so this is
   // also the real thread entry point test.
-  const asyncAudit = load("async_audit", {
+  const asyncTasks = load("async_tasks", {
     memoryKind: flavor.sharedMemory ? "shared" : "unshared",
   }).napiModule.exports;
   const events = [];
   if (flavor.sharedMemory) {
-    assert.strictEqual(await asyncAudit.asyncThreadValue(41), 42, "worker entry point");
-    assert.strictEqual(await asyncAudit.asyncThreadValue(99), 100, "worker entry point (reuse)");
+    assert.strictEqual(await asyncTasks.asyncThreadValue(41), 42, "worker entry point");
+    assert.strictEqual(await asyncTasks.asyncThreadValue(99), 100, "worker entry point (reuse)");
   }
   const produce = flavor.sharedMemory
-    ? (count, listener) => asyncAudit.asyncSliceEvents(count, listener)
-    : (count, listener) => asyncAudit.asyncSliceEventsSingle(count, listener);
+    ? (count, listener) => asyncTasks.asyncSliceEvents(count, listener)
+    : (count, listener) => asyncTasks.asyncSliceEventsSingle(count, listener);
   const produced = await produce(200, (event) => events.push(event.text));
   assert.strictEqual(produced, 200, "event count");
   assert.deepStrictEqual(
@@ -601,7 +601,7 @@ async function childMain() {
       ticks += 1;
     }, 1);
     const concurrent = await Promise.all(
-      Array.from({ length: 8 }, (_, index) => asyncAudit.asyncThreadValue(index)),
+      Array.from({ length: 8 }, (_, index) => asyncTasks.asyncThreadValue(index)),
     );
     clearInterval(timer);
     assert.deepStrictEqual(
@@ -611,20 +611,20 @@ async function childMain() {
     );
     assert.ok(ticks > 0, "the main thread kept running while workers were busy");
     assert.strictEqual(
-      await asyncAudit.asyncEchoBytes("threaded-echo"),
+      await asyncTasks.asyncEchoBytes("threaded-echo"),
       "threaded-echo",
       "captured UTF-8 slice survives the worker",
     );
   }
 
   // Memory growth must not break subsequent calls in either flavor.
-  const pagesBefore = audit.memory.buffer.byteLength / 65536;
-  audit.memory.grow(64);
-  assert.strictEqual(audit.memory.buffer.byteLength / 65536, pagesBefore + 64, "memory grew");
-  assert.strictEqual(auditExports.string(utf8), utf8, "UTF-8 after growth");
+  const pagesBefore = contracts.memory.buffer.byteLength / 65536;
+  contracts.memory.grow(64);
+  assert.strictEqual(contracts.memory.buffer.byteLength / 65536, pagesBefore + 64, "memory grew");
+  assert.strictEqual(contractsExports.string(utf8), utf8, "UTF-8 after growth");
   assert.strictEqual(await produce(16, () => {}), 16, "events after growth");
   if (flavor.sharedMemory) {
-    assert.strictEqual(await asyncAudit.asyncThreadValue(200), 201, "worker after growth");
+    assert.strictEqual(await asyncTasks.asyncThreadValue(200), 201, "worker after growth");
   }
 
   // Allocation bookkeeping returns to its baseline once JavaScript collected
@@ -635,7 +635,7 @@ async function childMain() {
       await new Promise((resolve) => setImmediate(resolve));
     }
   }
-  const baselineBefore = asyncAudit.activeBytes();
+  const baselineBefore = asyncTasks.activeBytes();
   await produce(64, () => {});
   if (typeof global.gc === "function") {
     for (let round = 0; round < 3; round += 1) {
@@ -644,7 +644,7 @@ async function childMain() {
     }
   }
   assert.strictEqual(
-    asyncAudit.activeBytes(),
+    asyncTasks.activeBytes(),
     baselineBefore,
     "async event bursts return to the allocation baseline",
   );
