@@ -109,22 +109,70 @@ jobs:
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build wasm Node example
+      - name: Build wasm Node example (threaded)
         run: node packages/zig-napi/bin/zig-napi.js build --cwd examples/node --target wasm32-wasip1-threads -- --summary all
 
-      - name: Test wasm Node example
+      - name: Test wasm Node example (threaded)
         env:
           NAPI_RS_FORCE_WASI: 'error'
+          NAPI_RS_WASI_FLAVOR: 'wasi'
         run: node examples/node/test.js
 
-      - name: Build wasm node-test matrix
+      - name: Build wasm Node example (single-threaded)
+        run: node packages/zig-napi/bin/zig-napi.js build --cwd examples/node --target wasm32-wasip1 -- --summary all
+
+      - name: Test wasm Node example (single-threaded)
+        env:
+          NAPI_RS_FORCE_WASI: 'error'
+          NAPI_RS_WASI_FLAVOR: 'wasip1'
+        run: node examples/node/test.js
+
+      # Both flavors are built so every artifact and loader the suites below
+      # need exists; a build only regenerates the flavor it targets.
+      - name: Build wasm node-test matrix (threaded)
         run: node packages/zig-napi/bin/zig-napi.js build --cwd node-test --target wasm32-wasip1-threads -- --summary all
 
-      - name: Test wasm node-test matrix
+      - name: Build wasm node-test matrix (single-threaded)
+        run: node packages/zig-napi/bin/zig-napi.js build --cwd node-test --target wasm32-wasip1 -- --summary all
+
+      - name: Test wasm node-test matrix (threaded)
         working-directory: node-test
         env:
           NAPI_RS_FORCE_WASI: 'error'
+          ZIG_NAPI_WASI_FLAVOR: 'wasi'
         run: npm run test:run
+
+      - name: Test wasm node-test matrix (single-threaded)
+        working-directory: node-test
+        env:
+          NAPI_RS_FORCE_WASI: 'error'
+          ZIG_NAPI_WASI_FLAVOR: 'wasip1'
+        run: npm run test:run
+
+      - name: WASI ABI acceptance (both flavors)
+        run: node --test --test-timeout=300000 node-test/wasm/abi.test.cjs
+
+      # Runs every test in the CLI package's test directory: the real npm-pack
+      # smoke test today, plus generated-loader unit tests as they land there.
+      - name: CLI package tests (generated loaders and real npm pack)
+        run: node --test packages/zig-napi/test/
+
+      - name: Async event queue benchmark (both flavors)
+        run: node node-test/wasm/queue-benchmark.cjs --flavor=both
+
+      # The out-of-memory case needs an exhaustible heap. Building it rewrites
+      # the async_audit artifact, so it runs after every suite that loads the
+      # default artifact, and the small build is copied out before the default
+      # one is restored.
+      - name: Build and run the worker out-of-memory acceptance
+        run: |
+          cd node-test
+          zig build -Dtarget=wasm32-wasi -Dcpu=baseline+atomics+bulk_memory+mutable_globals -Dwasi-max-memory-pages=520 --summary all
+          mkdir -p ../zig-out/oom-artifacts
+          cp async_audit.wasm32-wasi.wasm ../zig-out/oom-artifacts/
+          zig build -Dtarget=wasm32-wasi -Dcpu=baseline+atomics+bulk_memory+mutable_globals --summary all
+          cd ..
+          ZIG_NAPI_WASM_OOM_ARTIFACT_ROOT="$PWD/zig-out/oom-artifacts" node --test --test-timeout=300000 node-test/wasm/abi.test.cjs
 
   cli-package-test:
     runs-on: ubuntu-latest
