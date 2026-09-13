@@ -322,8 +322,7 @@ async function childMain() {
   /// `BrkAllocator` instance with the same big-class table, so it needs the same
   /// guard. These probes drive it through the fixture's exports.
   function assertZigPageAllocatorEdges(scope) {
-    const { zigPageAlloc, zigPagePattern, zigPageResize, zigPageRemap, zigPageFree } =
-      addon;
+    const { zigPageAlloc, zigPagePattern, zigPageResize, zigPageRemap, zigPageFree } = addon;
     for (const name of ["zigPageAlloc", "zigPageResize", "zigPageRemap", "zigPageFree"]) {
       assert.strictEqual(
         typeof addon[name],
@@ -342,10 +341,7 @@ async function childMain() {
     let size = written;
     if (zigPageResize(block, size, 8192)) {
       size = 8192;
-      assert.ok(
-        zigPagePattern(block, written),
-        `${scope}: an in-place resize keeps the payload`,
-      );
+      assert.ok(zigPagePattern(block, written), `${scope}: an in-place resize keeps the payload`);
     }
     // `remap` may legitimately refuse (the bump allocator only extends its last
     // block); either outcome must leave a payload-carrying block behind.
