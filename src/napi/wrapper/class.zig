@@ -871,7 +871,15 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                     var value: T = undefined;
                     var keep_alive: ?KeepAlive = null;
 
+                    // Even a zero-argument factory enters native code. Shield
+                    // resources created by that body from a reentrant outer
+                    // conversion transaction.
+                    var conversion = Conversion{};
+                    conversion.start(allocator);
+                    defer conversion.end();
+
                     if (params.len == 0) {
+                        conversion.commit();
                         const result = if (@typeInfo(factory_fn_info.@"fn".return_type.?) == .error_union)
                             factory_fn() catch |err| return throwAnyAndNull(env, err)
                         else
@@ -885,12 +893,6 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                         const ArgsTuple = std.meta.ArgsTuple(factory_fn_type);
                         var tuple_args: ArgsTuple = undefined;
                         var initialized: usize = 0;
-
-                        // The factory arguments are converted as one
-                        // transaction; see `Conversion`.
-                        var conversion = Conversion{};
-                        conversion.start(allocator);
-                        defer conversion.end();
 
                         inline for (params, 0..) |param, i| {
                             tuple_args[i] = Napi.from_napi_value_auto_with_allocator(env, args_raw[i], param.type.?, allocator) catch |err| {
@@ -1247,7 +1249,10 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                                         } else {
                                             tuple_args[0] = &instance.value;
                                         }
-                                        initialized_args = 1;
+                                        // cleanupArgs counts converted JS
+                                        // arguments, not the injected receiver.
+                                        // A failure at argument zero must clean
+                                        // zero values, never undefined storage.
                                     }
 
                                     // Convert and pass the JavaScript arguments.

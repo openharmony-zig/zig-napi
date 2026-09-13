@@ -32,7 +32,7 @@ const FnArgs = struct { i32, i32 };
 const FnReturn = i32;
 
 pub fn hello(env: napi.Env, name: []u8) napi.String {
-    const allocator = std.heap.page_allocator;
+    const allocator = napi.globalAllocator();
     const message = std.fmt.allocPrint(allocator, "Hello, {s}!", .{name}) catch @panic("OOM");
     defer allocator.free(message);
     return napi.String.New(env, message);

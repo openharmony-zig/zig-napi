@@ -59,6 +59,33 @@ nativeTest("Worker termination keeps in-flight producers alive until they finish
   t.true(result.stdout.includes("survived-after-producers"));
 });
 
+nativeTest("terminating an environment with queued events releases records and futures", (t) => {
+  const result = isolated(
+    `
+    const {Worker}=require('worker_threads');
+    (async()=>{
+      await asyncAddon.asyncSliceEvents(1,()=>{});await collect();
+      const before=asyncAddon.activeBytes();
+      for(let round=0;round<10;round++){
+        const source=\`const {parentPort}=require('worker_threads');
+          const a=require(${JSON.stringify(loadPath)})('async_audit');
+          a.asyncSliceEvents(100000,()=>{}).catch(()=>{});
+          parentPort.postMessage('started');
+          const until=Date.now()+500;while(Date.now()<until){};\`;
+        const worker=new Worker(source,{eval:true});
+        await new Promise((r,j)=>{worker.once('message',r);worker.once('error',j)});
+        await new Promise(r=>setTimeout(r,25));
+        await worker.terminate();
+      }
+      await new Promise(r=>setTimeout(r,1000));await collect();
+      assert.strictEqual(asyncAddon.activeBytes(),before);
+    })().catch(e=>{console.error(e);process.exitCode=1});
+  `,
+    ["--expose-gc"],
+  );
+  survived(t, result);
+});
+
 nativeTest("Worker captures converted slice input before the export returns", (t) => {
   const result = isolated(`
     (async()=>{
@@ -208,4 +235,83 @@ test("unobserved progress does not allocate a payload for every event", async (t
   t.is(await asyncAddon.asyncSliceEvents(10000, undefined), 10000);
   const allocations = asyncAddon.allocationCount() - before;
   t.true(allocations < 128, `unobserved events caused ${allocations} allocations`);
+});
+
+for (const route of ["manual", "constructor", "factory", "method", "fields"]) {
+  weakTest(`${route} conversion failure rolls back JavaScript resources`, (t) => {
+    const expression = {
+      manual: "a.manualReferenceConversion({reference:value,number:'bad'})",
+      constructor: "new a.ReferenceCalls(value,'bad',{})",
+      factory: "a.ReferenceCalls.make(value,'bad',{})",
+      method: "instance.consume(value,'bad',{})",
+      fields: "new a.ReferenceFields(value,'bad')",
+    }[route];
+    const result = isolated(
+      `
+      const instance=new a.ReferenceCalls({},1,{});
+      const references=[];
+      for(let i=0;i<100;i++){
+        const value={payload:new ArrayBuffer(65536)};
+        references.push(new WeakRef(value));
+        assert.throws(()=>${expression});
+      }
+      (async()=>{await collect();assert.strictEqual(references.filter(r=>r.deref()).length,0)})()
+        .catch(e=>{console.error(e);process.exitCode=1});
+    `,
+      ["--expose-gc"],
+    );
+    survived(t, result);
+  });
+}
+
+nativeTest("transient Class inputs are released while instances remain reachable", (t) => {
+  const result = isolated(
+    `
+    (async()=>{
+      await collect();const before=a.activeBytes();
+      let values=[];
+      for(let i=0;i<100;i++){
+        const text='x'.repeat(65536);
+        values.push(i%2 ? a.TransientSummary.make(text) : new a.TransientSummary(text));
+      }
+      await collect();
+      assert(values.every(value=>value.length===65536));
+      const retained=a.activeBytes()-before;
+      assert(retained<100000,'retained '+retained+' bytes for scalar-only instances');
+      assert.strictEqual(a.TransientSummary.arg_ownership,undefined);
+      values=null;await collect();assert.strictEqual(a.activeBytes(),before);
+    })().catch(e=>{console.error(e);process.exitCode=1});
+  `,
+    ["--expose-gc"],
+  );
+  survived(t, result);
+});
+
+test("Worker Promise allocation failure releases captured inputs and native work", (t) => {
+  const before = a.activeBytes();
+  for (let i = 0; i < 100; i++) t.throws(() => a.workerPromiseAllocationFailure("x".repeat(1024)));
+  t.is(a.activeBytes(), before);
+});
+
+nativeTest("first instance-method argument failure never cleans uninitialized data", (t) => {
+  survived(
+    t,
+    isolated(`
+    const value=new a.BorrowedClass('kept alive');
+    for(let i=0;i<100;i++)assert.throws(()=>value.textLength(42));
+    assert.strictEqual(value.textLength('valid'),5);
+  `),
+  );
+});
+
+nativeTest("zero-argument factory resources survive an outer conversion rollback", (t) => {
+  survived(
+    t,
+    isolated(`
+    const saved={marker:'factory owns replacement'};
+    a.saveReference(saved);
+    assert.throws(()=>a.nested({get text(){a.ReferenceCalls.makeSaved();return 'outer'},count:'bad'}));
+    assert.strictEqual(a.takeSavedReference(),saved);
+  `),
+  );
 });

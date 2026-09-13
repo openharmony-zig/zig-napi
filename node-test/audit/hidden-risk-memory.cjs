@@ -35,3 +35,28 @@ for (const observed of [false, true]) {
     process.exitCode = 1;
   }
 }
+
+for (const className of ["RetainedSummary", "TransientSummary"]) {
+  const source = `
+    const a=require(${JSON.stringify(loader)})('audit');
+    const collect=async()=>{for(let i=0;i<10;i++){await new Promise(r=>setImmediate(r));global.gc();}};
+    (async()=>{
+      await collect();const before=a.activeBytes();let instances=[];
+      for(let i=0;i<100;i++)instances.push(i%2 ? a.${className}.make('x'.repeat(65536)) : new a.${className}('x'.repeat(65536)));
+      await collect();const retained=a.activeBytes()-before;
+      if(!instances.every(value=>value.length===65536))throw Error('invalid class output');
+      instances=null;await collect();const after=a.activeBytes()-before;
+      console.log(JSON.stringify({className:${JSON.stringify(className)},instances:100,inputBytes:6553600,retainedNativeBytes:retained,afterGcNativeBytes:after}));
+    })().catch(error=>{console.error(error);process.exitCode=1});
+  `;
+  const result = spawnSync(process.execPath, ["--expose-gc", "-e", source], {
+    encoding: "utf8",
+    timeout: 15000,
+  });
+  if (result.stdout) process.stdout.write(result.stdout);
+  if (result.stderr) process.stderr.write(result.stderr);
+  if (result.error || result.signal || result.status !== 0) {
+    console.error(result.error || `child failed: ${result.signal || result.status}`);
+    process.exitCode = 1;
+  }
+}

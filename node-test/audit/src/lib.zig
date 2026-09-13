@@ -1,7 +1,7 @@
 const std = @import("std");
 const napi = @import("napi");
-var counter = @import("audit_counting").CountingAllocator.init(std.heap.page_allocator);
-var alternate_counter = @import("audit_counting").CountingAllocator.init(std.heap.page_allocator);
+var counter = @import("audit_counting").CountingAllocator.init(napi.safePageAllocator());
+var alternate_counter = @import("audit_counting").CountingAllocator.init(napi.safePageAllocator());
 var failing_allocator = std.testing.FailingAllocator.init(counter.allocator(), .{});
 pub const napi_allocator = counter.allocator();
 pub const readFile = @import("example_async").read_file_async;
@@ -126,6 +126,9 @@ const BorrowedState = struct {
     pub fn make(text: []u8) @This() {
         return .{ .text = text };
     }
+    pub fn textLength(_: *@This(), text: []const u8) usize {
+        return text.len;
+    }
 };
 pub const BorrowedClass = napi.Class(BorrowedState);
 
@@ -231,12 +234,14 @@ pub fn referenceNested(env: napi.Env, input: struct { reference: napi.ObjectRef,
     try owned.Delete(env);
 }
 var saved_reference: ?napi.ObjectRef = null;
+var saved_env: napi.napi_sys.napi_sys.napi_env = null;
 pub fn saveReference(env: napi.Env, reference: napi.ObjectRef) !void {
     if (saved_reference) |old| {
         var mutable = old;
         try mutable.Delete(env);
     }
     saved_reference = reference;
+    saved_env = env.raw;
 }
 pub fn takeSavedReference(env: napi.Env) !napi.Object {
     var reference = saved_reference orelse return error.NoSavedReference;
@@ -244,6 +249,68 @@ pub fn takeSavedReference(env: napi.Env) !napi.Object {
     try reference.Delete(env);
     saved_reference = null;
     return value;
+}
+
+pub fn manualReferenceConversion(env: napi.Env, value: napi.NapiValue) !void {
+    const converted = try value.As(struct { reference: napi.ObjectRef, number: i32 });
+    var reference = converted.reference;
+    try reference.Delete(env);
+}
+
+const TransientSummaryState = struct {
+    pub const arg_ownership: napi.ArgOwnership = .transient;
+    length: usize,
+    pub fn init(text: []const u8) @This() {
+        return .{ .length = text.len };
+    }
+    pub fn make(text: []const u8) @This() {
+        return .{ .length = text.len };
+    }
+};
+pub const TransientSummary = napi.Class(TransientSummaryState);
+const RetainedSummaryState = struct {
+    length: usize,
+    pub fn init(text: []const u8) @This() {
+        return .{ .length = text.len };
+    }
+    pub fn make(text: []const u8) @This() {
+        return .{ .length = text.len };
+    }
+};
+pub const RetainedSummary = napi.Class(RetainedSummaryState);
+
+const ReferenceCallState = struct {
+    number: i32,
+    pub fn init(reference: napi.ObjectRef, number: i32, context: napi.Object) !@This() {
+        var owned = reference;
+        try owned.Delete(napi.Env.from_raw(context.env));
+        return .{ .number = number };
+    }
+    pub fn make(reference: napi.ObjectRef, number: i32, context: napi.Object) !@This() {
+        return init(reference, number, context);
+    }
+    pub fn makeSaved() !@This() {
+        const env = napi.Env.from_raw(saved_env);
+        var previous = saved_reference orelse return error.NoSavedReference;
+        const replacement = try napi.ObjectRef.New(env, try previous.GetValue(env));
+        try previous.Delete(env);
+        saved_reference = replacement;
+        return .{ .number = 1 };
+    }
+    pub fn consume(_: *@This(), reference: napi.ObjectRef, number: i32, context: napi.Object) !void {
+        _ = try init(reference, number, context);
+    }
+};
+pub const ReferenceCalls = napi.Class(ReferenceCallState);
+pub const ReferenceFields = napi.Class(struct { reference: napi.ObjectRef, number: i32 });
+
+/// Fail after the worker has captured its input, exactly when AsyncQueue
+/// allocates the Promise capability. The worker must unwind its own owner.
+pub fn workerPromiseAllocationFailure(env: napi.Env, input: []const u8) !napi.Promise {
+    const worker = try napi.tryWorker(env, .{ .data = input, .Execute = delayedWorkerRead });
+    setAllocationFailure(0);
+    defer napi.resetOperationAllocator();
+    return worker.AsyncQueue();
 }
 
 comptime {

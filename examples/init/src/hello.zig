@@ -17,7 +17,7 @@ fn fibonacci_execute(data: f64) f64 {
 }
 
 fn fibonacci_on_complete(_: napi.Env, data: f64) void {
-    const allocator = std.heap.page_allocator;
+    const allocator = napi.globalAllocator();
     const message = std.fmt.allocPrint(allocator, "Fibonacci result: {d}", .{data}) catch @panic("OOM");
     defer allocator.free(message);
 }
@@ -28,7 +28,7 @@ fn add(left: f64, right: f64) f64 {
 }
 
 fn hello(env: napi.Env, name: []u8) napi.String {
-    const allocator = std.heap.page_allocator;
+    const allocator = napi.globalAllocator();
 
     const message = std.fmt.allocPrint(allocator, "Hello, {s}!", .{name}) catch @panic("OOM");
     defer allocator.free(message);
@@ -46,7 +46,7 @@ fn fib_async(n: f64) napi.Async(f64, .thread) {
 }
 
 fn get_and_return_array(array: []f32) []f32 {
-    const pg = std.heap.page_allocator;
+    const pg = napi.globalAllocator();
     const message = std.fmt.allocPrint(pg, "Array length: {d}", .{array.len}) catch @panic("OOM");
     const message2 = std.fmt.allocPrint(pg, "Array content: {any}", .{array}) catch @panic("OOM");
     defer pg.free(message);
@@ -58,7 +58,7 @@ fn get_and_return_array(array: []f32) []f32 {
 const array_type = struct { f32, bool, []u8 };
 
 fn get_named_array(array: array_type) array_type {
-    const pg = std.heap.page_allocator;
+    const pg = napi.globalAllocator();
     const message = std.fmt.allocPrint(pg, "content: {any}", .{array}) catch @panic("OOM");
     defer pg.free(message);
 
@@ -66,7 +66,7 @@ fn get_named_array(array: array_type) array_type {
 }
 
 fn get_arraylist(array: ArrayList(f32)) ArrayList(f32) {
-    const pg = std.heap.page_allocator;
+    const pg = napi.globalAllocator();
     const message = std.fmt.allocPrint(pg, "Array length: {any}", .{array}) catch @panic("OOM");
     defer pg.free(message);
     return array;

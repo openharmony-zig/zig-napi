@@ -1355,6 +1355,9 @@ fn emitClassDecl(state: *State, comptime ExportName: []const u8, comptime T: typ
     }
 
     inline for (wrapped_info.decls) |decl| {
+        // Native construction policy is configuration, not a JavaScript static
+        // property. Keep declarations consistent with the class export filter.
+        if (comptime std.mem.eql(u8, decl.name, "arg_ownership")) continue;
         const value = @field(Wrapped, decl.name);
         const decl_type = @TypeOf(value);
         if (@typeInfo(decl_type) == .@"fn") {

@@ -300,7 +300,11 @@ nativeOnlyTest("thousands of threaded tasks return to the allocation baseline", 
   );
   t.is(probe.status, 0, probe.stderr);
   const measured = JSON.parse(probe.stdout.trim().split("\n").pop());
-  t.is(measured.after, measured.before, `2000 threaded tasks leaked ${measured.after - measured.before} bytes`);
+  t.is(
+    measured.after,
+    measured.before,
+    `2000 threaded tasks leaked ${measured.after - measured.before} bytes`,
+  );
 });
 
 test("the event queue is bounded and still delivers every event in order", async (t) => {
@@ -356,15 +360,17 @@ abortTest("cancelling releases a producer that waits for queue capacity", async 
   t.true(delivered < 1000000, `the producer stopped instead of draining the queue (${delivered})`);
 });
 
-nativeOnlyTest("queued events and a blocked producer release everything at worker shutdown", async (t) => {
-  // Ten environments, each with a producer that filled its bounded queue while
-  // the environment's thread was blocked in the listener. Terminating them
-  // closes the queue under a blocked producer, runs the finalizer before the
-  // null-environment drain, and must leave the counting allocator at its
-  // baseline - without crashing or hanging.
-  await native.asyncSliceEvents(1, () => {});
-  const probe = runIsolated(
-    `(async()=>{
+nativeOnlyTest(
+  "queued events and a blocked producer release everything at worker shutdown",
+  async (t) => {
+    // Ten environments, each with a producer that filled its bounded queue while
+    // the environment's thread was blocked in the listener. Terminating them
+    // closes the queue under a blocked producer, runs the finalizer before the
+    // null-environment drain, and must leave the counting allocator at its
+    // baseline - without crashing or hanging.
+    await native.asyncSliceEvents(1, () => {});
+    const probe = runIsolated(
+      `(async()=>{
       const {Worker}=require("worker_threads");
       const collect=async()=>{for(let i=0;i<5;i++){global.gc();await new Promise(r=>setImmediate(r));}};
       await a.asyncSliceEvents(1,()=>{});
@@ -385,13 +391,18 @@ nativeOnlyTest("queued events and a blocked producer release everything at worke
       await collect();
       console.log(JSON.stringify({baseline,after:a.activeBytes()}));
     })().catch((error)=>{console.error(error);process.exitCode=1});`,
-    ["--expose-gc"],
-    60000,
-  );
-  t.is(probe.status, 0, probe.stderr);
-  const measured = JSON.parse(probe.stdout.trim().split("\n").pop());
-  t.is(measured.after, measured.baseline, `shutdown leaked ${measured.after - measured.baseline} bytes`);
-});
+      ["--expose-gc"],
+      60000,
+    );
+    t.is(probe.status, 0, probe.stderr);
+    const measured = JSON.parse(probe.stdout.trim().split("\n").pop());
+    t.is(
+      measured.after,
+      measured.baseline,
+      `shutdown leaked ${measured.after - measured.baseline} bytes`,
+    );
+  },
+);
 
 test("a throwing event listener rejects the task with the original exception", async (t) => {
   const boom = new Error("listener boom");
@@ -703,42 +714,50 @@ nativeOnlyTest("an abandoned producer finishes after its environment is torn dow
   t.is(await native.asyncThreadValue(3), 4);
 });
 
-nativeOnlyTest("queued events survive the environment finalizer and its null-environment drain", async (t) => {
-  const { Worker } = workerThreads();
-  for (let round = 0; round < 2; round += 1) {
-    const worker = new Worker(workerSource, { workerData: { mode: "events-abandoned" } });
-    await new Promise((resolve, reject) => {
-      worker.once("message", resolve);
-      worker.once("error", reject);
-    });
-    // Terminate while the worker's listener is blocked and events are queued:
-    // the finalizer runs first, the queue is drained afterwards with a null
-    // environment, and the records must still be usable then. The producer is
-    // already done, so only the records' own references keep the operation
-    // alive at that point.
-    await delay(150);
-    await worker.terminate();
-    await delay(100);
-  }
-  await delay(1200);
-  t.is(await native.asyncThreadValue(2), 3);
-});
+nativeOnlyTest(
+  "queued events survive the environment finalizer and its null-environment drain",
+  async (t) => {
+    const { Worker } = workerThreads();
+    for (let round = 0; round < 2; round += 1) {
+      const worker = new Worker(workerSource, { workerData: { mode: "events-abandoned" } });
+      await new Promise((resolve, reject) => {
+        worker.once("message", resolve);
+        worker.once("error", reject);
+      });
+      // Terminate while the worker's listener is blocked and events are queued:
+      // the finalizer runs first, the queue is drained afterwards with a null
+      // environment, and the records must still be usable then. The producer is
+      // already done, so only the records' own references keep the operation
+      // alive at that point.
+      await delay(150);
+      await worker.terminate();
+      await delay(100);
+    }
+    await delay(1200);
+    t.is(await native.asyncThreadValue(2), 3);
+  },
+);
 
-abortTest("tearing down an environment with an abortable task does not free it early", async (t) => {
-  const { Worker } = workerThreads();
-  for (let round = 0; round < 3; round += 1) {
-    const worker = new Worker(workerSource, { workerData: { mode: "async-abandoned-abortable" } });
-    await new Promise((resolve, reject) => {
-      worker.once("message", resolve);
-      worker.once("error", reject);
-    });
-    await worker.terminate();
-  }
-  // The operation, its controller and its abort registration must all outlive
-  // the environment that started them (H01: three of three crashed before).
-  await delay(1500);
-  t.is(await native.asyncThreadValue(1), 2);
-});
+abortTest(
+  "tearing down an environment with an abortable task does not free it early",
+  async (t) => {
+    const { Worker } = workerThreads();
+    for (let round = 0; round < 3; round += 1) {
+      const worker = new Worker(workerSource, {
+        workerData: { mode: "async-abandoned-abortable" },
+      });
+      await new Promise((resolve, reject) => {
+        worker.once("message", resolve);
+        worker.once("error", reject);
+      });
+      await worker.terminate();
+    }
+    // The operation, its controller and its abort registration must all outlive
+    // the environment that started them (H01: three of three crashed before).
+    await delay(1500);
+    t.is(await native.asyncThreadValue(1), 2);
+  },
+);
 
 nativeOnlyTest("thread-safe function queue survives its environment being torn down", async (t) => {
   const { Worker } = workerThreads();
