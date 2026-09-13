@@ -180,7 +180,9 @@ function callOnCreateWorker(options) {
   // Instrument the real worker so the test observes the loader terminating it.
   const terminate = worker.terminate.bind(worker);
   worker.terminate = function () {
-    record("workerTerminate");
+    // The loader has to drop the wasm-threads manager's unexpected-exit
+    // detector before terminating, or the manager throws in Node.
+    record("workerTerminate", worker.listenerCount("exit"));
     return terminate();
   };
   calls.worker = worker;
@@ -1113,6 +1115,15 @@ test("the Node loader creates an isolated context and disposes it through the ha
   assert.ok(
     terminateIndex > destroyIndex,
     `workers are terminated after the context: ${events.join(",")}`,
+  );
+  // No "exit" listener survives into the termination: the wasm-threads manager
+  // reports an unbookkept exit as a crash, and a deliberate pool shutdown must
+  // not be reported as one.
+  assert.ok(
+    globalThis.__wasiStub.events.some(
+      (event) => Array.isArray(event) && event[0] === "workerTerminate" && event[1] === 0,
+    ),
+    "the loader must detach the exit listener before terminating a pooled worker",
   );
   // the drain saw the queue empty, so the context was destroyed
   assert.equal(globalThis.__wasiStub.context.destroyed, true);

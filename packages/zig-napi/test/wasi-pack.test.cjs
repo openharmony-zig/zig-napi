@@ -138,12 +138,38 @@ test("the packed CLI builds and loads both real WASI flavors", { timeout: 900_00
   // The scaffold resolves its runtime packages like an installed project would.
   fs.symlinkSync(runtimeRoot, path.join(project, "node_modules"), "dir");
 
+  // Give the scaffold one asynchronous export per runtime, so the acceptance
+  // also covers real async work, its worker pool and the teardown that follows
+  // it: a pooled worker dying during disposal used to surface as an uncaught
+  // "Worker stopped with exit code 1" that failed the process.
+  const libZigPath = path.join(project, "src", "lib.zig");
+  fs.writeFileSync(
+    libZigPath,
+    fs.readFileSync(libZigPath, "utf8") +
+      [
+        "",
+        "fn asyncEcho(input: u32) u32 {",
+        "    return input + 1;",
+        "}",
+        "",
+        "pub fn asyncThreadValue(input: u32) napi.Async(u32, .thread) {",
+        "    return napi.Async(u32, .thread).from(input, asyncEcho);",
+        "}",
+        "",
+        "pub fn asyncSingleValue(input: u32) napi.Async(u32, .single) {",
+        "    return napi.Async(u32, .single).from(input, asyncEcho);",
+        "}",
+        "",
+      ].join("\n"),
+  );
+
   const flavors = [
     {
       target: "wasm32-wasip1-threads",
       platformArchABI: "wasm32-wasi",
       suffix: "wasi",
       threads: true,
+      asyncExport: "asyncThreadValue",
       extraFiles: ["wasi-worker.mjs", "wasi-worker-browser.mjs"],
     },
     {
@@ -151,6 +177,7 @@ test("the packed CLI builds and loads both real WASI flavors", { timeout: 900_00
       platformArchABI: "wasm32-wasip1",
       suffix: "wasip1",
       threads: false,
+      asyncExport: "asyncSingleValue",
       extraFiles: ["packed_addon.wasip1-deferred.js", "packed_addon.wasip1-deferred.d.ts"],
     },
   ];
@@ -224,6 +251,10 @@ test("the packed CLI builds and loads both real WASI flavors", { timeout: 900_00
     const load = [
       `const loaderPath = "./packed_addon.${flavor.suffix}.cjs";`,
       `const suffix = ${JSON.stringify(flavor.suffix)};`,
+      'process.on("uncaughtException", (error) => {',
+      '  console.error("uncaught: " + (error && error.message));',
+      "  process.exit(9);",
+      "});",
       "const addon = require(loaderPath);",
       "if (addon.add(2, 3) !== 5) {",
       '  throw new Error(suffix + " add returned " + addon.add(2, 3));',
@@ -231,17 +262,20 @@ test("the packed CLI builds and loads both real WASI flavors", { timeout: 900_00
       'if (!addon.hello().startsWith("hello from ")) {',
       '  throw new Error(suffix + " hello returned " + addon.hello());',
       "}",
-      'const dispose = addon[Symbol.for("napi.rs.wasi.dispose")];',
-      "dispose()",
-      "  .then(() => {",
+      `addon.${flavor.asyncExport}(41).then((value) => {`,
+      "  if (value !== 42) {",
+      '    throw new Error(suffix + " async returned " + value);',
+      "  }",
+      '  const dispose = addon[Symbol.for("napi.rs.wasi.dispose")];',
+      "  return dispose().then(() => {",
       "    delete require.cache[require.resolve(loaderPath)];",
       "    const reloaded = require(loaderPath);",
       "    if (reloaded.add(4, 5) !== 9) {",
       '      throw new Error("the reinstantiated addon returned " + reloaded.add(4, 5));',
       "    }",
       '    return reloaded[Symbol.for("napi.rs.wasi.dispose")]();',
-      "  })",
-      '  .then(() => process.stdout.write("disposed"));',
+      "  });",
+      '}).then(() => process.stdout.write("disposed"));',
     ].join("\n");
     const loaded = run(process.execPath, ["-e", load], { cwd: project, timeout: 120_000 });
     assert.equal(loaded.stdout, "disposed", `${flavor.suffix}: ${loaded.stderr}`);

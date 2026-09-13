@@ -527,6 +527,14 @@ function __terminateWasiWorkers() {
   for (const worker of __wasiWorkers) {
     let result;
     try {
+      // Pooled workers are owned by the emnapi wasm-threads manager once it
+      // loads them, and in Node that manager treats any exit it did not
+      // bookkeep as a crash: its exit handler throws "Worker stopped with exit
+      // code 1", which is exactly what terminate() reports. Disposal is a
+      // deliberate shutdown of the whole pool, so drop that crash detector for
+      // the workers being terminated here - a worker that really crashed earlier
+      // still surfaced through it while the addon was alive.
+      worker.removeAllListeners?.("exit");
       result = worker.terminate();
     } catch (error) {
       cleanupErrors.push(error);
