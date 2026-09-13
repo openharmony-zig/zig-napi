@@ -3,8 +3,28 @@
 const childProcess = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
-const { NapiCli, parseTriple } = require("@napi-rs/cli");
+const { NapiCli } = require("@napi-rs/cli");
 const { Command } = require("commander");
+const {
+  WasiConfigError,
+  WASI_WORKER_TEMPLATE,
+  collectWasiFlavors,
+  createWasiBindingTypeDef,
+  createWasiBrowserBinding,
+  createWasiBrowserEntry,
+  createWasiBrowserWorkerBinding,
+  createWasiDeferredBrowserBinding,
+  createWasiDeferredBrowserBindingTypeDef,
+  createWasiNodeBinding,
+  getWasiFlavor,
+  isWasiTargetName,
+  isWasiThreadsTargetName,
+  managedWasiFilesByFlavor,
+  managedWasiFileNames,
+  normalizeWasiTargetName,
+  resolveWasmConfig,
+  wasiMemoryBuildArgs,
+} = require("./wasi-templates.cjs");
 
 const packageDir = path.resolve(__dirname, "..");
 const workspaceRoot = path.resolve(packageDir, "..", "..");
@@ -34,6 +54,7 @@ const availableTargets = [
   "riscv64gc-unknown-linux-gnu",
   "powerpc64le-unknown-linux-gnu",
   "s390x-unknown-linux-gnu",
+  "wasm32-wasip1",
   "wasm32-wasip1-threads",
 ];
 
@@ -52,6 +73,7 @@ function fail(message) {
 function run(command, args, options = {}) {
   const result = childProcess.spawnSync(command, args, {
     cwd: options.cwd || process.cwd(),
+    env: options.env || process.env,
     stdio: "inherit",
     shell: false,
   });
@@ -130,7 +152,7 @@ function validateTargets(targets) {
 }
 
 function normalizeTargetName(target) {
-  return target === "wasm32-wasi-preview1-threads" ? "wasm32-wasip1-threads" : target;
+  return normalizeWasiTargetName(target);
 }
 
 function formatJsonStringArrayItems(values, indent) {
@@ -308,10 +330,6 @@ function writeJson(file, value) {
   fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
 }
 
-function createBrowserEntry(packageName) {
-  return `export { default } from '${packageName}-wasm32-wasi'\nexport * from '${packageName}-wasm32-wasi'\n`;
-}
-
 function readDtsExportIdents(cwd) {
   const dtsPath = path.join(cwd, "index.d.ts");
   if (!fs.existsSync(dtsPath)) return [];
@@ -328,42 +346,82 @@ function readDtsExportIdents(cwd) {
   return [...idents];
 }
 
-function removeWasiBrowserTemplateFiles(projectDir) {
-  for (const file of [
-    "browser.js",
-    "wasi-worker.mjs",
-    "wasi-worker-browser.mjs",
-    ...fs
-      .readdirSync(projectDir)
-      .filter((entry) => entry.endsWith(".wasi.cjs") || entry.endsWith(".wasi-browser.js")),
-  ]) {
-    fs.rmSync(path.join(projectDir, file), { force: true });
-  }
-}
+/**
+ * Package `files` globs for the enabled flavors. The globs are added or removed
+ * by the CLI so the scaffold publishes exactly the loaders it generated,
+ * whichever flavors the project configures.
+ */
+const WASI_PACKAGE_FILE_GLOBS = [
+  "*.wasm",
+  "*.cjs",
+  "*.wasi.cjs",
+  "*.d.cts",
+  "*.wasi-browser.js",
+  "*.wasip1-browser.js",
+  "browser.js",
+  "wasi-worker.mjs",
+  "wasi-worker-browser.mjs",
+  "*-deferred.js",
+  "*-deferred.d.ts",
+];
 
 function updateTemplatePackageForTargets(projectDir, targets) {
-  if (targets.some((target) => isWasiTargetName(target))) return;
-
-  removeWasiBrowserTemplateFiles(projectDir);
-
+  const flavors = collectWasiFlavors(targets);
   const packageJsonPath = path.join(projectDir, "package.json");
   const packageJson = readJson(packageJsonPath);
-  if (packageJson.browser === "browser.js" || packageJson.browser === "./browser.js") {
-    delete packageJson.browser;
-  }
-  if (Array.isArray(packageJson.files)) {
-    packageJson.files = packageJson.files.filter(
-      (file) =>
-        file !== "browser.js" &&
-        file !== "./browser.js" &&
-        file !== "*.wasm" &&
-        file !== "*.wasi.cjs" &&
-        file !== "*.wasi-browser.js" &&
-        file !== "wasi-worker.mjs" &&
-        file !== "wasi-worker-browser.mjs",
+  const files = Array.isArray(packageJson.files) ? packageJson.files : [];
+
+  if (flavors.length === 0) {
+    for (const fileName of managedWasiFileNames(readAddonName(packageJson))) {
+      fs.rmSync(path.join(projectDir, fileName), { force: true });
+    }
+    if (packageJson.browser === "browser.js" || packageJson.browser === "./browser.js") {
+      delete packageJson.browser;
+    }
+    packageJson.files = files.filter(
+      (file) => file !== "./browser.js" && !WASI_PACKAGE_FILE_GLOBS.includes(file),
     );
+    writeJson(packageJsonPath, packageJson);
+    return;
   }
+
+  // Keep only the globs of the flavors that are enabled, so a native project
+  // never advertises loader files it does not ship.
+  const wanted = new Set(
+    flavors.flatMap((flavor) =>
+      flavor.threads
+        ? [
+            `*.${flavor.loaderSuffix}.cjs`,
+            `*.${flavor.loaderSuffix}-browser.js`,
+            "wasi-worker.mjs",
+            "wasi-worker-browser.mjs",
+          ]
+        : [
+            `*.${flavor.loaderSuffix}.cjs`,
+            `*.${flavor.loaderSuffix}-browser.js`,
+            "*-deferred.js",
+            "*-deferred.d.ts",
+          ],
+    ),
+  );
+  const retained = files.filter(
+    (file) => !WASI_PACKAGE_FILE_GLOBS.includes(file) && file !== "./browser.js",
+  );
+  retained.push("browser.js", "*.wasm", "*.d.cts", ...wanted);
+  packageJson.files = [...new Set(retained)];
   writeJson(packageJsonPath, packageJson);
+}
+
+function readAddonName(packageJson) {
+  const binaryName = packageJson?.napi?.binaryName;
+  if (typeof binaryName === "string" && binaryName) {
+    return binaryName;
+  }
+  const binaryNames = packageJson?.napi?.binaryNames;
+  if (Array.isArray(binaryNames) && typeof binaryNames[0] === "string") {
+    return binaryNames[0];
+  }
+  return undefined;
 }
 
 function resolveZigNapiPath(targetDir, value) {
@@ -411,20 +469,6 @@ function readBinaryNames(config) {
   return [...new Set(binaryNames)];
 }
 
-function isWasiTargetName(target) {
-  if (!target) return false;
-  try {
-    const parsed = parseTriple(target);
-    return parsed.platformArchABI === "wasm32-wasi";
-  } catch {
-    return target === "wasm32-wasi" || target.startsWith("wasm32-wasip");
-  }
-}
-
-function isWasiThreadsTargetName(target) {
-  return target === "wasm32-wasi-preview1-threads" || target === "wasm32-wasip1-threads";
-}
-
 function appendWasiThreadsBuildFlags(args, target, passthrough) {
   if (!isWasiThreadsTargetName(target)) return;
 
@@ -436,282 +480,157 @@ function appendWasiThreadsBuildFlags(args, target, passthrough) {
   }
 }
 
-function createWasiBinding(
-  wasmFileName,
-  packageName,
-  initialMemory = 4000,
-  maximumMemory = 65536,
-  exportIdents = [],
-) {
-  const namedExports = exportIdents
-    .map((ident) => `module.exports.${ident} = __napiModule.exports.${ident}`)
-    .join("\n");
+/**
+ * Flavors a run must generate loaders for: the flavor of an explicit
+ * `--target`, otherwise every WASI flavor the project configures (threaded
+ * first). A project may configure both flavors; each one gets its own loader,
+ * worker/deferred scripts and `.wasm` artifact name.
+ */
+function resolveConfiguredFlavors(config, flags) {
+  const explicit = getWasiFlavor(flags?.target);
+  if (explicit) {
+    return [explicit];
+  }
+  return collectWasiFlavors(config.targets);
+}
 
-  return `/* eslint-disable */
-/* auto-generated by zig-napi */
-
-const __nodeFs = require('node:fs')
-const __nodePath = require('node:path')
-const { WASI: __nodeWASI } = require('node:wasi')
-const { Worker } = require('node:worker_threads')
-
-const {
-  createOnMessage: __wasmCreateOnMessageForFsProxy,
-  getDefaultContext: __emnapiGetDefaultContext,
-  instantiateNapiModuleSync: __emnapiInstantiateNapiModuleSync,
-} = require('@napi-rs/wasm-runtime')
-
-const __rootDir = __nodePath.parse(process.cwd()).root
-
-const __wasi = new __nodeWASI({
-  version: 'preview1',
-  env: process.env,
-  preopens: {
-    [__rootDir]: __rootDir,
-  },
-})
-
-const __emnapiContext = __emnapiGetDefaultContext()
-
-const __sharedMemory = new WebAssembly.Memory({
-  initial: ${initialMemory},
-  maximum: ${maximumMemory},
-  shared: true,
-})
-
-const __wasmCandidates = [
-  __nodePath.join(__dirname, '${wasmFileName}.debug.wasm'),
-  __nodePath.join(__dirname, '${wasmFileName}.wasm'),
-  __nodePath.join(__dirname, 'zig-out', 'node', '${wasmFileName}.debug.wasm'),
-  __nodePath.join(__dirname, 'zig-out', 'node', '${wasmFileName}.wasm'),
-]
-
-let __wasmFilePath = __wasmCandidates.find((candidate) => __nodeFs.existsSync(candidate))
-
-if (!__wasmFilePath) {
-  try {
-    __wasmFilePath = require.resolve('${packageName}-wasm32-wasi/${wasmFileName}.wasm')
-  } catch {
-    throw new Error('Cannot find ${wasmFileName}.wasm file, and ${packageName}-wasm32-wasi package is not installed.')
+/**
+ * Rejects misspelled WASI triples instead of silently treating them as native
+ * targets, which would build and then fail at runtime.
+ */
+function validateConfiguredTargets(targets) {
+  for (const target of targets) {
+    if (typeof target !== "string" || isWasiTargetName(target)) {
+      continue;
+    }
+    if (/^wasm32-(?:wasip|wasi(?:-|$))/.test(target)) {
+      fail(
+        `unsupported WASI target ${target}; supported targets are wasm32-wasip1, wasm32-wasip1-threads, wasm32-wasi and wasm32-wasi-preview1-threads`,
+      );
+    }
   }
 }
 
-const {
-  instance: __napiInstance,
-  module: __wasiModule,
-  napiModule: __napiModule,
-} = __emnapiInstantiateNapiModuleSync(__nodeFs.readFileSync(__wasmFilePath), {
-  context: __emnapiContext,
-  asyncWorkPoolSize: (function () {
-    const threadsSizeFromEnv = Number(process.env.NAPI_RS_ASYNC_WORK_POOL_SIZE ?? process.env.UV_THREADPOOL_SIZE)
-    return threadsSizeFromEnv > 0 ? threadsSizeFromEnv : 4
-  })(),
-  reuseWorker: true,
-  wasi: __wasi,
-  onCreateWorker() {
-    const worker = new Worker(__nodePath.join(__dirname, 'wasi-worker.mjs'), {
-      env: process.env,
-    })
-    worker.onmessage = ({ data }) => {
-      __wasmCreateOnMessageForFsProxy(__nodeFs)(data)
-    }
-
-    {
-      const kPublicPort = Object.getOwnPropertySymbols(worker).find((symbol) =>
-        symbol.toString().includes('kPublicPort')
-      )
-      if (kPublicPort) {
-        worker[kPublicPort].ref = () => {}
-      }
-
-      const kHandle = Object.getOwnPropertySymbols(worker).find((symbol) =>
-        symbol.toString().includes('kHandle')
-      )
-      if (kHandle) {
-        worker[kHandle].ref = () => {}
-      }
-
-      worker.unref()
-    }
-    return worker
-  },
-  overwriteImports(importObject) {
-    importObject.env = {
-      ...importObject.env,
-      ...importObject.napi,
-      ...importObject.emnapi,
-      memory: __sharedMemory,
-    }
-    return importObject
-  },
-  beforeInit({ instance }) {
-    for (const name of Object.keys(instance.exports)) {
-      if (name.startsWith('__napi_register__')) {
-        instance.exports[name]()
-      }
-    }
-  },
-})
-
-module.exports = __napiModule.exports${namedExports ? `\n${namedExports}` : ""}
-`;
+function wasiNodeBindingModule(config, binaryName, flavor, wasm) {
+  const wasmFileName = `${binaryName}.${flavor.platformArchABI}`;
+  return (
+    createWasiNodeBinding({
+      wasmFileName,
+      packageWasmFileName: wasmFileName,
+      packageName: config.packageName,
+      platformArchABI: flavor.platformArchABI,
+      threads: flavor.threads,
+      initialMemory: wasm.initialMemory,
+      maximumMemory: wasm.maximumMemory,
+    }) + `module.exports = __napiModule.exports\n`
+  );
 }
 
-function createWasiBrowserBinding(
-  wasmFileName,
-  initialMemory = 4000,
-  maximumMemory = 65536,
-  exportIdents = [],
-) {
-  const namedExports = exportIdents
-    .map((ident) => `export const ${ident} = __napiModule.exports.${ident}`)
-    .join("\n");
-
-  return `/* auto-generated by zig-napi */
-import {
-  getDefaultContext as __emnapiGetDefaultContext,
-  instantiateNapiModuleSync as __emnapiInstantiateNapiModuleSync,
-  WASI as __WASI,
-} from '@napi-rs/wasm-runtime'
-
-const __wasi = new __WASI({
-  version: 'preview1',
-})
-
-const __wasmUrl = new URL('./${wasmFileName}.wasm', import.meta.url).href
-const __emnapiContext = __emnapiGetDefaultContext()
-
-const __sharedMemory = new WebAssembly.Memory({
-  initial: ${initialMemory},
-  maximum: ${maximumMemory},
-  shared: true,
-})
-
-const __wasmFile = await fetch(__wasmUrl).then((res) => res.arrayBuffer())
-
-const {
-  instance: __napiInstance,
-  module: __wasiModule,
-  napiModule: __napiModule,
-} = __emnapiInstantiateNapiModuleSync(__wasmFile, {
-  context: __emnapiContext,
-  asyncWorkPoolSize: 4,
-  wasi: __wasi,
-  onCreateWorker() {
-    return new Worker(new URL('./wasi-worker-browser.mjs', import.meta.url), {
-      type: 'module',
-    })
-  },
-  overwriteImports(importObject) {
-    importObject.env = {
-      ...importObject.env,
-      ...importObject.napi,
-      ...importObject.emnapi,
-      memory: __sharedMemory,
-    }
-    return importObject
-  },
-  beforeInit({ instance }) {
-    for (const name of Object.keys(instance.exports)) {
-      if (name.startsWith('__napi_register__')) {
-        instance.exports[name]()
-      }
-    }
-  },
-})
-
-export default __napiModule.exports${namedExports ? `\n${namedExports}` : ""}
-`;
-}
-
-const WASI_WORKER_TEMPLATE = `import fs from "node:fs";
-import { createRequire } from "node:module";
-import { parse } from "node:path";
-import { WASI } from "node:wasi";
-import { parentPort, Worker } from "node:worker_threads";
-
-const require = createRequire(import.meta.url);
-
-const { instantiateNapiModuleSync, MessageHandler, getDefaultContext } = require("@napi-rs/wasm-runtime");
-
-if (parentPort) {
-  parentPort.on("message", (data) => {
-    globalThis.onmessage({ data });
+function wasiBrowserBindingModule(config, binaryName, flavor, wasm) {
+  const wasmFileName = `${binaryName}.${flavor.platformArchABI}`;
+  return createWasiBrowserBinding({
+    wasmFileName,
+    threads: flavor.threads,
+    initialMemory: wasm.initialMemory,
+    maximumMemory: wasm.maximumMemory,
+    fs: wasm.browser.fs,
+    asyncInit: wasm.browser.asyncInit,
+    buffer: wasm.browser.buffer,
+    errorEvent: wasm.browser.errorEvent,
   });
 }
 
-Object.assign(globalThis, {
-  self: globalThis,
-  require,
-  Worker,
-  importScripts(f) {
-    ;(0, eval)(fs.readFileSync(f, "utf8") + "//# sourceURL=" + f);
-  },
-  postMessage(msg) {
-    if (parentPort) {
-      parentPort.postMessage(msg);
-    }
-  },
-});
-
-const emnapiContext = getDefaultContext();
-const __rootDir = parse(process.cwd()).root;
-
-const handler = new MessageHandler({
-  onLoad({ wasmModule, wasmMemory }) {
-    const wasi = new WASI({
-      version: "preview1",
-      env: process.env,
-      preopens: {
-        [__rootDir]: __rootDir,
-      },
-    });
-
-    return instantiateNapiModuleSync(wasmModule, {
-      childThread: true,
-      wasi,
-      context: emnapiContext,
-      overwriteImports(importObject) {
-        importObject.env = {
-          ...importObject.env,
-          ...importObject.napi,
-          ...importObject.emnapi,
-          memory: wasmMemory,
-        };
-      },
-    });
-  },
-});
-
-globalThis.onmessage = function (event) {
-  handler.handle(event);
-};
-`;
-
-const WASI_BROWSER_WORKER_TEMPLATE = `import { instantiateNapiModuleSync, MessageHandler, WASI } from '@napi-rs/wasm-runtime'
-
-const handler = new MessageHandler({
-  onLoad({ wasmModule, wasmMemory }) {
-    const wasi = new WASI({})
-    return instantiateNapiModuleSync(wasmModule, {
-      childThread: true,
-      wasi,
-      overwriteImports(importObject) {
-        importObject.env = {
-          ...importObject.env,
-          ...importObject.napi,
-          ...importObject.emnapi,
-          memory: wasmMemory,
-        }
-      },
-    })
-  },
-})
-
-globalThis.onmessage = function (event) {
-  handler.handle(event)
+function wasiDeferredBindingModule(binaryName, flavor, wasm) {
+  return createWasiDeferredBrowserBinding({
+    wasmFileName: `${binaryName}.${flavor.platformArchABI}`,
+    initialMemory: wasm.initialMemory,
+    maximumMemory: wasm.maximumMemory,
+    buffer: wasm.browser.buffer,
+  });
 }
-`;
+
+function appendWasiExports(source, exportIdents, kind) {
+  const namedExports = exportIdents
+    .map((ident) =>
+      kind === "cjs"
+        ? `module.exports.${ident} = __napiModule.exports.${ident}`
+        : `export const ${ident} = __napiModule.exports.${ident}`,
+    )
+    .join("\n");
+  const defaultExport = kind === "esm" ? `export default __napiModule.exports` : "";
+  const exportsCode = [defaultExport, namedExports].filter(Boolean).join("\n");
+  return exportsCode ? `${source}\n${exportsCode}\n` : source;
+}
+
+/**
+ * Writes every generated file of one flavor. Only files this run wrote are
+ * kept: `removeStaleWasiArtifacts` deletes the loaders of flavors the project
+ * no longer configures.
+ */
+function writeWasiFlavorArtifacts(options) {
+  const { outputDir, config, binaryName, flavor, wasm, exportIdents, written } = options;
+  const suffix = flavor.loaderSuffix;
+  const write = (fileName, content) => {
+    fs.writeFileSync(path.join(outputDir, fileName), content);
+    written.add(fileName);
+  };
+
+  write(
+    `${binaryName}.${suffix}.cjs`,
+    appendWasiExports(wasiNodeBindingModule(config, binaryName, flavor, wasm), exportIdents, "cjs"),
+  );
+  write(`${binaryName}.${suffix}.d.cts`, createWasiBindingTypeDef(`./${binaryName}.${suffix}.cjs`));
+  write(
+    `${binaryName}.${suffix}-browser.js`,
+    appendWasiExports(
+      wasiBrowserBindingModule(config, binaryName, flavor, wasm),
+      exportIdents,
+      "esm",
+    ),
+  );
+
+  if (flavor.threads) {
+    write("wasi-worker.mjs", WASI_WORKER_TEMPLATE);
+    write(
+      "wasi-worker-browser.mjs",
+      createWasiBrowserWorkerBinding(wasm.browser.fs, wasm.browser.errorEvent),
+    );
+    return;
+  }
+
+  write(`${binaryName}.${suffix}-deferred.js`, wasiDeferredBindingModule(binaryName, flavor, wasm));
+  write(
+    `${binaryName}.${suffix}-deferred.d.ts`,
+    createWasiDeferredBrowserBindingTypeDef(`./${binaryName}.${suffix}.cjs`),
+  );
+}
+
+/**
+ * Deletes loader files of flavors that are neither generated by this run nor
+ * configured for the project, so building one flavor does not remove the other
+ * configured flavor's artifacts. Only names the CLI owns for one of the
+ * project's binaries can be removed, so a hand-written file next to the
+ * generated ones is never touched.
+ */
+function removeStaleWasiArtifacts(outputDir, binaryNames, written, retainedFlavors) {
+  const retained = new Set(retainedFlavors.map((flavor) => flavor.platformArchABI));
+  for (const binaryName of binaryNames) {
+    for (const { flavor, fileName } of managedWasiFilesByFlavor(binaryName)) {
+      if (!written.has(fileName) && !retained.has(flavor.platformArchABI)) {
+        fs.rmSync(path.join(outputDir, fileName), { force: true });
+      }
+    }
+  }
+}
+
+/**
+ * The browser entry re-exports the flavor's optional package. A threadless
+ * flavor is preferred when both are configured: it runs in a browser without
+ * cross-origin isolation, which the threaded flavor requires.
+ */
+function resolveBrowserEntryFlavor(flavors) {
+  return flavors.find((flavor) => !flavor.threads) ?? flavors[0];
+}
 
 async function generateWasiBindings(cwd, flags) {
   const config = readZigNapiConfig(cwd, flags);
@@ -719,10 +638,18 @@ async function generateWasiBindings(cwd, flags) {
 }
 
 async function generateWasiBindingsWithConfig(cwd, flags, config, exportIdents) {
-  const shouldGenerate =
-    isWasiTargetName(flags.target) || config.targets.some((target) => isWasiTargetName(target));
+  validateConfiguredTargets([...(flags.target ? [flags.target] : []), ...config.targets]);
+  const flavors = resolveConfiguredFlavors(config, flags);
+  if (flavors.length === 0) return;
 
-  if (!shouldGenerate) return;
+  let wasm;
+  try {
+    wasm = resolveWasmConfig(config);
+  } catch (error) {
+    if (error instanceof WasiConfigError) fail(error.message);
+    throw error;
+  }
+
   const binaryNames = readBinaryNames(config);
   if (binaryNames.length === 0) fail("missing napi.binaryName; required to generate wasm bindings");
   if (!config.packageName) fail("missing package name; required to generate wasm bindings");
@@ -730,29 +657,152 @@ async function generateWasiBindingsWithConfig(cwd, flags, config, exportIdents) 
   const outputDir = path.resolve(cwd, flags.buildOutputDir || ".");
   fs.mkdirSync(outputDir, { recursive: true });
 
-  const initialMemory = config.wasm.initialMemory || 4000;
-  const maximumMemory = config.wasm.maximumMemory || 65536;
-
+  const written = new Set();
   for (const binaryName of binaryNames) {
-    const wasmFileName = `${binaryName}.wasm32-wasi`;
-    fs.writeFileSync(
-      path.join(outputDir, `${binaryName}.wasi.cjs`),
-      createWasiBinding(
-        wasmFileName,
-        config.packageName,
-        initialMemory,
-        maximumMemory,
+    for (const flavor of flavors) {
+      writeWasiFlavorArtifacts({
+        outputDir,
+        config,
+        binaryName,
+        flavor,
+        wasm,
         exportIdents,
-      ),
-    );
-    fs.writeFileSync(
-      path.join(outputDir, `${binaryName}.wasi-browser.js`),
-      createWasiBrowserBinding(wasmFileName, initialMemory, maximumMemory, exportIdents),
+        written,
+      });
+    }
+  }
+  // Configured flavors count too: a single-flavor build must not repoint the
+  // entry at a flavor the project does not actually ship.
+  const entryFlavor = resolveBrowserEntryFlavor([
+    ...flavors,
+    ...collectWasiFlavors(config.targets),
+  ]);
+  fs.writeFileSync(
+    path.join(outputDir, "browser.js"),
+    createWasiBrowserEntry(config.packageName, entryFlavor.platformArchABI, exportIdents),
+  );
+  written.add("browser.js");
+  const retainedFlavors = [...flavors, ...collectWasiFlavors(config.targets)];
+  removeStaleWasiArtifacts(outputDir, binaryNames, written, retainedFlavors);
+}
+
+/**
+ * The linked module imports the memory the loader allocates, so the limits have
+ * to match `napi.wasm` exactly. The options are declared once by the zig-napi
+ * build helper (`src/build/napi-build.zig`), so they are always accepted; the
+ * CLI never probes the build script for them.
+ */
+function appendWasiMemoryBuildFlags(args, config, flavors) {
+  if (flavors.length === 0) return;
+  let buildArgs;
+  try {
+    buildArgs = wasiMemoryBuildArgs(config);
+  } catch (error) {
+    if (error instanceof WasiConfigError) fail(error.message);
+    throw error;
+  }
+  args.push(...buildArgs);
+}
+
+const EMNAPI_PACKAGES = ["emnapi", "@emnapi/core", "@emnapi/runtime"];
+
+/** Directory of an installed package resolved from the project, if any. */
+function resolveInstalledPackageDir(cwd, name) {
+  const resolveOptions = { paths: [cwd] };
+  try {
+    return path.dirname(require.resolve(`${name}/package.json`, resolveOptions));
+  } catch {}
+  try {
+    let directory = path.dirname(require.resolve(name, resolveOptions));
+    for (;;) {
+      const manifestPath = path.join(directory, "package.json");
+      if (fs.existsSync(manifestPath)) {
+        return directory;
+      }
+      const parent = path.dirname(directory);
+      if (parent === directory) {
+        return undefined;
+      }
+      directory = parent;
+    }
+  } catch {
+    return undefined;
+  }
+}
+
+function readPackageVersion(directory) {
+  try {
+    const version = JSON.parse(
+      fs.readFileSync(path.join(directory, "package.json"), "utf8"),
+    ).version;
+    return typeof version === "string" ? version : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The archive the linker uses, the JS plugins and the emnapi runtime must come
+ * from one release: emnapi v2 archives leave async work and thread-safe
+ * functions to the `@emnapi/core` plugins, and a mixed install would link an
+ * archive whose ABI the loaded runtime does not implement. Package resolution
+ * failures are left to the build helper, which reports the archive it needs;
+ * this check only rejects a resolvable-but-wrong install.
+ */
+function resolveEmnapiRuntime(cwd) {
+  const versions = new Map();
+  for (const name of EMNAPI_PACKAGES) {
+    const directory = resolveInstalledPackageDir(cwd, name);
+    if (directory) {
+      versions.set(name, { directory, version: readPackageVersion(directory) });
+    }
+  }
+  if (versions.size === 0) {
+    return undefined;
+  }
+  const missing = EMNAPI_PACKAGES.filter((name) => !versions.has(name));
+  if (missing.length > 0) {
+    fail(
+      `WASI builds need ${EMNAPI_PACKAGES.join(", ")} installed in the project; missing ${missing.join(", ")}`,
     );
   }
-  fs.writeFileSync(path.join(outputDir, "browser.js"), createBrowserEntry(config.packageName));
-  fs.writeFileSync(path.join(outputDir, "wasi-worker.mjs"), WASI_WORKER_TEMPLATE);
-  fs.writeFileSync(path.join(outputDir, "wasi-worker-browser.mjs"), WASI_BROWSER_WORKER_TEMPLATE);
+  const distinct = new Set([...versions.values()].map((entry) => entry.version));
+  if (distinct.size > 1) {
+    fail(
+      `emnapi version mismatch: ${EMNAPI_PACKAGES.map(
+        (name) => `${name}@${versions.get(name).version}`,
+      ).join(", ")}. Install one emnapi release across emnapi, @emnapi/core and @emnapi/runtime`,
+    );
+  }
+  const version = [...distinct][0];
+  if (typeof version === "string" && version.startsWith("1.")) {
+    fail(
+      `emnapi@${version} cannot build WASI addons; zig-napi links the emnapi v2 archives (2.0.0-alpha.5 or newer)`,
+    );
+  }
+  return { version, libDir: path.join(versions.get("emnapi").directory, "lib") };
+}
+
+/**
+ * Points the build at the project's own emnapi archives instead of letting the
+ * helper walk every ancestor directory, so a hoisted install and a nested one
+ * cannot resolve to different releases. The value travels as `EMNAPI_LINK_DIR`
+ * (the environment setting the build helper already reads) rather than as a
+ * `-D` option, so a project pinned to an older zig-napi build script keeps
+ * building instead of failing on an undeclared option.
+ */
+function resolveWasiEmnapiEnv(cwd) {
+  const runtime = resolveEmnapiRuntime(cwd);
+  if (!runtime) {
+    console.warn(
+      "zig-napi: cannot resolve emnapi from this project; the WASI build relies on the build helper to find its archive",
+    );
+    return undefined;
+  }
+  if (fs.existsSync(runtime.libDir)) {
+    return { EMNAPI_LINK_DIR: runtime.libDir };
+  }
+  return undefined;
 }
 
 async function commandNew(projectDir, flags) {
@@ -776,6 +826,9 @@ async function commandNew(projectDir, flags) {
     __FINGERPRINT__: "0x0",
     __CLI_VERSION__: readJson(path.join(packageDir, "package.json")).version,
   });
+  // Loaders are generated from the same code path a build uses, so a scaffold
+  // and a built project cannot drift apart.
+  await generateWasiBindings(targetDir, { target: undefined, buildOutputDir: "." });
   updateTemplatePackageForTargets(targetDir, options.targets);
   repairZigFingerprint(targetDir);
 
@@ -785,14 +838,27 @@ async function commandNew(projectDir, flags) {
 async function commandBuild(flags, passthrough = []) {
   const cwd = path.resolve(process.cwd(), flags.cwd || ".");
   const config = readZigNapiConfig(cwd, flags);
+  // Validate before spending a build on a configuration the generated loaders
+  // could not use.
+  const flavors = resolveConfiguredFlavors(config, flags);
+  try {
+    resolveWasmConfig(config);
+  } catch (error) {
+    if (error instanceof WasiConfigError) fail(error.message);
+    throw error;
+  }
   const args = ["build"];
   if (flags.release) args.push("-Doptimize=ReleaseFast");
   if (flags.target) {
-    args.push(`-Dtarget=${isWasiThreadsTargetName(flags.target) ? "wasm32-wasi" : flags.target}`);
+    // Both WASI flavors build Zig's wasm32-wasi target; only the threaded one
+    // enables atomics/shared memory.
+    args.push(`-Dtarget=${isWasiTargetName(flags.target) ? "wasm32-wasi" : flags.target}`);
   }
   appendWasiThreadsBuildFlags(args, flags.target, passthrough);
+  appendWasiMemoryBuildFlags(args, config, flavors);
   args.push(...passthrough);
-  run("zig", args, { cwd });
+  const emnapiEnv = flavors.length > 0 ? resolveWasiEmnapiEnv(cwd) : undefined;
+  run("zig", args, { cwd, env: emnapiEnv ? { ...process.env, ...emnapiEnv } : process.env });
   await generateWasiBindingsWithConfig(cwd, flags, config, readDtsExportIdents(cwd));
 }
 
