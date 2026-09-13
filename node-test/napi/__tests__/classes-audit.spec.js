@@ -19,16 +19,6 @@ const test = require("ava");
 const loadAddon = require("../../load-addon");
 const audit = loadAddon("classes_audit");
 
-// A child process with an explicit GC is the only way to assert the native
-// allocation baseline of promise-carrying paths (a settled promise keeps its
-// settlement state until GC releases it). Under the WASI/emnapi runtime that
-// combination is flaky for reasons outside this addon - the runtime's promise
-// wrap finalizer (`Capability`) can trap during teardown - so those tests are
-// native only, like the async audit spec's child process tests.
-const isWasi =
-  process.env.NAPI_RS_FORCE_WASI === "true" || process.env.NAPI_RS_FORCE_WASI === "error";
-const nativeOnlyTest = isWasi ? test.skip : test;
-
 // FNV-1a over the UTF-8 bytes of `text`; the fixtures use ASCII payloads.
 function fnv1a(text) {
   let hash = 2166136261;
@@ -512,6 +502,31 @@ test("a worker released from its own completion keeps its payload alive", async 
   );
 });
 
+test("worker threads and the JS thread share one page allocator safely", async (t) => {
+  // The WebAssembly page allocator keeps its free lists in one unsynchronized
+  // global. emnapi runs these workers on real threads while the JavaScript
+  // thread converts arguments and creates promises (which allocate and, once
+  // collected, free native state) - the audit repro trapped inside a free after
+  // the free list handed the same block to a worker and to the JS thread.
+  const workers = [];
+  for (let i = 0; i < 6; i++) workers.push(audit.workerConcurrentAllocations(300));
+
+  const churn = [];
+  for (let round = 0; round < 60; round++) {
+    // JS-thread native allocations and frees on the same page allocator.
+    churn.push(await audit.workerCapturedChecksum("c".repeat(2048)));
+    if (churn.length > 8) churn.shift();
+  }
+
+  const mismatches = await Promise.all(workers);
+  t.deepEqual(
+    mismatches,
+    [0, 0, 0, 0, 0, 0],
+    "no worker may observe memory another thread is using",
+  );
+  t.is(churn.length, 8);
+});
+
 test("queueing, releasing and cancelling a running worker stay safe", async (t) => {
   // Two more `Queue` calls and two `deinit` calls while the work item is
   // running: the queues are refused, the releases are deferred to the
@@ -549,13 +564,14 @@ test("a worker owned result is released after the promise resolves", async (t) =
   t.is(await audit.workerOwnedAsync("worker-owned-async-payload"), "worker-owned-result");
 });
 
-nativeOnlyTest("worker payloads and results return to their allocation baseline", (t) => {
+test("worker payloads and results return to their allocation baseline", (t) => {
   // Every path that hands a payload to a worker, in one process with an
   // explicit GC: the fire-and-forget `Queue` path (whose result no promise ever
   // sees - the audit measured a permanent 100 * 19 byte increase there), the
   // promise path, the borrowed/manual path, cancellation and a release from
   // inside `OnComplete`. A missing release shows up as a positive delta, a
-  // second release as a negative one.
+  // second release as a negative one. This runs under WASI too (a child process
+  // with `--expose-gc` is what the emnapi runtime provides).
   const binding = Object.keys(require.cache).find((key) => key.includes("classes_audit."));
   t.truthy(binding, "the audit addon must be loaded before this test");
   const result = spawnSync(

@@ -13,7 +13,10 @@ const std = @import("std");
 const napi = @import("napi");
 const counting = @import("counting");
 
-var counter = counting.CountingAllocator.init(std.heap.page_allocator);
+// The backing is the *safe* page allocator: emnapi runs worker threads next to
+// the JavaScript thread in one WebAssembly instance, and the raw page allocator
+// keeps its free lists in one unsynchronized global that both of them share.
+var counter = counting.CountingAllocator.init(napi.safePageAllocator());
 
 pub const napi_allocator = counter.allocator();
 
@@ -446,6 +449,48 @@ fn slowLength(input: []const u8) u32 {
     var spin: u32 = 0;
     while (spin < 100_000) : (spin += 1) std.atomic.spinLoopHint();
     return @intCast(input.len);
+}
+
+/// Allocates, fills, verifies and releases several blocks per round on the
+/// *worker* thread while the JavaScript thread keeps allocating on its own.
+///
+/// Under emnapi both threads share one WebAssembly instance, and therefore one
+/// page allocator: with an unsynchronized free list the two threads hand out
+/// the same block to each other, which the pattern check reports - the audit's
+/// "memory access out of bounds" trap inside `Allocator.destroy` was the same
+/// corruption one step later.
+fn concurrentAllocationRounds(rounds: u32) u32 {
+    const allocator = napi.globalAllocator();
+    var mismatches: u32 = 0;
+    var round: u32 = 0;
+    while (round < rounds) : (round += 1) {
+        var buffers: [4][]u8 = undefined;
+        var count: usize = 0;
+        for (&buffers, 0..) |*buffer, index| {
+            buffer.* = allocator.alloc(u8, 1024 + index * 37) catch break;
+            @memset(buffer.*, @intCast(0x40 + index));
+            count += 1;
+        }
+        // Verify only after every block of the round exists: an overlapping
+        // allocation is visible here as a block another thread overwrote.
+        for (buffers[0..count], 0..) |buffer, index| {
+            for (buffer) |byte| {
+                if (byte != @as(u8, @intCast(0x40 + index))) {
+                    mismatches +%= 1;
+                    break;
+                }
+            }
+        }
+        for (buffers[0..count]) |buffer| allocator.free(buffer);
+    }
+    return mismatches;
+}
+
+/// Exercise the shared page allocator from a worker thread. The returned count
+/// must be zero: any other value means two threads were handed the same live
+/// block.
+pub fn workerConcurrentAllocations(env: napi.Env, rounds: u32) !napi.Promise {
+    return napi.Worker(env, .{ .data = rounds, .Execute = concurrentAllocationRounds }).AsyncQueue();
 }
 
 /// Manual transfer: the payload stays owned by the caller, which releases it in
