@@ -160,6 +160,25 @@ wasiTest("a throwing listener rejects with its own value", (t) => {
   });
 });
 
+wasiTest("cancellation reaches the producer without a timer, on both flavors", (t) => {
+  forEachFlavor(t, "abort_from_callback", (assertT, flavor, result) => {
+    assertT.is(result.pre.state, "rejected", `${flavor.file}: a pre-aborted task must reject`);
+    assertT.is(result.pre.code, "AbortError", `${flavor.file}: with AbortError`);
+    for (const [index, settled] of result.settled.entries()) {
+      assertT.is(settled.state, "rejected", `${flavor.file}: task ${index} must reject`);
+      assertT.is(settled.code, "AbortError", `${flavor.file}: task ${index} must reject with AbortError`);
+    }
+    // The producer stopped at its next checkpoint instead of finishing: a
+    // threadless host observes the abort on the very event that raised it, a
+    // worker flavor a few hundred events later.
+    assertT.true(result.delivered >= 1, `${flavor.file}: at least one event must be produced`);
+    assertT.true(
+      result.delivered < result.total,
+      `${flavor.file}: the producer must stop early (${result.delivered} of ${result.total})`,
+    );
+  });
+});
+
 wasiTest("the barrier never settles ahead of progress the task already queued", (t) => {
   forEachFlavor(t, "throw_after_finish", (assertT, flavor, result) => {
     if (result.skipped) {

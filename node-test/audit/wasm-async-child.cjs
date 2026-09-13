@@ -115,6 +115,33 @@ function blockHost(ms) {
 }
 
 const scenarios = {
+  /// Cancellation has to be observable without a timer: a timer only fires
+  /// where the task body can run concurrently with it, and the threadless host
+  /// runs that body itself. Driven from the task's own progress callback, the
+  /// abort reaches the producer on every flavor, and a second task sharing the
+  /// signal sees it too - whether it is already running (worker flavor) or
+  /// starts after the first one returned (threadless).
+  abort_from_callback: async (instance) => {
+    const slow = Number(process.env.WASM_ASYNC_SLOW_TASK || "200000000");
+    const total = Number(process.env.WASM_ASYNC_PER_TASK || "1000000");
+    const controller = new AbortController();
+    let delivered = 0;
+    const first = outcome(
+      instance.api.asyncAbortableSliceEvents(total, controller.signal, () => {
+        delivered += 1;
+        if (delivered === 1) controller.abort();
+      }),
+    );
+    const second = outcome(instance.api.asyncMultiSignalTask(slow, controller.signal));
+    const settled = await Promise.all([first, second]);
+    // The pre-aborted shape, which must reject on every flavor: the signal is
+    // already aborted when the task is submitted.
+    const preAborted = new AbortController();
+    preAborted.abort();
+    const pre = await outcome(instance.api.asyncAbortable(4096, preAborted.signal));
+    return { delivered, pre, settled, total };
+  },
+
   /// The barrier must not settle ahead of progress the task already queued: a
   /// listener that throws has to reject the promise with its own value, and
   /// every queued event still has to be delivered.

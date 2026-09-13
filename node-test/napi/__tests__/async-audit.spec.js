@@ -607,21 +607,43 @@ abortTest("pre-aborted and mid-flight async aborts reject with AbortError", asyn
   t.is(pre.state, "rejected");
   t.true(String(pre.message).includes("AbortError"));
 
+  // The mid-flight abort is driven from inside the task's own progress
+  // callback rather than from a timer. A timer is only a cancellation trigger
+  // where the task body can run concurrently with it: the threadless WASI build
+  // runs the body on the host thread, so a timer would fire after the body
+  // returned, and a task that already finished keeps the result it produced
+  // (the same rule the native runtime follows for a late abort). The callback
+  // runs while the producer is still going on every flavor, which makes the
+  // abort observable everywhere instead of racing the dispatch.
   const controller = new AbortController();
-  const pending = native.asyncAbortable(200000000, controller.signal);
-  await delay(0);
-  controller.abort();
+  const total = 1000000;
+  let delivered = 0;
+  const pending = native.asyncAbortableSliceEvents(total, controller.signal, () => {
+    delivered += 1;
+    if (delivered === 1) {
+      controller.abort();
+    }
+  });
   const mid = await settlesWithin(pending, 5000);
   t.is(mid.state, "rejected");
   t.true(String(mid.message).includes("AbortError"));
+  t.true(delivered < total, `the producer must stop at its next checkpoint (${delivered})`);
 });
 
 abortTest("one signal can drive several tasks without cross-talk", async (t) => {
   const controller = new AbortController();
-  const first = native.asyncMultiSignalTask(200000000, controller.signal);
+  const total = 1000000;
+  let delivered = 0;
+  // Same construction: the abort comes from the first task's own callback, so
+  // the second task sees it whether it is already running (a worker flavor) or
+  // starts after the first one finished (the threadless host).
+  const first = native.asyncAbortableSliceEvents(total, controller.signal, () => {
+    delivered += 1;
+    if (delivered === 1) {
+      controller.abort();
+    }
+  });
   const second = native.asyncMultiSignalTask(200000000, controller.signal);
-  await delay(0);
-  controller.abort();
   const outcomes = await Promise.all([settlesWithin(first, 5000), settlesWithin(second, 5000)]);
   for (const outcome of outcomes) {
     t.is(outcome.state, "rejected");
