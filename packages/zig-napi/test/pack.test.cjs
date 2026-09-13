@@ -19,7 +19,7 @@ function run(command, args, cwd) {
 
 test(
   "packed CLI scaffolds and builds using only its installed Zig sources",
-  { timeout: 300_000 },
+  { timeout: 600_000 },
   () => {
     const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "zig-napi-pack-"));
     try {
@@ -48,6 +48,8 @@ test(
           "audit-addon",
           "--addon",
           "audit_addon",
+          "--targets",
+          "aarch64-apple-darwin,wasm32-wasip1-threads",
         ],
         tooling,
       );
@@ -69,6 +71,20 @@ test(
       assert.ok(addon);
       const load = `const a=require(${JSON.stringify(path.join(outputDir, addon))});if(a.add(2,3)!==5)process.exit(1);`;
       run(process.execPath, ["-e", load], project);
+
+      // Install the scaffold's real runtime dependencies outside the workspace.
+      // The CLI has not been published yet, so resolve that dev dependency to
+      // the package we just installed, retaining the generated-version check.
+      generated.devDependencies["@ohos-rs/zig-cli"] = `file:${installed}`;
+      fs.writeFileSync(path.join(project, "package.json"), JSON.stringify(generated, null, 2));
+      run("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund"], project);
+      run(
+        process.execPath,
+        [cli, "build", "--cwd", project, "--target", "wasm32-wasip1-threads"],
+        tooling,
+      );
+      const wasiLoad = `const a=require('./audit_addon.wasi.cjs');if(a.add(2,3)!==5)process.exit(1);`;
+      run(process.execPath, ["-e", wasiLoad], project);
     } finally {
       fs.rmSync(scratch, { recursive: true, force: true });
     }

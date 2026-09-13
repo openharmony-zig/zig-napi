@@ -66,9 +66,7 @@ async function settlesWithin(call, timeoutMs) {
 
 function artifactRoot() {
   return path.resolve(
-    parseArg("artifact-root") ??
-      process.env.ZIG_NAPI_WASM_ARTIFACT_ROOT ??
-      nodeTestDir,
+    parseArg("artifact-root") ?? process.env.ZIG_NAPI_WASM_ARTIFACT_ROOT ?? nodeTestDir,
   );
 }
 
@@ -90,10 +88,7 @@ function registerTests() {
   for (const flavor of FLAVORS) {
     test(`WASI ${flavor.name} ABI (${flavor.platformArchABI})`, () => {
       for (const module of ["async_audit", "example", "audit"]) {
-        const artifact = path.join(
-          root,
-          `${module}.${flavor.platformArchABI}.wasm`,
-        );
+        const artifact = path.join(root, `${module}.${flavor.platformArchABI}.wasm`);
         assert.ok(
           fs.existsSync(artifact),
           `missing artifact ${artifact}; build it with ` +
@@ -106,14 +101,7 @@ function registerTests() {
       const started = Date.now();
       const result = spawnSync(
         process.execPath,
-        [
-          "--expose-gc",
-          __filename,
-          CHILD_FLAG,
-          flavor.name,
-          root,
-          String(DEFAULT_TIMEOUT_MS),
-        ],
+        ["--expose-gc", __filename, CHILD_FLAG, flavor.name, root, String(DEFAULT_TIMEOUT_MS)],
         {
           cwd: nodeTestDir,
           encoding: "utf8",
@@ -141,18 +129,18 @@ function registerTests() {
   const oomRoot = oomArtifactRoot();
   test(
     "WASI worker allocation failure is reported, not trapped",
-    { skip: oomRoot ? false : "set ZIG_NAPI_WASM_OOM_ARTIFACT_ROOT to a -Dwasi-max-memory-pages build" },
+    {
+      skip: oomRoot
+        ? false
+        : "set ZIG_NAPI_WASM_OOM_ARTIFACT_ROOT to a -Dwasi-max-memory-pages build",
+    },
     () => {
-      const result = spawnSync(
-        process.execPath,
-        [__filename, OOM_CHILD_FLAG, oomRoot],
-        {
-          cwd: nodeTestDir,
-          encoding: "utf8",
-          timeout: DEFAULT_TIMEOUT_MS,
-          env: { ...process.env },
-        },
-      );
+      const result = spawnSync(process.execPath, [__filename, OOM_CHILD_FLAG, oomRoot], {
+        cwd: nodeTestDir,
+        encoding: "utf8",
+        timeout: DEFAULT_TIMEOUT_MS,
+        env: { ...process.env },
+      });
       const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
       assert.strictEqual(
         result.signal,
@@ -230,8 +218,7 @@ function loadAddonChildMain(flavorValue) {
 /// loader whose wasm heap cannot grow must fail the build with a message that
 /// names the option, instead of linking an addon that traps at startup.
 function registerBuildOptionTests() {
-  const zigAvailable =
-    spawnSync("zig", ["version"], { encoding: "utf8" }).status === 0;
+  const zigAvailable = spawnSync("zig", ["version"], { encoding: "utf8" }).status === 0;
   const cases = [
     {
       args: ["-Dwasi-max-memory-pages=0"],
@@ -263,11 +250,12 @@ function registerBuildOptionTests() {
     { skip: zigAvailable ? false : "zig is not on PATH" },
     () => {
       for (const { args, expect } of cases) {
-        const result = spawnSync(
-          "zig",
-          ["build", "-Dtarget=wasm32-wasi", ...args],
-          { cwd: nodeTestDir, encoding: "utf8", timeout: 120000, env: { ...process.env } },
-        );
+        const result = spawnSync("zig", ["build", "-Dtarget=wasm32-wasi", ...args], {
+          cwd: nodeTestDir,
+          encoding: "utf8",
+          timeout: 120000,
+          env: { ...process.env },
+        });
         const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
         assert.notStrictEqual(result.status, 0, `\`${args.join(" ")}\` must fail the build`);
         assert.match(output, expect, `\`${args.join(" ")}\` produced:\n${output}`);
@@ -285,12 +273,8 @@ async function oomChildMain() {
   const createRequireFromTest = require("node:module").createRequire(
     path.join(nodeTestDir, "package.json"),
   );
-  const {
-    createContext,
-    instantiateNapiModuleSync,
-    emnapiAsyncWorkPlugin,
-    emnapiTSFNPlugin,
-  } = createRequireFromTest("@napi-rs/wasm-runtime");
+  const { createContext, instantiateNapiModuleSync, emnapiAsyncWorkPlugin, emnapiTSFNPlugin } =
+    createRequireFromTest("@napi-rs/wasm-runtime");
   const { WASI } = require("node:wasi");
 
   const artifact = path.join(root, "async_audit.wasm32-wasi.wasm");
@@ -360,15 +344,12 @@ async function oomChildMain() {
     "aligned_alloc below the class limit must fail cleanly on a small heap",
   );
   assert.ok(
-    (smallMemory.buffer.byteLength / 65536) - pagesBefore < 64,
+    smallMemory.buffer.byteLength / 65536 - pagesBefore < 64,
     "a refused request must not grow the linear memory by its full size",
   );
   console.log("# class-limit requests fail cleanly on a small heap");
 
-  const outcome = await settlesWithin(
-    () => napiModule.exports.asyncThreadValue(41),
-    30000,
-  );
+  const outcome = await settlesWithin(() => napiModule.exports.asyncThreadValue(41), 30000);
   assert.notStrictEqual(outcome.kind, "hung", "queued async work must settle, not hang");
   console.log(`# async work after exhaustion: ${outcome.kind}`);
 
@@ -453,8 +434,7 @@ async function childMain() {
   const { WASI } = require("node:wasi");
   const { Worker } = require("node:worker_threads");
 
-  const artifact = (module) =>
-    path.join(root, `${module}.${flavor.platformArchABI}.wasm`);
+  const artifact = (module) => path.join(root, `${module}.${flavor.platformArchABI}.wasm`);
 
   const bytesOf = (module) => fs.readFileSync(artifact(module));
   const memoryImport = readMemoryImport(bytesOf("async_audit"));

@@ -69,14 +69,23 @@ function runScenario(scenario, flavor, timeoutMs = 60000, env = {}) {
 function forEachFlavor(t, scenario, assert, options) {
   const observed = [];
   for (const flavor of flavors) {
-    const outcome = runScenario(scenario, flavor, options && options.timeoutMs, options && options.env);
+    const outcome = runScenario(
+      scenario,
+      flavor,
+      options && options.timeoutMs,
+      options && options.env,
+    );
     const label = `${scenario} (${flavor.threaded ? "threaded" : "threadless"})`;
     if (outcome.timedOut) {
-      t.fail(`${label}: no result within the parent-enforced timeout; child output: ${outcome.stderr.trim().slice(-400)}`);
+      t.fail(
+        `${label}: no result within the parent-enforced timeout; child output: ${outcome.stderr.trim().slice(-400)}`,
+      );
       continue;
     }
     if (outcome.status !== 0 || !outcome.payload) {
-      t.fail(`${label}: exited with ${outcome.status}${outcome.signal ? ` (${outcome.signal})` : ""}: ${outcome.stderr.trim().slice(-600)}`);
+      t.fail(
+        `${label}: exited with ${outcome.status}${outcome.signal ? ` (${outcome.signal})` : ""}: ${outcome.stderr.trim().slice(-600)}`,
+      );
       continue;
     }
     observed.push({ flavor, outcome });
@@ -87,7 +96,11 @@ function forEachFlavor(t, scenario, assert, options) {
 
 wasiTest("the pre-teardown barrier exports exist on both flavors", (t) => {
   forEachFlavor(t, "barrier", (assertT, flavor, result) => {
-    assertT.is(result.exports, "function", `${flavor.file}: napi_prepare_wasm_env_cleanup must be exported`);
+    assertT.is(
+      result.exports,
+      "function",
+      `${flavor.file}: napi_prepare_wasm_env_cleanup must be exported`,
+    );
     assertT.is(result.before, 0, `${flavor.file}: an idle environment has nothing queued`);
     // Called twice: the loader may retry a disposal.
     assertT.is(result.pending, 0, `${flavor.file}: the barrier stays idempotent`);
@@ -122,7 +135,11 @@ wasiTest("a finished task whose completion is not published yet still settles", 
     }
     assertT.is(result.primed, 2, `${flavor.file}: the pool must be warm`);
     assertT.is(result.pendingAtBarrier, 0, `${flavor.file}: nothing was queued yet`);
-    assertT.is(result.settled.state, "resolved", `${flavor.file}: the task's own result must settle it`);
+    assertT.is(
+      result.settled.state,
+      "resolved",
+      `${flavor.file}: the task's own result must settle it`,
+    );
     assertT.is(result.settled.value, 3, `${flavor.file}: with the value it produced`);
     assertT.not(result.drained, -1, `${flavor.file}: the queue ends empty`);
   });
@@ -137,7 +154,11 @@ wasiTest("events past the queue limit stay ordered and never wedge the host", (t
     if (flavor.threaded) {
       // The bounded queue is real on the worker flavor, and the producer parks
       // on it instead of growing memory.
-      assertT.is(result.highWater, result.limit, `${flavor.file}: the producer must park on the bound`);
+      assertT.is(
+        result.highWater,
+        result.limit,
+        `${flavor.file}: the producer must park on the bound`,
+      );
       assertT.is(result.inline, false, `${flavor.file}: worker events go through the queue`);
     } else {
       // Nothing could drain a queue the producer waits on when the producer *is*
@@ -166,7 +187,11 @@ wasiTest("cancellation reaches the producer without a timer, on both flavors", (
     assertT.is(result.pre.code, "AbortError", `${flavor.file}: with AbortError`);
     for (const [index, settled] of result.settled.entries()) {
       assertT.is(settled.state, "rejected", `${flavor.file}: task ${index} must reject`);
-      assertT.is(settled.code, "AbortError", `${flavor.file}: task ${index} must reject with AbortError`);
+      assertT.is(
+        settled.code,
+        "AbortError",
+        `${flavor.file}: task ${index} must reject with AbortError`,
+      );
     }
     // The producer stopped at its next checkpoint instead of finishing: a
     // threadless host observes the abort on the very event that raised it, a
@@ -190,10 +215,20 @@ wasiTest("the barrier never settles ahead of progress the task already queued", 
     }
     // The barrier found the task finished with progress still queued: it has to
     // queue the settlement behind that progress.
-    assertT.true(result.barrierPending >= 1, `${flavor.file}: the deferred settlement must be visible to the loader`);
-    assertT.is(result.seen.length, result.total, `${flavor.file}: every queued event must still be delivered`);
+    assertT.true(
+      result.barrierPending >= 1,
+      `${flavor.file}: the deferred settlement must be visible to the loader`,
+    );
+    assertT.is(
+      result.seen.length,
+      result.total,
+      `${flavor.file}: every queued event must still be delivered`,
+    );
     assertT.deepEqual(result.seen, [0, 1, 2], `${flavor.file}: in the producer's order`);
-    assertT.true(result.identity, `${flavor.file}: the queued listener's own throw must be the rejection reason`);
+    assertT.true(
+      result.identity,
+      `${flavor.file}: the queued listener's own throw must be the rejection reason`,
+    );
     assertT.not(result.drained, -1, `${flavor.file}: the queue ends empty`);
   });
 });
@@ -209,7 +244,11 @@ wasiTest("the deferred settlement keeps a primitive thrown identity", (t) => {
         assertT.is(flavor.threaded, false, `${flavor.file}: only the threadless flavor may skip`);
         return;
       }
-      assertT.is(result.reasonType, "string", `${flavor.file}: the primitive must be the rejection reason`);
+      assertT.is(
+        result.reasonType,
+        "string",
+        `${flavor.file}: the primitive must be the rejection reason`,
+      );
       assertT.true(result.identity, `${flavor.file}: identity, not a copy of the text`);
       assertT.is(result.seen.length, result.total, `${flavor.file}: every queued event still runs`);
     },

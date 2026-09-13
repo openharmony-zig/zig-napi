@@ -39,10 +39,10 @@
     "test:run": "ava"
   },
   "dependencies": {
-    "@emnapi/core": "^1.11.0",
-    "@emnapi/runtime": "^1.11.0",
-    "@napi-rs/wasm-runtime": "^1.1.6",
-    "emnapi": "^1.11.1"
+    "@emnapi/core": "2.0.0-alpha.5",
+    "@emnapi/runtime": "2.0.0-alpha.5",
+    "@napi-rs/wasm-runtime": "1.2.4",
+    "emnapi": "2.0.0-alpha.5"
   },
   "devDependencies": {
     "@ohos-rs/zig-cli": "__CLI_VERSION__",

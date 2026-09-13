@@ -163,7 +163,9 @@ const scenarios = {
     // Both shapes: a primitive is the one an implementation that re-creates the
     // reason instead of keeping the thrown value gets wrong most quietly.
     const boom =
-      process.env.WASM_ASYNC_THROWN === "primitive" ? "queued-listener-throw" : { marker: "queued-listener-throw" };
+      process.env.WASM_ASYNC_THROWN === "primitive"
+        ? "queued-listener-throw"
+        : { marker: "queued-listener-throw" };
     const seen = [];
     let barrierPending = -1;
     let reason;
@@ -211,7 +213,9 @@ const scenarios = {
     );
     const expected = Array.from({ length: taskCount }, (_unused, index) => index + 1);
     return {
-      matches: values.length === expected.length && values.every((value, index) => value === expected[index]),
+      matches:
+        values.length === expected.length &&
+        values.every((value, index) => value === expected[index]),
       values,
     };
   },

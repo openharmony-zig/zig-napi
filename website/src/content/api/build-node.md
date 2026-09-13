@@ -94,13 +94,13 @@ the versions it found.
 
 The module imports its memory; the loader decides how much to create.
 
-| Setting                            | Default                    | Meaning                                     |
-| ---------------------------------- | -------------------------- | ------------------------------------------- |
-| `-Dwasi-initial-memory-pages=<n>`  | linker minimum (257 pages) | imported memory minimum, 64 KiB pages       |
-| `-Dwasi-max-memory-pages=<n>`      | `65536` (4 GiB)            | imported memory maximum                     |
-| `-Dwasi-stack-size=<bytes>`        | toolchain default (16 MiB) | module stack                                |
-| `.wasi_memory`                     | same defaults              | the programmatic form of the three above    |
-| `wasm.initialMemory` / `wasm.maximumMemory` | `4000` / `65536`   | what the generated loader passes to `WebAssembly.Memory` |
+| Setting                                     | Default                    | Meaning                                                  |
+| ------------------------------------------- | -------------------------- | -------------------------------------------------------- |
+| `-Dwasi-initial-memory-pages=<n>`           | linker minimum (257 pages) | imported memory minimum, 64 KiB pages                    |
+| `-Dwasi-max-memory-pages=<n>`               | `65536` (4 GiB)            | imported memory maximum                                  |
+| `-Dwasi-stack-size=<bytes>`                 | toolchain default (16 MiB) | module stack                                             |
+| `.wasi_memory`                              | same defaults              | the programmatic form of the three above                 |
+| `wasm.initialMemory` / `wasm.maximumMemory` | `4000` / `65536`           | what the generated loader passes to `WebAssembly.Memory` |
 
 Keep the loader's initial size **below** its maximum: a Zig wasi module
 allocates through `sbrk`, which grows the linear memory past its current size,
@@ -114,9 +114,9 @@ Both flavors link `libemnapi-basic-napi-rs.a`, which leaves
 `napi_create_async_work` and the thread-safe function API to the host. The
 `@emnapi/core` plugins (bundled by `@napi-rs/wasm-runtime`) implement them:
 
-* single-threaded: the plugin queues work on the JavaScript thread; the loader
+- single-threaded: the plugin queues work on the JavaScript thread; the loader
   passes `asyncWorkPoolSize: 0` and creates no workers.
-* threaded: the plugin runs work on JavaScript worker threads. The module
+- threaded: the plugin runs work on JavaScript worker threads. The module
   exports `emnapi_async_worker_create` / `emnapi_async_worker_init` for that
   pool; the loader passes `asyncWorkPoolSize > 0`, `onCreateWorker` and a shared
   memory.

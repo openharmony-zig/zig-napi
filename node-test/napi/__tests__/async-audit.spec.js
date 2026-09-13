@@ -359,7 +359,11 @@ abortTest("cancelling releases a producer that waits for queue capacity", async 
   while (Date.now() < until) {
     // busy wait
   }
-  t.is(native.eventQueueHighWater(), expectedInFlight, "the producer must have been blocked on a full queue");
+  t.is(
+    native.eventQueueHighWater(),
+    expectedInFlight,
+    "the producer must have been blocked on a full queue",
+  );
   controller.abort();
   const outcome = await settlesWithin(pending, 5000);
   t.is(outcome.state, "rejected");

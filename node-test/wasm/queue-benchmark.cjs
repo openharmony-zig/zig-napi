@@ -80,19 +80,12 @@ async function runChild() {
   const requireFromPackage = require("node:module").createRequire(
     path.join(nodeTestDir, "package.json"),
   );
-  const {
-    createContext,
-    instantiateNapiModuleSync,
-    emnapiAsyncWorkPlugin,
-    emnapiTSFNPlugin,
-  } = requireFromPackage("@napi-rs/wasm-runtime");
+  const { createContext, instantiateNapiModuleSync, emnapiAsyncWorkPlugin, emnapiTSFNPlugin } =
+    requireFromPackage("@napi-rs/wasm-runtime");
   const { WASI } = require("node:wasi");
   const { Worker } = require("node:worker_threads");
 
-  const artifact = path.join(
-    root,
-    `async_audit.${flavor.platformArchABI}.wasm`,
-  );
+  const artifact = path.join(root, `async_audit.${flavor.platformArchABI}.wasm`);
   const rootDir = path.parse(process.cwd()).root;
   const memory = new WebAssembly.Memory({
     initial: 1024,
@@ -124,8 +117,7 @@ async function runChild() {
     options.onCreateWorker = () =>
       new Worker(path.join(nodeTestDir, "wasi-worker.mjs"), { env: process.env });
   }
-  const addon = instantiateNapiModuleSync(fs.readFileSync(artifact), options)
-    .napiModule.exports;
+  const addon = instantiateNapiModuleSync(fs.readFileSync(artifact), options).napiModule.exports;
   const produce = flavor.sharedMemory
     ? (count, listener) => addon.asyncSliceEvents(count, listener)
     : (count, listener) => addon.asyncSliceEventsSingle(count, listener);
@@ -239,11 +231,7 @@ async function runChild() {
       "a stalled listener must force events through the bounded queue (high-water stayed 0)",
     );
   } else {
-    assert.strictEqual(
-      eventQueueHighWater,
-      0,
-      "without a listener no event may be queued",
-    );
+    assert.strictEqual(eventQueueHighWater, 0, "without a listener no event may be queued");
   }
 
   await gcAndSettle();
@@ -307,9 +295,7 @@ async function runChild() {
 
 function main() {
   const root = path.resolve(
-    parseArg("artifact-root") ??
-      process.env.ZIG_NAPI_WASM_ARTIFACT_ROOT ??
-      nodeTestDir,
+    parseArg("artifact-root") ?? process.env.ZIG_NAPI_WASM_ARTIFACT_ROOT ?? nodeTestDir,
   );
   const events = Number(parseArg("events") ?? 3000);
   const stallMs = Number(parseArg("stall-ms") ?? 300);
@@ -318,10 +304,7 @@ function main() {
 
   for (const flavor of selectFlavors()) {
     for (const mode of ["no-listener", "stalled-listener"]) {
-      const artifact = path.join(
-        root,
-        `async_audit.${FLAVOR_META[flavor].platformArchABI}.wasm`,
-      );
+      const artifact = path.join(root, `async_audit.${FLAVOR_META[flavor].platformArchABI}.wasm`);
       assert.ok(fs.existsSync(artifact), `missing artifact ${artifact}`);
 
       const result = spawnSync(

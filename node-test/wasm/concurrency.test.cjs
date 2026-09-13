@@ -57,7 +57,12 @@ function registerTests() {
       const result = spawnSync(
         process.execPath,
         ["--expose-gc", __filename, CHILD_FLAG, flavor.name, root],
-        { cwd: nodeTestDir, encoding: "utf8", timeout: DEFAULT_TIMEOUT_MS, env: { ...process.env } },
+        {
+          cwd: nodeTestDir,
+          encoding: "utf8",
+          timeout: DEFAULT_TIMEOUT_MS,
+          env: { ...process.env },
+        },
       );
       const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
       assert.strictEqual(
@@ -88,12 +93,8 @@ async function childMain() {
   const requireFromPackage = require("node:module").createRequire(
     path.join(nodeTestDir, "package.json"),
   );
-  const {
-    createContext,
-    instantiateNapiModuleSync,
-    emnapiAsyncWorkPlugin,
-    emnapiTSFNPlugin,
-  } = requireFromPackage("@napi-rs/wasm-runtime");
+  const { createContext, instantiateNapiModuleSync, emnapiAsyncWorkPlugin, emnapiTSFNPlugin } =
+    requireFromPackage("@napi-rs/wasm-runtime");
   const { WASI } = require("node:wasi");
   const { Worker } = require("node:worker_threads");
 
@@ -123,10 +124,7 @@ async function childMain() {
     options.onCreateWorker = () =>
       new Worker(path.join(nodeTestDir, "wasi-worker.mjs"), { env: process.env });
   }
-  const { instance, napiModule } = instantiateNapiModuleSync(
-    fs.readFileSync(artifact),
-    options,
-  );
+  const { instance, napiModule } = instantiateNapiModuleSync(fs.readFileSync(artifact), options);
   const addon = napiModule.exports;
   const produce = flavor.sharedMemory
     ? (count, listener) => addon.asyncSliceEvents(count, listener)
@@ -257,8 +255,7 @@ async function childMain() {
     assert.notStrictEqual(outPointer, 0, `${scope}: scratch block for the out parameter`);
     // A fresh view per access: the views detach when the heap grows, which the
     // workloads above are allowed to do.
-    const readOut = () =>
-      new DataView(memory.buffer, outPointer >>> 0, 8).getUint32(0, true);
+    const readOut = () => new DataView(memory.buffer, outPointer >>> 0, 8).getUint32(0, true);
     const writeOut = (value) =>
       new DataView(memory.buffer, outPointer >>> 0, 8).setUint32(0, value, true);
     // wasi-libc numbers errno in the WASI space: EINVAL is 28 there, not the 22
@@ -306,11 +303,7 @@ async function childMain() {
     // valloc is page aligned (64 KiB on wasm), not 16 bytes.
     const pageAligned = valloc(64);
     assert.notStrictEqual(pageAligned, 0, `${scope}: valloc must succeed`);
-    assert.strictEqual(
-      (pageAligned >>> 0) % 65536,
-      0,
-      `${scope}: valloc must be page aligned`,
-    );
+    assert.strictEqual((pageAligned >>> 0) % 65536, 0, `${scope}: valloc must be page aligned`);
     free(pageAligned);
   }
 
@@ -321,9 +314,7 @@ async function childMain() {
   await gcAndSettle();
   const baselineBytes = addon.activeBytes();
   const baselineAllocations = addon.allocationCount();
-  console.log(
-    `# baseline: activeBytes=${baselineBytes} allocations=${baselineAllocations}`,
-  );
+  console.log(`# baseline: activeBytes=${baselineBytes} allocations=${baselineAllocations}`);
 
   // 1. Four producers emit events at the same time, repeatedly. Every burst is
   //    deep copied through the shared heap while the other producers are in the
@@ -391,9 +382,7 @@ async function childMain() {
     for (let index = 0; index < 32; index += 1) {
       allocations.push(instance.exports.malloc(128 + index * 8));
     }
-    const work = Array.from({ length: flavor.producers }, () =>
-      produce(32, () => {}),
-    );
+    const work = Array.from({ length: flavor.producers }, () => produce(32, () => {}));
     for (const pointer of allocations) {
       instance.exports.free(pointer);
     }
@@ -441,13 +430,9 @@ async function childMain() {
   //    a per-group growth slope is exactly what a heap that keeps handing out
   //    corrupted blocks looks like.
   const repeatedWorkload = async () => {
-    await Promise.all(
-      Array.from({ length: flavor.producers }, () => produce(64, () => {})),
-    );
+    await Promise.all(Array.from({ length: flavor.producers }, () => produce(64, () => {})));
     for (let round = 0; round < 4; round += 1) {
-      await Promise.all(
-        Array.from({ length: flavor.producers }, () => produce(32, () => {})),
-      );
+      await Promise.all(Array.from({ length: flavor.producers }, () => produce(32, () => {})));
     }
   };
 
@@ -503,9 +488,7 @@ async function childMain() {
 
 if (process.argv.includes(CHILD_FLAG)) {
   childMain().catch((error) => {
-    console.error(
-      error && error.stack ? error.stack : `${describeFallback(error)}`,
-    );
+    console.error(error && error.stack ? error.stack : `${describeFallback(error)}`);
     process.exitCode = 1;
   });
 } else {

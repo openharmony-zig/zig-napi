@@ -92,9 +92,10 @@ module.exports = function loadAddon(name) {
         : "`zig-napi build --target wasm32-wasip1-threads`")
     : `${name}.node or ${path.basename(wasi[0])}`;
   throw new Error(
-    [`Unable to load ${name}: expected ${expected}`, ...loadErrors.map((error) => `- ${error && error.message ? error.message : error}`)].join(
-      "\n",
-    ),
+    [
+      `Unable to load ${name}: expected ${expected}`,
+      ...loadErrors.map((error) => `- ${error && error.message ? error.message : error}`),
+    ].join("\n"),
   );
 };
 
