@@ -1,8 +1,37 @@
+//! WASI (wasm32-wasip1) support for the Node-API surface.
+//!
+//! A WASI addon links emnapi's `libemnapi-basic-napi-rs.a`, which binds every
+//! `napi_*` reference to the `env` wasm import module and leaves async work and
+//! thread-safe functions to the `@emnapi/core` plugins. The functions in this
+//! file are the few entry points `src/sys/node.zig` routes through Zig instead
+//! of calling them directly; each one forwards to the very implementation the
+//! archive ships, so the ABI stays emnapi's rather than a hand-written copy.
+//! (`napi_get_last_error_info`, `napi_async_init`, `napi_async_destroy`,
+//! `napi_add/remove_async_cleanup_hook`, `napi_get_node_version` and
+//! `node_api_get_module_file_name` are all defined by the archive; `@emnapi/core`
+//! v2 moved the last-error state into the C env struct, so there is no
+//! `_emnapi_get_last_error_info` import to call any more.)
+//!
+//! Threaded (shared memory) addons additionally export the async work pool
+//! entry points `@emnapi/core` calls: `emnapi_async_worker_create` below and
+//! `emnapi_async_worker_init`. emnapi v2 publishes their C implementations in
+//! no WASI archive, and they must write the `__stack_pointer` / `__tls_base`
+//! wasm globals, so both live here.
+
 const builtin = @import("builtin");
+const std = @import("std");
 
 const node = @import("types.zig");
 
 const is_enabled = builtin.cpu.arch == .wasm32 and builtin.os.tag == .wasi;
+
+/// A threaded (shared memory) WASI addon is built with
+/// `-Dcpu=baseline+atomics+bulk_memory+mutable_globals`, which is also what
+/// makes `@emnapi/core` drive its async work through a worker pool. Only those
+/// builds export the pool entry points: a single-threaded addon has no workers
+/// to enter, and the exports would drag in the `_emnapi_spawn_worker` and
+/// `_emnapi_async_worker` host imports for nothing.
+const is_threaded = is_enabled and std.Target.wasm.featureSetHas(builtin.cpu.features, .atomics);
 
 pub const enabled = enabled: {
     _ = AsyncWorkerExports;
@@ -13,363 +42,51 @@ pub fn setup() void {
     _ = AsyncWorkerExports;
 }
 
-const node_release = "node";
-
-const error_messages = [_][*c]const u8{
-    null,
-    "Invalid argument",
-    "An object was expected",
-    "A string was expected",
-    "A string or symbol was expected",
-    "A function was expected",
-    "A number was expected",
-    "A boolean was expected",
-    "An array was expected",
-    "Unknown failure",
-    "An exception is pending",
-    "The async work item was cancelled",
-    "napi_escape_handle already called on scope",
-    "Invalid handle scope usage",
-    "Invalid callback scope usage",
-    "Thread-safe function queue is full",
-    "Thread-safe function handle is closing",
-    "A bigint was expected",
-    "A date was expected",
-    "An arraybuffer was expected",
-    "A detachable arraybuffer was expected",
-    "Main thread would deadlock",
-    "External buffers are not allowed",
-    "Cannot run JavaScript",
-};
-
-const unknown_error_message = "Unknown Node-API error";
-
-var last_error_info = node.napi_extended_error_info{
-    .error_message = null,
-    .engine_reserved = null,
-    .engine_error_code = 0,
-    .error_code = node.napi_ok,
-};
-
-var node_version = node.napi_node_version{
-    .major = 0,
-    .minor = 0,
-    .patch = 0,
-    .release = node_release,
-};
-
-var module_filename: ?[*c]u8 = null;
-
-const AsyncContext = extern struct {
-    low: i32,
-    high: i32,
-};
-
-const AsyncCleanupHook = ?*const fn (?*anyopaque, AsyncCleanupDone, ?*anyopaque) callconv(.c) void;
-const AsyncCleanupDone = ?*const fn (?*anyopaque) callconv(.c) void;
-
-const AsyncCleanupHookInfo = extern struct {
-    env: node.napi_env,
-    fun: AsyncCleanupHook,
-    arg: ?*anyopaque,
-    started: bool,
-};
-
-const AsyncCleanupHookHandle = extern struct {
-    handle: ?*AsyncCleanupHookInfo,
-    env: node.napi_env,
-    user_hook: node.napi_async_cleanup_hook,
-    user_data: ?*anyopaque,
-    done_cb: AsyncCleanupDone,
-    done_data: ?*anyopaque,
-};
-
-const AsyncWorkerArgs = extern struct {
-    stack_base: ?*anyopaque,
-    tls_base: ?*anyopaque,
-};
-
-const async_worker_stack_size = 2 * 1024 * 1024;
-
-extern fn malloc(size: usize) callconv(.c) ?*anyopaque;
-extern fn calloc(count: usize, size: usize) callconv(.c) ?*anyopaque;
-extern fn free(ptr: ?*anyopaque) callconv(.c) void;
-
-extern fn _emnapi_async_worker(arg: ?*anyopaque) callconv(.c) ?*anyopaque;
-extern fn _emnapi_spawn_worker(worker: *const fn (?*anyopaque) callconv(.c) ?*anyopaque, arg: ?*anyopaque) callconv(.c) c_int;
-
-fn apiReturnType(comptime Fn: type) type {
-    return @typeInfo(@typeInfo(Fn).pointer.child).@"fn".return_type.?;
-}
-
+/// `@extern` with a name that the linked emnapi archive also defines: the
+/// linker binds the reference to that definition, and the symbol only stays an
+/// import when nothing defines it.
 pub fn callEmnapiApi(comptime name: [:0]const u8, comptime Fn: type, args: anytype) apiReturnType(Fn) {
     const function = @extern(Fn, .{ .name = name });
     return @call(.auto, function, args);
 }
 
-fn asyncWorkerCreate(directly_spawn: c_int, global_address: ?*anyopaque) callconv(.c) c_int {
-    // Delegate actual worker creation to @napi-rs/wasm-runtime; this only matches emnapi's C ABI.
-    if (directly_spawn != 0) {
-        const index = _emnapi_spawn_worker(_emnapi_async_worker, global_address);
-        if (index < 0) return 0;
-        return -(index + 1);
-    }
-
-    const args_size = @sizeOf(AsyncWorkerArgs);
-    const total_size = args_size + async_worker_stack_size;
-    const block_ptr = calloc(1, total_size) orelse return 0;
-    const block_addr = @intFromPtr(block_ptr);
-    const args: *AsyncWorkerArgs = @ptrCast(@alignCast(block_ptr));
-    args.* = .{
-        .stack_base = @ptrFromInt(block_addr + total_size),
-        .tls_base = null,
-    };
-    return @intCast(block_addr);
-}
-
-const AsyncWorkerExports = if (is_enabled) struct {
-    export fn emnapi_async_worker_create(directly_spawn: c_int, global_address: ?*anyopaque) callconv(.c) c_int {
-        return asyncWorkerCreate(directly_spawn, global_address);
-    }
-} else struct {};
-
-fn setLastError(env: node.node_api_basic_env, status: node.napi_status) node.napi_status {
-    const Fn = *const fn (node.node_api_basic_env, node.napi_status, u32, ?*anyopaque) callconv(.c) node.napi_status;
-    return callEmnapiApi("napi_set_last_error", Fn, .{ env, status, 0, null });
-}
-
-fn clearLastError(env: node.node_api_basic_env) node.napi_status {
-    const Fn = *const fn (node.node_api_basic_env) callconv(.c) node.napi_status;
-    return callEmnapiApi("napi_clear_last_error", Fn, .{env});
-}
-
-fn envCheckGcAccess(env: node.napi_env) void {
-    const Fn = *const fn (node.napi_env) callconv(.c) void;
-    callEmnapiApi("_emnapi_env_check_gc_access", Fn, .{env});
+fn apiReturnType(comptime Fn: type) type {
+    return @typeInfo(@typeInfo(Fn).pointer.child).@"fn".return_type.?;
 }
 
 pub fn getLastErrorInfo(env: node.node_api_basic_env, result: [*c][*c]const node.napi_extended_error_info) node.napi_status {
-    if (env == null) return node.napi_invalid_arg;
-    if (result == null) return setLastError(env, node.napi_invalid_arg);
-
-    const Fn = *const fn (node.napi_env, [*c]node.napi_status, [*c]u32, [*c]?*anyopaque) callconv(.c) void;
-    callEmnapiApi("_emnapi_get_last_error_info", Fn, .{ env, &last_error_info.error_code, &last_error_info.engine_error_code, &last_error_info.engine_reserved });
-
-    if (last_error_info.error_code < error_messages.len) {
-        last_error_info.error_message = error_messages[@intCast(last_error_info.error_code)];
-    } else {
-        last_error_info.error_message = unknown_error_message;
-    }
-
-    if (last_error_info.error_code == node.napi_ok) {
-        _ = clearLastError(env);
-        last_error_info.engine_error_code = 0;
-        last_error_info.engine_reserved = null;
-    }
-
-    result.* = &last_error_info;
-    return node.napi_ok;
+    const Fn = *const fn (node.node_api_basic_env, [*c][*c]const node.napi_extended_error_info) callconv(.c) node.napi_status;
+    return callEmnapiApi("napi_get_last_error_info", Fn, .{ env, result });
 }
 
 pub fn getNodeVersion(env: node.node_api_basic_env, version: [*c][*c]const node.napi_node_version) node.napi_status {
-    if (env == null) return node.napi_invalid_arg;
-    if (version == null) return setLastError(env, node.napi_invalid_arg);
-
-    const Fn = *const fn ([*c]u32, [*c]u32, [*c]u32) callconv(.c) void;
-    callEmnapiApi("_emnapi_get_node_version", Fn, .{ &node_version.major, &node_version.minor, &node_version.patch });
-
-    version.* = &node_version;
-    return clearLastError(env);
-}
-
-pub fn asyncInit(env: node.napi_env, async_resource: node.napi_value, async_resource_name: node.napi_value, result: [*c]node.napi_async_context) node.napi_status {
-    if (env == null) return node.napi_invalid_arg;
-    envCheckGcAccess(env);
-    if (async_resource_name == null) return setLastError(env, node.napi_invalid_arg);
-    if (result == null) return setLastError(env, node.napi_invalid_arg);
-
-    const context_ptr = malloc(@sizeOf(AsyncContext)) orelse return setLastError(env, node.napi_generic_failure);
-    const context: *AsyncContext = @ptrCast(@alignCast(context_ptr));
-    const async_context: node.napi_async_context = @ptrCast(context);
-
-    const Fn = *const fn (node.napi_value, node.napi_value, node.napi_async_context) callconv(.c) node.napi_status;
-    const status = callEmnapiApi("_emnapi_async_init_js", Fn, .{ async_resource, async_resource_name, async_context });
-    if (status != node.napi_ok) {
-        free(context_ptr);
-        return setLastError(env, status);
-    }
-
-    result.* = async_context;
-    return clearLastError(env);
-}
-
-pub fn asyncDestroy(env: node.napi_env, async_context: node.napi_async_context) node.napi_status {
-    if (env == null) return node.napi_invalid_arg;
-    envCheckGcAccess(env);
-    if (async_context == null) return setLastError(env, node.napi_invalid_arg);
-
-    const Fn = *const fn (node.napi_async_context) callconv(.c) node.napi_status;
-    const status = callEmnapiApi("_emnapi_async_destroy_js", Fn, .{async_context});
-    if (status != node.napi_ok) {
-        return setLastError(env, status);
-    }
-
-    free(async_context);
-    return clearLastError(env);
-}
-
-fn runtimeKeepalivePush() void {
-    const Fn = *const fn () callconv(.c) void;
-    callEmnapiApi("_emnapi_runtime_keepalive_push", Fn, .{});
-}
-
-fn runtimeKeepalivePop() void {
-    const Fn = *const fn () callconv(.c) void;
-    callEmnapiApi("_emnapi_runtime_keepalive_pop", Fn, .{});
-}
-
-fn ctxIncreaseWaitingRequestCounter() void {
-    const Fn = *const fn () callconv(.c) void;
-    callEmnapiApi("_emnapi_ctx_increase_waiting_request_counter", Fn, .{});
-}
-
-fn ctxDecreaseWaitingRequestCounter() void {
-    const Fn = *const fn () callconv(.c) void;
-    callEmnapiApi("_emnapi_ctx_decrease_waiting_request_counter", Fn, .{});
-}
-
-fn envRef(env: node.napi_env) void {
-    const Fn = *const fn (node.napi_env) callconv(.c) void;
-    callEmnapiApi("_emnapi_env_ref", Fn, .{env});
-}
-
-fn envUnref(env: node.napi_env) void {
-    const Fn = *const fn (node.napi_env) callconv(.c) void;
-    callEmnapiApi("_emnapi_env_unref", Fn, .{env});
-}
-
-fn setImmediate(callback: AsyncCleanupDone, data: ?*anyopaque) void {
-    const Fn = *const fn (AsyncCleanupDone, ?*anyopaque) callconv(.c) void;
-    callEmnapiApi("_emnapi_set_immediate", Fn, .{ callback, data });
-}
-
-fn finishAsyncCleanupHook(arg: ?*anyopaque) callconv(.c) void {
-    const info: *AsyncCleanupHookInfo = @ptrCast(@alignCast(arg.?));
-    runtimeKeepalivePop();
-    ctxDecreaseWaitingRequestCounter();
-    free(info);
-}
-
-fn runAsyncCleanupHook(arg: ?*anyopaque) callconv(.c) void {
-    const info: *AsyncCleanupHookInfo = @ptrCast(@alignCast(arg.?));
-    runtimeKeepalivePush();
-    ctxIncreaseWaitingRequestCounter();
-    info.started = true;
-    info.fun.?(info.arg, finishAsyncCleanupHook, info);
-}
-
-fn achHandleHook(data: ?*anyopaque, done_cb: AsyncCleanupDone, done_data: ?*anyopaque) callconv(.c) void {
-    const handle: *AsyncCleanupHookHandle = @ptrCast(@alignCast(data.?));
-    handle.done_cb = done_cb;
-    handle.done_data = done_data;
-    handle.user_hook.?(@ptrCast(handle), handle.user_data);
-}
-
-fn addAsyncEnvironmentCleanupHook(env: node.napi_env, fun: AsyncCleanupHook, arg: ?*anyopaque) ?*AsyncCleanupHookInfo {
-    const info_ptr = malloc(@sizeOf(AsyncCleanupHookInfo)) orelse return null;
-    const info: *AsyncCleanupHookInfo = @ptrCast(@alignCast(info_ptr));
-    info.* = .{
-        .env = env,
-        .fun = fun,
-        .arg = arg,
-        .started = false,
-    };
-
-    const status = node.napi_add_env_cleanup_hook(env, runAsyncCleanupHook, info);
-    if (status != node.napi_ok) {
-        free(info_ptr);
-        return null;
-    }
-
-    return info;
-}
-
-fn removeAsyncEnvironmentCleanupHook(info: *AsyncCleanupHookInfo) void {
-    if (info.started) return;
-    _ = node.napi_remove_env_cleanup_hook(info.env, runAsyncCleanupHook, info);
-}
-
-fn achHandleCreate(env: node.napi_env, user_hook: node.napi_async_cleanup_hook, user_data: ?*anyopaque) ?*AsyncCleanupHookHandle {
-    const handle_ptr = calloc(1, @sizeOf(AsyncCleanupHookHandle)) orelse return null;
-    const handle: *AsyncCleanupHookHandle = @ptrCast(@alignCast(handle_ptr));
-    handle.env = env;
-    handle.user_hook = user_hook;
-    handle.user_data = user_data;
-    handle.handle = addAsyncEnvironmentCleanupHook(env, achHandleHook, handle) orelse {
-        free(handle_ptr);
-        return null;
-    };
-    envRef(env);
-
-    return handle;
-}
-
-fn achHandleEnvUnref(arg: ?*anyopaque) callconv(.c) void {
-    envUnref(@ptrCast(arg));
-}
-
-fn achHandleDelete(handle: *AsyncCleanupHookHandle) void {
-    if (handle.handle) |info| {
-        removeAsyncEnvironmentCleanupHook(info);
-        if (!info.started) free(info);
-    }
-    if (handle.done_cb) |done_cb| done_cb(handle.done_data);
-
-    setImmediate(achHandleEnvUnref, handle.env);
-    free(handle);
-}
-
-pub fn addAsyncCleanupHook(env: node.node_api_basic_env, hook: node.napi_async_cleanup_hook, data: ?*anyopaque, remove_handle: [*c]node.napi_async_cleanup_hook_handle) node.napi_status {
-    if (env == null) return node.napi_invalid_arg;
-    if (hook == null) return setLastError(env, node.napi_invalid_arg);
-
-    const handle = achHandleCreate(env, hook, data) orelse return setLastError(env, node.napi_generic_failure);
-    if (remove_handle != null) {
-        remove_handle.* = @ptrCast(handle);
-    }
-
-    return clearLastError(env);
-}
-
-pub fn removeAsyncCleanupHook(remove_handle: node.napi_async_cleanup_hook_handle) node.napi_status {
-    const handle = remove_handle orelse return node.napi_invalid_arg;
-    achHandleDelete(@ptrCast(@alignCast(handle)));
-    return node.napi_ok;
+    const Fn = *const fn (node.node_api_basic_env, [*c][*c]const node.napi_node_version) callconv(.c) node.napi_status;
+    return callEmnapiApi("napi_get_node_version", Fn, .{ env, version });
 }
 
 pub fn getModuleFileName(env: node.node_api_basic_env, result: [*c][*c]const u8) node.napi_status {
-    if (env == null) return node.napi_invalid_arg;
-    if (result == null) return setLastError(env, node.napi_invalid_arg);
+    const Fn = *const fn (node.node_api_basic_env, [*c][*c]const u8) callconv(.c) node.napi_status;
+    return callEmnapiApi("node_api_get_module_file_name", Fn, .{ env, result });
+}
 
-    if (module_filename) |filename| {
-        free(filename);
-        module_filename = null;
-    }
+pub fn asyncInit(env: node.napi_env, async_resource: node.napi_value, async_resource_name: node.napi_value, result: [*c]node.napi_async_context) node.napi_status {
+    const Fn = *const fn (node.napi_env, node.napi_value, node.napi_value, [*c]node.napi_async_context) callconv(.c) node.napi_status;
+    return callEmnapiApi("napi_async_init", Fn, .{ env, async_resource, async_resource_name, result });
+}
 
-    const Fn = *const fn (node.napi_env, [*c]u8, c_int) callconv(.c) c_int;
-    var len = callEmnapiApi("_emnapi_get_filename", Fn, .{ env, null, 0 });
-    if (len == 0) {
-        result.* = "";
-    } else {
-        const filename_ptr = malloc(@intCast(len + 1)) orelse return setLastError(env, node.napi_generic_failure);
-        const filename: [*c]u8 = @ptrCast(@alignCast(filename_ptr));
-        len = callEmnapiApi("_emnapi_get_filename", Fn, .{ env, filename, len + 1 });
-        filename[@intCast(len)] = 0;
-        module_filename = filename;
-        result.* = filename;
-    }
+pub fn asyncDestroy(env: node.napi_env, async_context: node.napi_async_context) node.napi_status {
+    const Fn = *const fn (node.napi_env, node.napi_async_context) callconv(.c) node.napi_status;
+    return callEmnapiApi("napi_async_destroy", Fn, .{ env, async_context });
+}
 
-    return clearLastError(env);
+pub fn addAsyncCleanupHook(env: node.node_api_basic_env, hook: node.napi_async_cleanup_hook, data: ?*anyopaque, remove_handle: [*c]node.napi_async_cleanup_hook_handle) node.napi_status {
+    const Fn = *const fn (node.node_api_basic_env, node.napi_async_cleanup_hook, ?*anyopaque, [*c]node.napi_async_cleanup_hook_handle) callconv(.c) node.napi_status;
+    return callEmnapiApi("napi_add_async_cleanup_hook", Fn, .{ env, hook, data, remove_handle });
+}
+
+pub fn removeAsyncCleanupHook(remove_handle: node.napi_async_cleanup_hook_handle) node.napi_status {
+    const Fn = *const fn (node.napi_async_cleanup_hook_handle) callconv(.c) node.napi_status;
+    return callEmnapiApi("napi_remove_async_cleanup_hook", Fn, .{remove_handle});
 }
 
 pub fn syncMemory(env: node.napi_env, js_to_wasm: bool, array: [*c]node.napi_value, byte_offset: usize, byte_length: usize) node.napi_status {
@@ -379,3 +96,142 @@ pub fn syncMemory(env: node.napi_env, js_to_wasm: bool, array: [*c]node.napi_val
     }
     return node.napi_ok;
 }
+
+// ---------------------------------------------------------------------------
+// Async work pool (threaded flavor)
+// ---------------------------------------------------------------------------
+
+/// `struct worker_args` from emnapi's `src/thread/async_worker_create.c`: the
+/// host reads `stack_base` at offset 0 and `tls_base` at offset
+/// `@sizeOf(usize)` when a worker starts, so this layout is ABI.
+const AsyncWorkerArgs = extern struct {
+    stack_base: ?*anyopaque,
+    tls_base: ?*anyopaque,
+};
+
+/// Stack handed to each pooled worker. emnapi's C allocator derives this from
+/// the linker's `__stack_high`/`__stack_low` and clamps it to 8 MiB; those are
+/// weak link-time symbols, which Zig cannot declare, so this hands out a fixed
+/// size that comfortably covers a user's `execute` callback.
+const async_worker_stack_size = 2 * 1024 * 1024;
+
+/// The wasm ABI keeps the stack pointer 16 byte aligned.
+const async_worker_stack_align = 16;
+
+extern fn calloc(count: usize, size: usize) callconv(.c) ?*anyopaque;
+
+extern fn _emnapi_async_worker(arg: ?*anyopaque) callconv(.c) ?*anyopaque;
+extern fn _emnapi_spawn_worker(worker: *const fn (?*anyopaque) callconv(.c) ?*anyopaque, arg: ?*anyopaque) callconv(.c) c_int;
+
+/// Synthetic function emitted by wasm-ld: copies the TLS image into `memory`
+/// and installs it as the current thread's TLS base.
+extern fn __wasm_init_tls(memory: [*]u8) callconv(.c) void;
+
+/// Linker-provided TLS layout, read through the wasm globals lld emits. Zig's
+/// `std.Thread.Wasm` reads them the same way; there is no builtin for it.
+inline fn wasmTlsSize() u32 {
+    return asm volatile (
+        \\.globaltype __tls_size, i32, immutable
+        \\global.get __tls_size
+        \\local.set %[ret]
+        : [ret] "=r" (-> u32),
+    );
+}
+
+inline fn wasmTlsAlign() u32 {
+    return asm (
+        \\.globaltype __tls_align, i32, immutable
+        \\global.get __tls_align
+        \\local.set %[ret]
+        : [ret] "=r" (-> u32),
+    );
+}
+
+inline fn wasmTlsBase() usize {
+    return asm (
+        \\.globaltype __tls_base, i32
+        \\global.get __tls_base
+        \\local.set %[ret]
+        : [ret] "=r" (-> usize),
+    );
+}
+
+inline fn setWasmTlsBase(addr: usize) void {
+    asm volatile (
+        \\local.get %[ptr]
+        \\global.set __tls_base
+        :
+        : [ptr] "r" (addr),
+    );
+}
+
+/// Prepares the TLS block for a worker and returns its base, leaving the
+/// caller's own TLS installed. Mirrors `__copy_tls` in
+/// `async_worker_create.c`, which wasi-libc exposes to C but not to Zig.
+fn copyTls(memory: [*]u8) [*]u8 {
+    const previous_base = wasmTlsBase();
+    __wasm_init_tls(memory);
+    setWasmTlsBase(previous_base);
+    return memory;
+}
+
+/// `emnapi_async_worker_create`: `directly_spawn != 0` asks the host to spawn a
+/// pooled worker, anything else allocates the block the worker's entry point
+/// installs. Returns 0 when no worker could be created.
+pub fn workerCreate(directly_spawn: c_int, global_address: ?*anyopaque) c_int {
+    // Mirrors `emnapi_async_worker_create` from emnapi's
+    // `src/thread/async_worker_create.c`. The host calls this with
+    // `directly_spawn != 0` while filling the pool (it must end up in the
+    // host's own spawn path) and with `directly_spawn == 0` to obtain the
+    // per-worker block that `emnapi_async_worker_init` later installs.
+    if (directly_spawn != 0) {
+        const index = _emnapi_spawn_worker(_emnapi_async_worker, global_address);
+        // The host reports the pool slot as `-(index + 1)`; zero means "no
+        // worker". Same expression as the C `(void*)(intptr_t)(-(index + 1))`.
+        return -index - 1;
+    }
+
+    const args_size = @sizeOf(AsyncWorkerArgs);
+    const stack_size = std.mem.alignForward(usize, async_worker_stack_size, async_worker_stack_align);
+    const tls_size = wasmTlsSize();
+    const tls_align = if (tls_size == 0) @as(usize, 1) else wasmTlsAlign();
+    // Room for the aligned TLS image plus the alignment slack it may need.
+    const tls_block_size = if (tls_size == 0) 0 else std.mem.alignForward(usize, tls_size, tls_align) + tls_align;
+    const block_size = args_size + tls_block_size + stack_size + async_worker_stack_align;
+
+    const block_ptr = calloc(1, block_size) orelse return 0;
+    const block_addr = @intFromPtr(block_ptr);
+
+    var tls_base: ?*anyopaque = null;
+    if (tls_size != 0) {
+        const tls_addr = std.mem.alignForward(usize, block_addr + args_size, tls_align);
+        tls_base = @ptrCast(copyTls(@ptrFromInt(tls_addr)));
+    }
+
+    // The stack grows downwards from an aligned top, after the TLS block.
+    const stack_top = std.mem.alignForward(
+        usize,
+        block_addr + args_size + tls_block_size + stack_size,
+        async_worker_stack_align,
+    );
+    const args: *AsyncWorkerArgs = @ptrCast(@alignCast(block_ptr));
+    args.* = .{
+        .stack_base = @ptrFromInt(stack_top),
+        .tls_base = tls_base,
+    };
+    // The host stores this value as a 32 bit wasm pointer and hands it back to
+    // `emnapi_async_worker_init`. `@bitCast` keeps the highest bit intact:
+    // `@intCast` would trap for any block above 2 GiB even though wasm32 memory
+    // may be 4 GiB.
+    return @bitCast(@as(u32, @truncate(block_addr)));
+}
+
+/// `emnapi_async_worker_init` is `src/sys/emnapi_async_worker_init.S`: it has
+/// to switch `__stack_pointer` and `__tls_base` and then return with those
+/// values still installed, which no function with a prologue can do (the
+/// epilogue restores the incoming stack pointer).
+const AsyncWorkerExports = if (is_threaded) struct {
+    export fn emnapi_async_worker_create(directly_spawn: c_int, global_address: ?*anyopaque) callconv(.c) c_int {
+        return workerCreate(directly_spawn, global_address);
+    }
+} else struct {};

@@ -148,6 +148,8 @@ pnpm test
 
 It installs the addon as `zig-out/node/hello.<platform-arch-abi>.node`, for example `hello.darwin-arm64.node`, `hello.linux-x64-gnu.node`, or `hello.win32-x64-msvc.node`. For WASI threads, use `zig-napi build --target wasm32-wasip1-threads`; the CLI maps that to Zig's `wasm32-wasi` target with atomics/shared-memory features, and the output follows napi-rs naming as `hello.wasm32-wasi.wasm`.
 
+WASI addons link emnapi's `libemnapi-basic-napi-rs.a` from a `node_modules/emnapi` install (`emnapi`, `@emnapi/core` and `@emnapi/runtime` at v2, all at the same version), which the build looks for next to the addon project and upwards. `--target wasm32-wasip1` builds the single-threaded flavor as `hello.wasm32-wasip1.wasm` with an unshared imported memory, and `--target wasm32-wasip1-threads` builds the shared-memory flavor; both hand async work and thread-safe functions to the `@emnapi/core` plugins, and the threaded flavor runs them on the plugin's JavaScript worker pool through the `emnapi_async_worker_create` / `emnapi_async_worker_init` exports. Pass `-Demnapi-link-dir=<dir>` (or set `EMNAPI_LINK_DIR`) to select another archive directory, `-Demnapi-archive=<name-or-path>` to select another archive, and `-Dwasi-initial-memory-pages=<pages>` / `-Dwasi-stack-size=<bytes>` when a larger minimum than the linker's is required.
+
 The package also provides a `zig-napi` CLI for Node.js addons. Zig-specific commands such as `new` and `build` are implemented by this project. Packaging commands reuse the community `@napi-rs/cli` API for npm package directory creation, artifact collection, and pre-publish processing.
 
 The CLI requires Node.js 20.17 or newer.
