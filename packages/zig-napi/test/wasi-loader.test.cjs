@@ -151,6 +151,15 @@ function makeInstanceExports() {
     },
     napi_wasm_env_cleanup_pending: function () {
       record("pending");
+      // A probe that throws is not an empty queue: the loader has to keep the
+      // thrown value and stay retryable.
+      if (config().pendingThrows && !calls.pendingThrew) {
+        calls.pendingThrew = true;
+        if (config().pendingThrows === "string") {
+          throw "pending probe failed";
+        }
+        throw new Error("pending probe failed");
+      }
       if (calls.forcePending || config().pendingForever) return 3;
       if (pendingTurns > 0) {
         pendingTurns -= 1;
@@ -161,6 +170,10 @@ function makeInstanceExports() {
   };
   if (config().missingHandshake) {
     delete exports.napi_prepare_wasm_env_cleanup;
+    delete exports.napi_wasm_env_cleanup_pending;
+  }
+  if (config().missingPendingExport) {
+    // The barrier ran, but the queue is not observable.
     delete exports.napi_wasm_env_cleanup_pending;
   }
   return exports;
@@ -557,10 +570,6 @@ test("napi.wasm configuration is validated before anything is generated", () => 
       /must not exceed napi.wasm.maximumMemory/,
     ],
     [
-      { wasm: { initialMemory: 128 } },
-      /needs at least 256 pages \(16777216 bytes\) because the Zig linker reserves a 16 MiB stack/,
-    ],
-    [
       { wasm: { initialMemory: 2048, maximumMemory: 2048 } },
       /leaves no room to grow; the Zig\/wasi-libc allocator grows linear memory/,
     ],
@@ -570,6 +579,15 @@ test("napi.wasm configuration is validated before anything is generated", () => 
   for (const [config, pattern] of invalidCases) {
     assert.throws(() => templates.resolveWasmConfig(config), pattern);
   }
+
+  // There is no page-count floor: a project that lowers the linker stack
+  // (`-Dwasi-stack-size`) can legitimately run with 8 MiB, and the linker is
+  // the authority on whether the image fits. The equality rule still applies.
+  assert.equal(
+    templates.resolveWasmConfig({ wasm: { initialMemory: 128, maximumMemory: 1024 } })
+      .initialMemory,
+    128,
+  );
 });
 
 test("every generated module parses", () => {
@@ -1154,6 +1172,44 @@ test("a stuck settlement queue makes disposal retryable instead of destroying th
   // The queue drains on the retry: disposal then destroys the context.
   globalThis.__wasiStub.forcePending = false;
   await binding[DISPOSE_SYMBOL]();
+  assert.equal(globalThis.__wasiStub.context.destroyed, true);
+});
+
+test("a throwing queue probe preserves its value and stays retryable", async () => {
+  const project = createProject("node-pending-throws", {
+    targets: ["wasm32-wasip1-threads"],
+    packageName: "node-pending-throws",
+  });
+  writePlaceholderWasm(project, "wasm32-wasi");
+  setStubConfig({ pendingThrows: "string" });
+  const binding = requireGeneratedLoader(project);
+
+  // The probe threw, so nothing proved the queue empty: the primitive reaches
+  // the caller unchanged and the context is not destroyed.
+  await assert.rejects(binding[DISPOSE_SYMBOL](), (error) => error === "pending probe failed");
+  assert.equal(globalThis.__wasiStub.context.destroyed, false);
+
+  // The retry probes again, sees an empty queue and completes the disposal.
+  await binding[DISPOSE_SYMBOL]();
+  assert.equal(globalThis.__wasiStub.context.destroyed, true);
+});
+
+test("an unobservable queue keeps the documented bounded blind drain", async () => {
+  const project = createProject("node-pending-missing", {
+    targets: ["wasm32-wasip1-threads"],
+    packageName: "node-pending-missing",
+  });
+  writePlaceholderWasm(project, "wasm32-wasi");
+  setStubConfig({ missingPendingExport: true });
+  const binding = requireGeneratedLoader(project);
+
+  // The barrier ran (prepare is present), only the counter is absent: the
+  // loader waits its bounded blind turns and then destroys, which is the
+  // documented degradation rather than an unproven success.
+  await binding[DISPOSE_SYMBOL]();
+  const events = loadStubEvents().events;
+  assert.ok(events.includes("prepare"), events.join(","));
+  assert.ok(!events.includes("pending"), events.join(","));
   assert.equal(globalThis.__wasiStub.context.destroyed, true);
 });
 

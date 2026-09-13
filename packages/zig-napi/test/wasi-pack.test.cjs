@@ -82,7 +82,13 @@ function runtimePackagesRoot() {
   return undefined;
 }
 
+let packedCliPath;
+
+/** Packs the CLI once per test run and returns the extracted entry point. */
 function extractPackedCli() {
+  if (packedCliPath) {
+    return packedCliPath;
+  }
   const packDir = path.join(scratchRoot, "pack");
   fs.mkdirSync(packDir, { recursive: true });
   run("npm", ["pack", "--pack-destination", packDir], { cwd: packageDir });
@@ -108,8 +114,18 @@ function extractPackedCli() {
     fs.existsSync(path.join(cliDependencies, "@napi-rs", "cli", "package.json")),
     "the CLI package must have its own @napi-rs/cli install",
   );
-  fs.symlinkSync(cliDependencies, path.join(installed, "node_modules"), "dir");
-  return path.join(installed, "bin", "zig-napi.js");
+  const linkedModules = path.join(installed, "node_modules");
+  fs.rmSync(linkedModules, { force: true, recursive: true });
+  fs.symlinkSync(cliDependencies, linkedModules, "dir");
+  packedCliPath = path.join(installed, "bin", "zig-napi.js");
+  return packedCliPath;
+}
+
+/** Links the scaffold's runtime packages, replacing anything already there. */
+function linkRuntimePackages(project, runtimeRoot) {
+  const linkedModules = path.join(project, "node_modules");
+  fs.rmSync(linkedModules, { force: true, recursive: true });
+  fs.symlinkSync(runtimeRoot, linkedModules, "dir");
 }
 
 test("the packed CLI builds and loads both real WASI flavors", { timeout: 900_000 }, () => {
@@ -136,7 +152,7 @@ test("the packed CLI builds and loads both real WASI flavors", { timeout: 900_00
     "wasm32-wasip1-threads,wasm32-wasip1",
   ]);
   // The scaffold resolves its runtime packages like an installed project would.
-  fs.symlinkSync(runtimeRoot, path.join(project, "node_modules"), "dir");
+  linkRuntimePackages(project, runtimeRoot);
 
   // Give the scaffold one asynchronous export per runtime, so the acceptance
   // also covers real async work, its worker pool and the teardown that follows
@@ -310,4 +326,60 @@ test("the packed CLI builds and loads both real WASI flavors", { timeout: 900_00
     timeout: 120_000,
   });
   assert.equal(deferredResult.stdout, "deferred-ok", deferredResult.stderr);
+});
+
+test("a lowered linker stack allows a small initial memory", { timeout: 900_000 }, () => {
+  assert.ok(
+    abiArchiveIntegrated(),
+    "src/build/napi-build.zig does not link the emnapi v2 archive (libemnapi-basic-napi-rs.a), so a real WASI build cannot validate anything",
+  );
+  const runtimeRoot = runtimePackagesRoot();
+  assert.ok(runtimeRoot, "the repository install of emnapi 2.x / @napi-rs/wasm-runtime is missing");
+
+  const packedCli = extractPackedCli();
+  const project = path.join(scratchRoot, "small stack addon");
+  run(process.execPath, [
+    packedCli,
+    "new",
+    project,
+    "--no-interactive",
+    "--no-enable-default-targets",
+    "--name",
+    "small-stack-addon",
+    "--addon",
+    "small_stack_addon",
+    "--targets",
+    "wasm32-wasip1-threads",
+  ]);
+  linkRuntimePackages(project, runtimeRoot);
+  const packageJsonPath = path.join(project, "package.json");
+  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
+  // 8 MiB of linear memory is only valid because the build lowers the stack it
+  // has to fit; the CLI must not impose a page floor of its own.
+  packageJson.napi.wasm = { initialMemory: 128, maximumMemory: 1024 };
+  fs.writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2));
+
+  run(process.execPath, [
+    packedCli,
+    "build",
+    "--cwd",
+    project,
+    "--target",
+    "wasm32-wasip1-threads",
+    "--",
+    "-Dwasi-stack-size=1048576",
+  ]);
+
+  const loader = fs.readFileSync(path.join(project, "small_stack_addon.wasi.cjs"), "utf8");
+  assert.match(loader, /initial: 128/, "the loader must allocate the configured initial memory");
+  assert.match(loader, /maximum: 1024/);
+
+  const load = [
+    'const addon = require("./small_stack_addon.wasi.cjs");',
+    'if (addon.add(2, 3) !== 5) { throw new Error("add returned " + addon.add(2, 3)); }',
+    'const dispose = addon[Symbol.for("napi.rs.wasi.dispose")];',
+    'dispose().then(() => process.stdout.write("small-stack-ok"));',
+  ].join("\n");
+  const loaded = run(process.execPath, ["-e", load], { cwd: project, timeout: 120_000 });
+  assert.equal(loaded.stdout, "small-stack-ok", loaded.stderr);
 });

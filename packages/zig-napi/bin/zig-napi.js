@@ -716,7 +716,8 @@ function appendWasiMemoryBuildFlags(args, config, flavors) {
  * The linker owns the lower bound of the imported memory (linked data plus the
  * stack), so a configured `initialMemory` that is too small for the image fails
  * inside wasm-ld. Turn that into a message that names the configuration the
- * number came from.
+ * number came from. The stack is whatever the build uses - 16 MiB by default,
+ * but a project may pass `-Dwasi-stack-size`, so the hint names both.
  */
 function wasiMemoryFailureHint(config, flavors) {
   if (flavors.length === 0) return undefined;
@@ -724,7 +725,7 @@ function wasiMemoryFailureHint(config, flavors) {
   if (wasm.initialMemory === undefined && wasm.maximumMemory === undefined) {
     return undefined;
   }
-  return `the link failed while napi.wasm.initialMemory=${wasm.initialMemory ?? "default"}/${wasm.maximumMemory ?? "default"} (pages) was passed as -Dwasi-initial-memory-pages/-Dwasi-max-memory-pages; the initial memory must cover the linked image (data plus the 16 MiB default stack), so raise napi.wasm.initialMemory if wasm-ld reports the initial memory as too small`;
+  return `the link failed while napi.wasm.initialMemory=${wasm.initialMemory ?? "default"}/${wasm.maximumMemory ?? "default"} (pages) was passed as -Dwasi-initial-memory-pages/-Dwasi-max-memory-pages; the initial memory must cover the linked image, which is the linked data plus the stack (16 MiB unless the build passes -Dwasi-stack-size), so raise napi.wasm.initialMemory or lower -Dwasi-stack-size if wasm-ld reports the initial memory as too small`;
 }
 
 const EMNAPI_PACKAGES = ["emnapi", "@emnapi/core", "@emnapi/runtime"];

@@ -6,6 +6,18 @@ This project can help us to build native module libraries for OpenHarmony/Harmon
 
 For openharmony, we must use a patched zig library to build. See detail with [zig-patch](https://github.com/openharmony-zig/zig-patch).
 
+### Node.js requirements
+
+The build CLI and the artifacts it produces are separate: the CLI runs on the
+Node.js versions its dependencies support, while an addon only needs the runtime
+of the host that loads it.
+
+| Component | Node.js |
+| --- | --- |
+| `zig-napi` build CLI | `^20.17.0 \|\| ^22.13.0 \|\| >=23.5.0` — the range `@napi-rs/cli` 3.9.1 and `@inquirer/prompts` require (Node 21 and 22.0–22.12 are not supported by them) |
+| Native addons (`*.node`) | any Node.js exposing the N-API version the addon targets; see the supported runtime matrix in the repository README |
+| WASI loaders (`*.wasi.cjs`, `*.wasip1.cjs`, `*-browser.js`) | `^20.19.0 \|\| ^22.13.0 \|\| >=23.5.0`, the range `@napi-rs/wasm-runtime` 1.2.4 requires. The threaded flavor additionally needs `SharedArrayBuffer`; the threadless `wasm32-wasip1` flavor runs without cross-origin isolation |
+
 ## Install
 
 We recommend you use ZON(Zig Package Manager) to install it.

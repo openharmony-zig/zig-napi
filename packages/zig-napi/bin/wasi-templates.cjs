@@ -29,13 +29,6 @@
 const WASM_PAGE_SIZE = 65536;
 /** 4 GiB, the maximum a 32 bit wasm memory can address. */
 const MAX_WASM_PAGES = 65536;
-/**
- * Floor for `napi.wasm.initialMemory`. Zig's wasi linker script reserves a
- * 16 MiB stack inside the linear memory, and the linked image adds its data on
- * top, so anything below that cannot be satisfied by the module the loader
- * instantiates.
- */
-const MIN_WASM_PAGES = 256;
 const DEFAULT_INITIAL_MEMORY = 4000;
 const DEFAULT_MAXIMUM_MEMORY = 65536;
 /** deferred (workerd) loader default: 64 MiB, headroom under workerd's isolate limit. */
@@ -179,11 +172,6 @@ function assertPageCount(value, field, fallback) {
       `napi.wasm.${field} must be between 1 and ${MAX_WASM_PAGES} pages (${MAX_WASM_PAGES * WASM_PAGE_SIZE} bytes)`,
     );
   }
-  if (value < MIN_WASM_PAGES) {
-    throw new WasiConfigError(
-      `napi.wasm.${field} is ${value} pages (${value * WASM_PAGE_SIZE} bytes); a WASI addon needs at least ${MIN_WASM_PAGES} pages (${MIN_WASM_PAGES * WASM_PAGE_SIZE} bytes) because the Zig linker reserves a 16 MiB stack inside the linear memory`,
-    );
-  }
   return value;
 }
 
@@ -230,7 +218,7 @@ function resolveWasmConfig(config) {
     // with no headroom traps on the first allocation past the initial size
     // instead of failing a grow. Leave room explicitly.
     throw new WasiConfigError(
-      `napi.wasm.initialMemory and napi.wasm.maximumMemory are both ${initialMemory} pages, which leaves no room to grow; the Zig/wasi-libc allocator grows linear memory on every allocation past the initial size, so set maximumMemory above initialMemory (for example ${initialMemory + MIN_WASM_PAGES})`,
+      `napi.wasm.initialMemory and napi.wasm.maximumMemory are both ${initialMemory} pages, which leaves no room to grow; the Zig/wasi-libc allocator grows linear memory on every allocation past the initial size, so set maximumMemory above initialMemory`,
     );
   }
   const browser = wasm.browser ?? {};
@@ -279,12 +267,14 @@ const WASI_ROLLBACK_REGISTRY_SYMBOL = "napi.rs.wasi.rollback.registry.v1";
 /**
  * Shared teardown machinery.
  *
- * `napi_prepare_wasm_env_cleanup()` only *queues* the settlements of the tasks
- * it cancels, and `Context.destroy()` runs the threadsafe function cleanup hook
- * that drains that queue with a null env and discards whatever is still in it.
- * Destroying the context without yielding first therefore strands exactly the
- * promises the barrier exists to settle, so disposal waits for
- * `napi_wasm_env_cleanup_pending()` to reach zero on real event-loop turns.
+ * `napi_prepare_wasm_env_cleanup()` cancels pending work directly and hands the
+ * settlements it produces to the threadsafe-function delivery path, which
+ * `@emnapi/core` dispatches from a macrotask; `napi_wasm_env_cleanup_pending()`
+ * counts the deliveries that have not been dispatched yet. `Context.destroy()`
+ * runs the threadsafe function cleanup hook, which drains that path with a null
+ * env and discards whatever is still in it, so destroying without yielding
+ * first strands exactly the promises the barrier exists to settle. Disposal
+ * therefore waits for the counter to reach zero on real event-loop turns.
  */
 const EMNAPI_CONTEXT_LIFECYCLE = `
 const __wasiDisposeSymbol = Symbol.for("${WASI_DISPOSE_SYMBOL}");
@@ -421,13 +411,11 @@ function __drainWasmEnvCleanup() {
   const pending = __napiInstance?.exports?.napi_wasm_env_cleanup_pending;
   const observable = typeof pending === "function";
   if (observable) {
-    let queued;
-    try {
-      queued = pending();
-    } catch {
-      __emnapiWasmEnvCleanupDrained = true;
-      return;
-    }
+    // A probe that throws is not proof that the queue is empty - a getter or a
+    // trap can throw for any reason - so the error is propagated unchanged and
+    // the drain stays unset, which keeps disposal retryable. Only an export
+    // that is absent at all falls back to the bounded blind wait below.
+    const queued = pending();
     if (!queued) {
       __emnapiWasmEnvCleanupDrained = true;
       return;
@@ -443,11 +431,10 @@ function __drainWasmEnvCleanup() {
       if (!observable) {
         continue;
       }
-      try {
-        queued = pending();
-      } catch {
-        return;
-      }
+      // Same rule as the first probe: a throwing probe rejects the drain (the
+      // caller keeps the context and can retry) instead of being read as an
+      // empty queue.
+      queued = pending();
       if (!queued) {
         return;
       }
@@ -861,12 +848,14 @@ function memoryDeclaration({ threads, initialMemory, maximumMemory, name }) {
  * being used as-is.
  *
  * The bound is 64 for both hosts, not the `1024` a large `UV_THREADPOOL_SIZE`
- * could ask for: every pooled worker instantiates the addon and reserves its
- * own linear memory (hundreds of MiB with the default 4000 pages), so a
- * four-digit pool exhausts the address space and the process before it is ever
- * useful. Upstream leaves the value unbounded in Node; the browser already
- * derives its pool from `hardwareConcurrency`, and this keeps both hosts in the
- * same validated range.
+ * could ask for. Pooled workers share the addon's single `WebAssembly.Memory`;
+ * what each one costs is its own stack and TLS block (about 2 MiB) plus a
+ * JavaScript worker realm, so a four-digit pool is a resource guard rather than
+ * a memory limit: it is far past any useful parallelism for an addon whose
+ * async work is one queue, while hundreds of native threads and realms are
+ * measurable overhead. Upstream leaves the value unbounded in Node; the browser
+ * already derives its pool from `hardwareConcurrency`, and this keeps both
+ * hosts in the same validated range.
  */
 function workerPoolValidationHelpers({ maxPoolSize }) {
   return `const __DEFAULT_ASYNC_WORK_POOL_SIZE = 4;
@@ -1868,12 +1857,9 @@ function __drainWasmEnvCleanup(__instance) {
   const __pending = __instance?.exports.napi_wasm_env_cleanup_pending;
   const __observable = typeof __pending === "function";
   if (__observable) {
-    let __queued;
-    try {
-      __queued = __pending();
-    } catch {
-      return;
-    }
+    // A throwing probe is not an empty queue: propagate it unchanged so the
+    // caller keeps the instance and can retry (see the CommonJS flavor).
+    const __queued = __pending();
     if (!__queued) {
       return;
     }
@@ -1888,11 +1874,7 @@ function __drainWasmEnvCleanup(__instance) {
       if (!__observable) {
         continue;
       }
-      try {
-        __queued = __pending();
-      } catch {
-        return;
-      }
+      __queued = __pending();
       if (!__queued) {
         return;
       }
@@ -2719,7 +2701,6 @@ module.exports = {
   DEFAULT_INITIAL_MEMORY,
   DEFAULT_MAXIMUM_MEMORY,
   MAX_WASM_PAGES,
-  MIN_WASM_PAGES,
   WASI_DISPOSE_SYMBOL,
   WASI_FLAVORS,
   WASI_ROLLBACK_REGISTRY_SYMBOL,
