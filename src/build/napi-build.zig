@@ -210,12 +210,14 @@ fn isWasiNodeAddonTarget(target: std.Target) bool {
     return target.cpu.arch == .wasm32 and target.os.tag == .wasi;
 }
 
-/// WASI addons are built in two threading flavors. The CLI maps
-/// `wasm32-wasip1-threads` to Zig's `wasm32-wasi` plus
-/// `-Dcpu=baseline+atomics+bulk_memory+mutable_globals` and passes
-/// `wasm32-wasip1` through unchanged; Zig resolves both triples to the same
-/// `wasm32-wasi` target, so the atomics feature is what separates a shared
-/// memory (threaded) build from a single-threaded one.
+/// WASI addons are built in two threading flavors.
+///
+/// Zig 0.16 only knows the `wasm32-wasi` triple — `zig build -Dtarget=wasm32-wasip1`
+/// fails with `unknown OS: 'wasip1'` — so both napi-rs flavors are passed as
+/// `-Dtarget=wasm32-wasi` and the threaded one adds
+/// `-Dcpu=baseline+atomics+bulk_memory+mutable_globals`. The `atomics` feature is
+/// therefore the only signal that separates a shared memory (threaded) build
+/// from a single-threaded one; never rely on the requested name.
 pub const WasiFlavor = enum {
     single_threaded,
     threads,
@@ -293,8 +295,11 @@ const WasiEmnapiSettings = struct {
     archive: ?[]const u8 = null,
 };
 
-/// Command line `-D` values, read once per build: Zig rejects a second
-/// declaration of the same option, and a project builds several addons.
+/// Command line `-D` values, read once per `*std.Build`: `Build.option` panics
+/// on a second declaration of the same name, and one project builds several
+/// addons. A map, not a last-used slot: dependency packages have their own
+/// `*Build` (`Build.createChildOnly`), so the same process can interleave
+/// builds A → B → A and a single slot would redeclare A's options.
 const WasiCommandLineOptions = struct {
     link_dir: ?[]const u8 = null,
     archive: ?[]const u8 = null,
@@ -303,21 +308,20 @@ const WasiCommandLineOptions = struct {
     stack_size: ?u64 = null,
 };
 
-var cached_wasi_options_build: ?*std.Build = null;
-var cached_wasi_options: WasiCommandLineOptions = .{};
+var cached_wasi_options: std.AutoHashMapUnmanaged(*std.Build, WasiCommandLineOptions) = .empty;
 
 fn wasiCommandLineOptions(build: *std.Build) WasiCommandLineOptions {
-    if (cached_wasi_options_build == build) return cached_wasi_options;
-
-    cached_wasi_options = .{
-        .link_dir = build.option([]const u8, "emnapi-link-dir", "Directory that holds the emnapi archive to link for WASI targets"),
-        .archive = build.option([]const u8, "emnapi-archive", "emnapi archive file name or path to link for WASI targets"),
-        .initial_memory_pages = build.option(u32, "wasi-initial-memory-pages", "WASI imported memory minimum in 64 KiB pages (default: the linker minimum)"),
-        .max_memory_pages = build.option(u32, "wasi-max-memory-pages", "WASI imported memory maximum in 64 KiB pages"),
-        .stack_size = build.option(u64, "wasi-stack-size", "WASI module stack size in bytes"),
-    };
-    cached_wasi_options_build = build;
-    return cached_wasi_options;
+    const entry = cached_wasi_options.getOrPut(build.allocator, build) catch @panic("out of memory");
+    if (!entry.found_existing) {
+        entry.value_ptr.* = .{
+            .link_dir = build.option([]const u8, "emnapi-link-dir", "Directory that holds the emnapi archive to link for WASI targets"),
+            .archive = build.option([]const u8, "emnapi-archive", "emnapi archive file name or path to link for WASI targets"),
+            .initial_memory_pages = build.option(u32, "wasi-initial-memory-pages", "WASI imported memory minimum in 64 KiB pages (default: the linker minimum)"),
+            .max_memory_pages = build.option(u32, "wasi-max-memory-pages", "WASI imported memory maximum in 64 KiB pages"),
+            .stack_size = build.option(u64, "wasi-stack-size", "WASI module stack size in bytes"),
+        };
+    }
+    return entry.value_ptr.*;
 }
 
 fn wasiEmnapiSettings(build: *std.Build, option: NodeAddonBuildOptionsWithModule) WasiEmnapiSettings {
