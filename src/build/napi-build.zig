@@ -506,14 +506,71 @@ fn resolveWasiEmnapiArchive(
 }
 
 /// Imported memory shape for a WASI addon: programmatic defaults, overridden by
-/// the command line options a consumer's `zig build` accepts.
+/// the command line options a consumer's `zig build` accepts, then validated.
 fn wasiMemory(build: *std.Build, option: NodeAddonBuildOptionsWithModule) WasiMemory {
     const command_line = wasiCommandLineOptions(build);
     var memory = option.wasi_memory;
     if (command_line.initial_memory_pages) |pages| memory.initial_pages = pages;
     if (command_line.max_memory_pages) |pages| memory.max_pages = pages;
     if (command_line.stack_size) |size| memory.stack_size = size;
+    validateWasiMemory(memory);
     return memory;
+}
+
+/// Rejects memory limits a Zig-built wasi addon cannot run with.
+///
+/// `WebAssembly.Memory` itself accepts `initial == maximum`, but a Zig wasi
+/// module allocates through `sbrk`/`BrkAllocator`, which grows the linear
+/// memory *above its current size*. With equal limits there is no headroom, so
+/// every allocation after the linked image fails — including the emnapi
+/// environment and the async work pool's worker blocks (measured: with
+/// `initial == maximum == 520` pages, `malloc(1 MiB)` returns 0). Failing the
+/// build beats emitting a loader that traps on the first environment or worker
+/// allocation.
+fn validateWasiMemory(memory: WasiMemory) void {
+    if (memory.max_pages == 0 or memory.max_pages > 65536) {
+        std.debug.panic(
+            "WASI memory maximum must be between 1 and 65536 pages (4 GiB), got {d}; " ++
+                "pass -Dwasi-max-memory-pages=<pages>",
+            .{memory.max_pages},
+        );
+    }
+    if (memory.initial_pages) |pages| {
+        if (pages == 0) {
+            std.debug.panic("WASI imported memory minimum must be at least 1 page, got 0", .{});
+        }
+        if (pages > memory.max_pages) {
+            std.debug.panic(
+                "WASI imported memory minimum ({d} pages) must not exceed the maximum ({d} pages)",
+                .{ pages, memory.max_pages },
+            );
+        }
+        if (pages == memory.max_pages) {
+            std.debug.panic(
+                "WASI imported memory minimum equals the maximum ({d} pages): Zig's wasi allocator " ++
+                    "grows the linear memory above its current size, so the module would have no " ++
+                    "headroom for the environment or the async work pool. Leave the minimum unset " ++
+                    "(the linker minimum is used) or keep it below -Dwasi-max-memory-pages",
+                .{pages},
+            );
+        }
+    }
+    if (memory.stack_size) |size| {
+        if (size == 0) {
+            std.debug.panic("WASI stack size must be greater than zero", .{});
+        }
+        if (memory.initial_pages) |pages| {
+            const minimum_bytes = @as(u64, pages) * 65536;
+            if (size >= minimum_bytes) {
+                std.debug.panic(
+                    "WASI stack size ({d} bytes) does not fit in the imported memory minimum " ++
+                        "({d} pages = {d} bytes); raise -Dwasi-initial-memory-pages or lower " ++
+                        "-Dwasi-stack-size",
+                    .{ size, pages, minimum_bytes },
+                );
+            }
+        }
+    }
 }
 
 /// Symbols every WASI addon must export. `napi_register_wasm_v1` and

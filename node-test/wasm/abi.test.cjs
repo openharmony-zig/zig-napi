@@ -27,6 +27,7 @@ const assert = require("node:assert");
 
 const CHILD_FLAG = "--zig-napi-abi-child";
 const OOM_CHILD_FLAG = "--zig-napi-abi-oom-child";
+const LOAD_ADDON_CHILD_FLAG = "--zig-napi-load-addon-child";
 const nodeTestDir = path.resolve(__dirname, "..");
 const DEFAULT_TIMEOUT_MS = 240000;
 
@@ -134,6 +135,9 @@ function registerTests() {
     });
   }
 
+  registerLoadAddonTests();
+  registerBuildOptionTests();
+
   const oomRoot = oomArtifactRoot();
   test(
     "WASI worker allocation failure is reported, not trapped",
@@ -157,6 +161,117 @@ function registerTests() {
       );
       assert.strictEqual(result.status, 0, `OOM child failed:\n${output}`);
       assert.match(output, /^OOM OK$/m, `OOM child did not finish:\n${output}`);
+    },
+  );
+}
+
+/// `load-addon.js` flavor selection: `ZIG_NAPI_WASI_FLAVOR=wasip1` must pick
+/// the single-threaded loader, never fall back to the threaded one, and an
+/// unknown value must fail loudly.
+function registerLoadAddonTests() {
+  test("load-addon.js selects the WASI flavor strictly", () => {
+    const run = (flavorValue) => {
+      const result = spawnSync(
+        process.execPath,
+        [__filename, LOAD_ADDON_CHILD_FLAG, flavorValue ?? ""],
+        { cwd: nodeTestDir, encoding: "utf8", timeout: 60000, env: { ...process.env } },
+      );
+      const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+      assert.strictEqual(result.status, 0, `child failed:\n${output}`);
+      const line = output
+        .split("\n")
+        .find((candidate) => candidate.startsWith('{"kind":"load-addon"'));
+      assert.ok(line, `child printed no result:\n${output}`);
+      return JSON.parse(line);
+    };
+
+    const fallback = run("");
+    assert.strictEqual(fallback.flavor, "wasi", "the threaded flavor stays the default");
+    assert.match(fallback.candidate, /\.wasi\.cjs$/, "default loads the threaded loader");
+
+    const wasip1 = run("wasip1");
+    assert.strictEqual(wasip1.flavor, "wasip1");
+    assert.match(wasip1.candidate, /\.wasip1\.cjs$/, "wasip1 loads its own loader");
+    assert.ok(
+      !wasip1.candidates.some((candidate) => candidate.endsWith(".wasi.cjs")),
+      "the wasip1 flavor must not offer the threaded loader as a fallback",
+    );
+
+    const invalid = run("wasm32-wasip1");
+    assert.match(
+      invalid.error ?? "",
+      /ZIG_NAPI_WASI_FLAVOR must be one of wasi, wasip1/,
+      "an unknown flavor is rejected instead of being ignored",
+    );
+  });
+}
+
+/// Child mode for the `load-addon.js` selection test.
+function loadAddonChildMain(flavorValue) {
+  if (flavorValue) {
+    process.env.ZIG_NAPI_WASI_FLAVOR = flavorValue;
+  } else {
+    delete process.env.ZIG_NAPI_WASI_FLAVOR;
+  }
+  delete process.env.NAPI_RS_FORCE_WASI;
+  const loadAddon = require(path.join(nodeTestDir, "load-addon.js"));
+  const report = { kind: "load-addon" };
+  try {
+    report.flavor = loadAddon.wasiFlavor();
+    report.candidates = loadAddon.wasiCandidates("audit");
+    report.candidate = report.candidates[0];
+  } catch (error) {
+    report.error = error && error.message;
+  }
+  console.log(JSON.stringify(report));
+}
+
+/// Build-side memory validation: the option combinations that would produce a
+/// loader whose wasm heap cannot grow must fail the build with a message that
+/// names the option, instead of linking an addon that traps at startup.
+function registerBuildOptionTests() {
+  const zigAvailable =
+    spawnSync("zig", ["version"], { encoding: "utf8" }).status === 0;
+  const cases = [
+    {
+      args: ["-Dwasi-max-memory-pages=0"],
+      expect: /WASI memory maximum must be between 1 and 65536 pages/,
+    },
+    {
+      args: ["-Dwasi-max-memory-pages=70000"],
+      expect: /WASI memory maximum must be between 1 and 65536 pages/,
+    },
+    {
+      args: ["-Dwasi-initial-memory-pages=0"],
+      expect: /WASI imported memory minimum must be at least 1 page/,
+    },
+    {
+      args: ["-Dwasi-initial-memory-pages=65536"],
+      expect: /no headroom for the environment or the async work pool/,
+    },
+    {
+      args: ["-Dwasi-initial-memory-pages=2048", "-Dwasi-max-memory-pages=1024"],
+      expect: /must not exceed the maximum/,
+    },
+    {
+      args: ["-Dwasi-initial-memory-pages=256", "-Dwasi-stack-size=33554432"],
+      expect: /does not fit in the imported memory minimum/,
+    },
+  ];
+  test(
+    "WASI memory options are validated at build time",
+    { skip: zigAvailable ? false : "zig is not on PATH" },
+    () => {
+      for (const { args, expect } of cases) {
+        const result = spawnSync(
+          "zig",
+          ["build", "-Dtarget=wasm32-wasi", ...args],
+          { cwd: nodeTestDir, encoding: "utf8", timeout: 120000, env: { ...process.env } },
+        );
+        const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+        assert.notStrictEqual(result.status, 0, `\`${args.join(" ")}\` must fail the build`);
+        assert.match(output, expect, `\`${args.join(" ")}\` produced:\n${output}`);
+      }
     },
   );
 }
@@ -443,7 +558,7 @@ async function childMain() {
   const example = load("example", {
     memoryKind: flavor.sharedMemory ? "shared" : "unshared",
   }).napiModule.exports;
-  const exampleUtf8 = "zig-napi ✓ 🦀   after the NULL";
+  const exampleUtf8 = "zig-napi ✓ 🦀 \u0000 after the NULL";
   assert.strictEqual(example.roundtripStr(exampleUtf8), exampleUtf8, "example UTF-8 round trip");
   assert.strictEqual(example.add(20, 22), 42, "example add");
 
@@ -546,6 +661,8 @@ if (process.argv.includes(CHILD_FLAG)) {
     console.error(error && error.stack ? error.stack : error);
     process.exitCode = 1;
   });
+} else if (process.argv.includes(LOAD_ADDON_CHILD_FLAG)) {
+  loadAddonChildMain(process.argv[process.argv.indexOf(LOAD_ADDON_CHILD_FLAG) + 1]);
 } else {
   registerTests();
 }
