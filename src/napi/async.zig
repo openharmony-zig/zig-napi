@@ -233,6 +233,286 @@ fn reaperMain(service: *ReapService) void {
     }
 }
 
+/// True on the WASI node-addon build.
+///
+/// wasm has no environment callback that still allows JavaScript calls, so the
+/// generated loaders dispose the environment through the handshake below
+/// instead of waiting for the engine's cleanup hook. Native targets keep the
+/// Node ordering (`napi_add_env_cleanup_hook` before the threadsafe functions
+/// are finalized) and never call these exports.
+const use_wasm_env_cleanup = options.isWasmNodeAddon();
+
+/// Whether this build can block a producer on a shared-memory futex.
+///
+/// Zig reports every wasm32-wasi target as single threaded, so
+/// `builtin.single_threaded` cannot answer this: the threaded wasi flavor is
+/// told apart by its atomics feature, which is exactly what
+/// `memory.atomic.wait32` requires. Without it - plain `wasm32-wasip1`, where
+/// the host runs the async-work callback on the very JavaScript thread that
+/// would have to drain the queue - a wait could never be woken, and blocking
+/// would deadlock the event loop instead of applying backpressure.
+const wasm_futex_available = builtin.cpu.arch == .wasm32 and
+    std.Target.wasm.featureSetHas(builtin.cpu.features, .atomics);
+
+/// True when the async-work producer runs on the host's *own* thread.
+///
+/// Plain `wasm32-wasip1` has no atomics and therefore no worker threads: the
+/// host runs the async-work callback on the JavaScript event loop, which is
+/// also the only thread that could ever drain the thread-safe-function queue.
+/// A bounded queue is meaningless there - nothing is deferred while the host is
+/// busy running the producer - and waiting for capacity would deadlock the
+/// event loop, so events are delivered straight to the listener instead.
+const wasm_producer_shares_host_thread = use_wasm_emnapi_async_work and !wasm_futex_available;
+
+/// Shared-memory wait/notify used by the bounded event queue of the threaded
+/// wasm build.
+///
+/// The wait is always bounded: it re-checks its predicate when the timeout
+/// expires, so a notification lost to a race can never park a producer
+/// forever. Every caller checks the predicate once more after the wait.
+const WasmFutex = if (wasm_futex_available) struct {
+    /// One millisecond, as an immediate of the instruction below.
+    const timeout_ns = std.time.ns_per_ms;
+
+    fn wait(word: *const std.atomic.Value(u32), expected: u32) void {
+        _ = asm volatile (
+            \\ local.get %[ptr]
+            \\ local.get %[expected]
+            \\ i64.const 1000000
+            \\ memory.atomic.wait32 0
+            \\ drop
+            :
+            : [ptr] "r" (word),
+              [expected] "r" (expected),
+        );
+    }
+
+    fn wakeAll(word: *const std.atomic.Value(u32)) void {
+        _ = asm volatile (
+            \\ local.get %[ptr]
+            \\ i32.const -1
+            \\ memory.atomic.notify 0
+            \\ drop
+            :
+            : [ptr] "r" (word),
+        );
+    }
+
+    /// Publish a state change and wake every parked producer.
+    fn publish(word: *std.atomic.Value(u32)) void {
+        _ = word.fetchAdd(1, .acq_rel);
+        wakeAll(word);
+    }
+} else struct {
+    fn wait(_: *const std.atomic.Value(u32), _: u32) void {
+        unreachable;
+    }
+
+    fn wakeAll(_: *const std.atomic.Value(u32)) void {}
+
+    fn publish(_: *std.atomic.Value(u32)) void {}
+};
+
+/// Latched by `napi_prepare_wasm_env_cleanup`, released when a *new*
+/// environment registers this addon image.
+///
+/// Yielding to the event loop is what the drain after the barrier needs, and
+/// that lets arbitrary JavaScript run: an addon export called from it must not
+/// restart the work the barrier just quiesced behind the drain's back. Every
+/// threaded submission is refused while this is set.
+var wasm_env_disposing: std.atomic.Value(bool) = std.atomic.Value(bool).init(false);
+
+/// Promise settlements queued in the threadsafe-function queue that have not
+/// been handed back to JavaScript yet; see `napi_wasm_env_cleanup_pending`.
+var wasm_cleanup_pending: std.atomic.Value(u32) = std.atomic.Value(u32).init(0);
+
+/// Registry of the operations the pre-teardown barrier may still cancel.
+var wasm_operation_lock: std.atomic.Mutex = .unlocked;
+var wasm_operation_head: ?*WasmOperationNode = null;
+
+/// Who owns a registry node.
+///
+/// The transition always happens under `wasm_operation_lock`, so exactly one
+/// owner may touch the node's links or drop the registry's reference. That is
+/// what lets the barrier walk nodes it detached while an operation's own
+/// terminal path retires itself concurrently: the loser of the transition
+/// leaves the node completely alone.
+const WasmNodeState = enum(u8) {
+    /// Linked in the registry.
+    linked,
+    /// Detached by the barrier, which now owns the node and its reference.
+    claimed,
+    /// Unlinked and released; nobody may touch the node again.
+    retired,
+};
+
+/// Registry node of one live operation.
+///
+/// The node lives inside the operation it describes, so registration never
+/// allocates, and it holds one reference on that operation until the node is
+/// retired: whoever detaches the node owns that reference until it drops it, so
+/// the barrier can call into an operation it claimed without any other thread
+/// being able to free it underneath.
+pub const WasmOperationNode = struct {
+    next: ?*WasmOperationNode = null,
+    prev: ?*WasmOperationNode = null,
+    context: ?*anyopaque = null,
+    /// Makes the disposal visible for the operation behind `context`: cancels
+    /// it and settles its promise while JavaScript is still alive.
+    settle_for_cleanup: ?*const fn (?*anyopaque) void = null,
+    /// Drops the reference the registry took when the node was linked. Also the
+    /// "this node was registered" marker: `retireWasmOperation` is a no-op
+    /// without it.
+    release_reference: ?*const fn (?*anyopaque) void = null,
+    state: std.atomic.Value(u8) = std.atomic.Value(u8).init(@intFromEnum(WasmNodeState.linked)),
+};
+
+fn registerWasmOperation(node: *WasmOperationNode, context: *anyopaque, settle_for_cleanup: *const fn (?*anyopaque) void, release_reference: *const fn (?*anyopaque) void) void {
+    node.* = .{
+        .context = context,
+        .settle_for_cleanup = settle_for_cleanup,
+        .release_reference = release_reference,
+    };
+
+    spinLock(&wasm_operation_lock);
+    node.next = wasm_operation_head;
+    if (wasm_operation_head) |head| head.prev = node;
+    wasm_operation_head = node;
+    wasm_operation_lock.unlock();
+}
+
+/// State transition under the registry lock; true when it was applied here.
+fn claimWasmNodeLocked(node: *WasmOperationNode, from: WasmNodeState, to: WasmNodeState) bool {
+    const previous = node.state.load(.acquire);
+    if (previous != @intFromEnum(from)) return false;
+    node.state.store(@intFromEnum(to), .release);
+    return true;
+}
+
+/// Unlink the node and drop the reference the registry held, once.
+///
+/// Idempotent, callable from any thread, and a no-op for a node that was never
+/// registered or was already claimed by the barrier. The state transition and
+/// the unlink happen under the registry lock, so a barrier traversal can never
+/// race this: it either sees the node linked and claims it first, or it never
+/// sees it at all. Dropping the reference can free the operation, so the caller
+/// must still own a reference of its own and must not touch the node
+/// afterwards.
+fn retireWasmOperation(node: *WasmOperationNode) void {
+    if (node.release_reference == null) return;
+
+    spinLock(&wasm_operation_lock);
+    // A node the barrier already claimed belongs to the barrier, including the
+    // release of its reference.
+    if (!claimWasmNodeLocked(node, .linked, .retired)) {
+        wasm_operation_lock.unlock();
+        return;
+    }
+    if (node.prev) |prev| {
+        prev.next = node.next;
+    } else if (wasm_operation_head == node) {
+        wasm_operation_head = node.next;
+    }
+    if (node.next) |next| next.prev = node.prev;
+    node.prev = null;
+    node.next = null;
+    wasm_operation_lock.unlock();
+
+    if (node.release_reference) |release| release(node.context);
+}
+
+/// Latch the disposal, then make every live operation's outcome real.
+///
+/// Runs on the JavaScript thread with a fully usable environment, which is the
+/// last moment at which a cancelled task can still settle its promise. Per
+/// operation, `settleForWasmCleanup` decides between rejecting a running task,
+/// settling a finished one on the spot, or queueing its completion behind the
+/// progress it already produced - see that function for which shape implies
+/// which. `napi_cancel_async_work` only *schedules* a completion callback, and
+/// a finished task is not a queued settlement either, so a counter that
+/// tracked the queue alone would read zero long before the promise it stands
+/// for was settled: that is why the barrier settles what it can instead of
+/// trusting the count to describe it.
+fn wasmEnvCleanupPrepare() callconv(.c) void {
+    if (wasm_env_disposing.swap(true, .acq_rel)) return;
+
+    // Claim every node under the lock before touching any of them: a concurrent
+    // `retireWasmOperation` then leaves the whole detached list alone, and the
+    // reference each claimed node carries keeps its operation alive until this
+    // traversal drops it.
+    spinLock(&wasm_operation_lock);
+    const head = wasm_operation_head;
+    wasm_operation_head = null;
+    var current = head;
+    while (current) |node| {
+        _ = claimWasmNodeLocked(node, .linked, .claimed);
+        node.prev = null;
+        current = node.next;
+    }
+    wasm_operation_lock.unlock();
+
+    current = head;
+    while (current) |node| {
+        // Read the link before the release below: the node lives inside the
+        // operation, which that release may free.
+        const next = node.next;
+        node.next = null;
+        if (node.settle_for_cleanup) |settle| settle(node.context);
+        node.state.store(@intFromEnum(WasmNodeState.retired), .release);
+        if (node.release_reference) |release| release(node.context);
+        current = next;
+    }
+}
+
+/// Queued promise settlements that have not been delivered to JavaScript yet.
+fn wasmEnvCleanupPending() callconv(.c) u32 {
+    return wasm_cleanup_pending.load(.acquire);
+}
+
+/// One operation is about to publish its settlement.
+///
+/// Counted *before* the publish so a loader that observes zero can never be
+/// looking at an operation that is between "decided to settle" and "queued",
+/// and balanced by `noteSettlementDelivered` when the enqueue fails.
+fn noteSettlementQueued() void {
+    _ = wasm_cleanup_pending.fetchAdd(1, .acq_rel);
+}
+
+/// One queued settlement reached JavaScript, was discarded by the engine's
+/// null-environment drain, or was never queued because the enqueue failed.
+///
+/// Exactly one decrement per increment: the assertion catches a bookkeeping
+/// mistake in a debug build instead of hiding it behind a saturating clamp.
+fn noteSettlementDelivered() void {
+    const previous = wasm_cleanup_pending.fetchSub(1, .acq_rel);
+    std.debug.assert(previous != 0);
+}
+
+/// One queue record of an operation is about to be published.
+fn noteQueuedItem(count: *std.atomic.Value(u32)) void {
+    _ = count.fetchAdd(1, .acq_rel);
+}
+
+/// A published record was handed to the JavaScript side, or never made it into
+/// the queue. Exactly one decrement per increment.
+fn noteQueuedItemDelivered(count: *std.atomic.Value(u32)) void {
+    const previous = count.fetchSub(1, .acq_rel);
+    std.debug.assert(previous != 0);
+}
+
+/// A new environment registered this addon image: the disposal that latched the
+/// module is over.
+pub fn onWasmModuleRegister() void {
+    wasm_env_disposing.store(false, .release);
+}
+
+comptime {
+    if (use_wasm_env_cleanup) {
+        @export(&wasmEnvCleanupPrepare, .{ .name = "napi_prepare_wasm_env_cleanup", .linkage = .strong });
+        @export(&wasmEnvCleanupPending, .{ .name = "napi_wasm_env_cleanup_pending", .linkage = .strong });
+    }
+}
+
 pub const RuntimeModel = enum {
     single,
     thread,
@@ -676,6 +956,10 @@ fn AsyncTaskDescriptor(comptime Result: type, comptime Event: type, comptime run
         /// Largest number of events one operation keeps in flight (see
         /// `max_inflight_events`), exposed so regressions can assert the bound.
         pub const async_max_inflight_events = max_inflight_events;
+        /// True when events bypass the bounded queue because the producer runs
+        /// on the host's own thread (threadless WASI build), so nothing is ever
+        /// in flight and the bound cannot be observed.
+        pub const async_events_inline = wasm_producer_shares_host_thread;
         /// Highest number of in-flight events observed, process wide.
         pub fn asyncEventQueueHighWaterMark() usize {
             return eventQueueHighWaterMark();
@@ -935,11 +1219,36 @@ fn AsyncTaskOperation(
         completion: ?*DispatchData = null,
         /// True once a thread-safe function owns this operation's finalization.
         tsfn_created: bool = false,
+        /// The host ran the async-work completion callback, which is what
+        /// queues the settlement (counted before it is published). Only the
+        /// JavaScript thread touches it. It is *not* implied by
+        /// `task_finished`: the worker marks itself finished strictly before
+        /// that callback gets its event-loop turn, which is exactly the window
+        /// the pre-teardown barrier has to close.
+        completion_dispatched: bool = false,
+        /// The host's async-work completion callback had not run yet when the
+        /// pre-teardown barrier settled this operation, so the host still owns
+        /// deleting the async work - it has that dispatch pending, and freeing
+        /// the handle here would pull it out from under the host. Only the
+        /// JavaScript thread touches it.
+        host_owns_async_work: bool = false,
+        /// Registry node of the WASM pre-teardown barrier. Unused (and never
+        /// linked) on every other target.
+        wasm_node: WasmOperationNode = .{},
         state_mutex: std.Io.Mutex = .init,
         state_cond: std.Io.Condition = .init,
         state: std.atomic.Value(u8) = std.atomic.Value(u8).init(@intFromEnum(AsyncState.created)),
-        task_done: bool = false,
-        cancel_requested: bool = false,
+        /// The task body returned.
+        ///
+        /// An atomic, not a mutex-guarded bool: the JavaScript thread (the
+        /// abort path, the pre-teardown barrier) and the executor thread both
+        /// read it, and on a single threaded target a *contended*
+        /// `std.Io.Mutex` traps instead of blocking, so the mutex alone cannot
+        /// carry this signal there. The mutex below still serializes the
+        /// condition-variable wait on threaded targets.
+        task_finished: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+        /// Cancellation was requested while the task was still running.
+        cancel_requested: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
         cancel_dispatched: bool = false,
         result_ready: bool = false,
         uses_threaded_runtime: bool = false,
@@ -977,8 +1286,21 @@ fn AsyncTaskOperation(
         /// blocking primitive to wait on: it spins on this counter instead. On
         /// threaded targets the mutex above orders every access.
         inflight_events: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
+        /// Wake-up word of the same backpressure wait.
+        ///
+        /// Only the threaded wasm build parks producers on it (`memory.atomic.
+        /// wait32`); everywhere else it is a plain field nobody waits on.
+        event_queue_futex: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
         /// Set once the dispatcher can no longer deliver.
         queue_closed: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+        /// Records of this operation that are in the dispatcher queue and not
+        /// handed to the JavaScript side yet (progress events and completions).
+        ///
+        /// Counted *before* each record is published, so a reader that sees
+        /// zero knows every record published so far was already dispatched -
+        /// which is what tells the pre-teardown barrier that no listener of
+        /// this operation can still run ahead of a settlement it makes itself.
+        queued_items: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
         /// Recycled queue records.
         ///
         /// Guarded by a small spin lock, not a lock-free stack: several consumer
@@ -1123,21 +1445,46 @@ fn AsyncTaskOperation(
             errdefer {
                 var discardable = self.promise;
                 discardable.discard();
+                // A registered operation owns a reference of its own: the
+                // registry entry goes away with this failure.
+                if (comptime use_wasm_env_cleanup) retireWasmOperation(&self.wasm_node);
                 // A created thread-safe function already owns the initial
                 // reference and its finalizer drops it (whether or not the
                 // setup finished). Without one, this call still owns it.
                 const dispatcher_owns_initial = self.tsfn_created;
-                _ = self.destroyJs(self.env);
+                _ = self.destroyJs(self.env, true);
                 if (!dispatcher_owns_initial) self.dropOwner();
             }
 
             const promise = self.promise;
             if (self.abort_registration != null and self.isAbortRequestedFromSignal()) {
                 self.cancel_token.cancel();
-                self.cancel_requested = true;
+                self.cancel_requested.store(true, .release);
                 self.dispatchCompletion(self.env);
                 self.dropOwner();
                 return promise;
+            }
+
+            if (comptime use_wasm_env_cleanup) {
+                if (wasm_env_disposing.load(.acquire)) {
+                    // The environment is being disposed: refusing here is the
+                    // whole point of the latch. Start nothing, and reject the
+                    // caller's promise on this thread, while JavaScript is
+                    // still alive to observe it.
+                    self.err = NapiError.Error.withCodeAndMessage(
+                        "Cancelled",
+                        "The async work item was cancelled",
+                    );
+                    self.dispatchCompletion(self.env);
+                    self.dropOwner();
+                    return promise;
+                }
+
+                // Registered before any producer starts, so the barrier can
+                // still cancel this operation. The registry holds one
+                // reference until the operation reaches a terminal state.
+                self.retain();
+                registerWasmOperation(&self.wasm_node, @ptrCast(self), settleForWasmCleanup, releaseOperation);
             }
 
             switch (effectiveRuntime(runtime)) {
@@ -1185,7 +1532,7 @@ fn AsyncTaskOperation(
                         // for a producer that is waiting for this thread to
                         // drain a queue it can no longer drain.
                         self.cancel_token.cancel();
-                        self.cancel_requested = true;
+                        self.cancel_requested.store(true, .release);
                         self.closeEventQueue();
                         if (self.future) |*future| {
                             future.cancel(io);
@@ -1254,6 +1601,20 @@ fn AsyncTaskOperation(
         }
 
         fn runTaskWithIo(self: *Self, io: std.Io, effective_runtime: RuntimeModel) void {
+            // On the threadless wasm target the host runs this body on its own
+            // event loop, without an N-API callback frame: events are delivered
+            // to the listener inline there (see `emitFromContext`), and creating
+            // the JavaScript value for one needs an open handle scope. Opened
+            // once for the whole task, and only where it is needed.
+            var scope: napi.napi_handle_scope = null;
+            var scope_opened = false;
+            if (comptime wasm_producer_shares_host_thread) {
+                scope_opened = napi.napi_open_handle_scope(self.env, &scope) == napi.napi_ok;
+            }
+            defer if (scope_opened) {
+                _ = napi.napi_close_handle_scope(self.env, scope);
+            };
+
             var group: std.Io.Group = .init;
             defer group.cancel(io);
 
@@ -1353,6 +1714,12 @@ fn AsyncTaskOperation(
         fn wasmAsyncWorkExecute(_: napi.napi_env, data: ?*anyopaque) callconv(.c) void {
             const self: *Self = @ptrCast(@alignCast(data));
             self.setState(.running);
+            // This is the executor's `runTask` (it does not go through it, so
+            // that the task body keeps using the single threaded io): the
+            // "task returned" signal has to be published here. The pre-teardown
+            // barrier reads it to tell a running task from one that finished but
+            // whose completion the host has not queued yet.
+            defer self.markTaskDone();
             self.runTaskWithIo(singleIo(), .thread);
         }
 
@@ -1362,6 +1729,10 @@ fn AsyncTaskOperation(
             // below only touches native state and the dispatcher.
             defer self.dropOwner();
 
+            // From here on the settlement is this callback's to queue: the
+            // barrier must not settle the operation a second time, and must
+            // know that a finished task no longer needs its help.
+            self.completion_dispatched = true;
             if (status == napi.napi_cancelled) {
                 self.cancel_dispatched = true;
             }
@@ -1387,6 +1758,102 @@ fn AsyncTaskOperation(
             self.requestAbort();
         }
 
+        /// Barrier callback: make this operation's outcome real before the
+        /// environment stops accepting JavaScript calls.
+        ///
+        /// Runs on the JavaScript thread, and settles in the three shapes an
+        /// operation can be in - none of which implies another:
+        ///
+        /// * task still running: `napi_cancel_async_work` would only *schedule*
+        ///   a completion callback, so the promise is rejected right here (and
+        ///   the work cancelled) before the environment can go away.
+        /// * task finished, nothing of this operation left in the queue: every
+        ///   listener that was going to run already ran, so the settlement is
+        ///   made here, with the outcome the task produced.
+        /// * task finished with its progress still queued: the completion is
+        ///   queued behind those events - where the host's own callback would
+        ///   have put it - so no queued listener is skipped and the settlement
+        ///   keeps its place in the FIFO.
+        ///
+        /// Nothing the producer may still touch is released: the promise is
+        /// settled, the native operation, its captured input/result and the
+        /// async work all stay alive for the task that is still running.
+        fn settleForWasmCleanup(ptr: ?*anyopaque) void {
+            const self: *Self = @ptrCast(@alignCast(ptr));
+            // This export is entered straight from JavaScript instead of
+            // through an N-API callback frame, and rejecting the promise
+            // creates JavaScript values (the rejection reason): the
+            // environment's handle scope must be opened explicitly.
+            var scope: napi.napi_handle_scope = null;
+            const scope_opened = napi.napi_open_handle_scope(self.env, &scope) == napi.napi_ok;
+            defer if (scope_opened) {
+                _ = napi.napi_close_handle_scope(self.env, scope);
+            };
+
+            if (!self.task_finished.load(.acquire)) {
+                // Still in user code (or not started at all): reject the
+                // promise here and cancel the work. Nothing a producer reads is
+                // touched - no result, no listener reference, no async work.
+                self.requestAbort();
+                self.rejectFromBarrier(self.env);
+                return;
+            }
+
+            if (self.completion_dispatched) {
+                // The host ran the async-work completion callback, so the
+                // settlement is queued behind whatever that callback found -
+                // counted before it was published. The loader's drain delivers
+                // it, and settling again here would only race the real outcome.
+                return;
+            }
+
+            if (self.queued_items.load(.acquire) == 0) {
+                // The task returned and nothing of it is queued any more. The
+                // host has not run the callback that would queue the
+                // settlement, so this is the only place it can be made - and
+                // doing it here, with the outcome the task really produced, is
+                // what keeps the promise from stranding when the environment is
+                // destroyed before the host's next turn.
+                self.host_owns_async_work = true;
+                self.dispatchSettlement(self.env, false);
+                return;
+            }
+
+            // Progress this task produced is still queued, so those listeners
+            // have to run before anything is settled. Queue the completion
+            // behind them, exactly where the host's own callback would put it.
+            // That callback is also still the owner of the async work handle:
+            // its dispatch is pending, so this settlement must not free it.
+            self.host_owns_async_work = true;
+            self.queueCompletion() catch {
+                // The queue is gone: neither the queued events nor a settlement
+                // can be delivered any more, so settle here while JavaScript is
+                // still alive.
+                self.dispatchSettlement(self.env, false);
+            };
+        }
+
+        /// Settle the caller's promise from the barrier, without any teardown.
+        ///
+        /// The JavaScript-side resources (listener references, abort
+        /// registration, the async work handle and the thread-safe function)
+        /// are deliberately untouched: a producer may still be inside the task
+        /// and the queue may still hold records that reference this operation.
+        /// They are released exactly once, by `destroyJs` on the path that
+        /// observes the operation's end.
+        fn rejectFromBarrier(self: *Self, env_raw: napi.napi_env) void {
+            if (self.settled.swap(true, .acq_rel)) return;
+            // The reason a cancelled operation rejects with, whether it was
+            // cancelled by an AbortSignal or by the environment's disposal.
+            self.cancel_dispatched = true;
+            self.setState(.settling);
+            const value = AbortSignalModule.abortErrorValue(Env.from_raw(env_raw)) catch
+                NapiError.Error.withCodeAndMessage("AbortError", "AbortError").to_napi_error(Env.from_raw(env_raw));
+            var promise = self.promise;
+            promise.rejectRaw(value) catch {};
+            self.setState(.settled);
+        }
+
         fn requestAbort(self: *Self) void {
             // Cancellation must be observable even after the operation was torn
             // down natively, but nothing else may be touched then.
@@ -1394,28 +1861,37 @@ fn AsyncTaskOperation(
                 self.cancel_token.cancel();
                 return;
             }
-            const io = self.operationIo();
             self.cancel_token.cancel();
-            self.state_mutex.lockUncancelable(io);
-            defer self.state_mutex.unlock(io);
-            if (self.task_done) return;
-            self.cancel_requested = true;
+            // The predicate is an atomic: the JavaScript thread (this path) and
+            // the executor thread (`markTaskDone`) both touch it, and on a
+            // single threaded target a contended `std.Io.Mutex` traps rather
+            // than blocking, so the mutex alone cannot carry the signal there.
+            if (self.task_finished.load(.acquire)) return;
+            self.cancel_requested.store(true, .release);
             if (comptime use_wasm_emnapi_async_work) {
                 if (self.async_work != null) {
                     _ = napi.napi_cancel_async_work(self.env, self.async_work);
                 }
             }
-            self.state_cond.signal(io);
+            // Wake a controller that is waiting for this task: it takes the
+            // same mutex the store above is ordered against.
+            if (comptime !builtin.single_threaded) {
+                const io = self.operationIo();
+                self.state_mutex.lockUncancelable(io);
+                self.state_cond.signal(io);
+                self.state_mutex.unlock(io);
+            }
             // Cancellation must unblock producers waiting for queue capacity.
             self.wakeEventProducers();
         }
 
         fn markTaskDone(self: *Self) void {
+            self.task_finished.store(true, .release);
+            if (comptime builtin.single_threaded) return;
             const io = self.operationIo();
             self.state_mutex.lockUncancelable(io);
-            defer self.state_mutex.unlock(io);
-            self.task_done = true;
             self.state_cond.signal(io);
+            self.state_mutex.unlock(io);
         }
 
         fn waitForTaskDoneOrAbort(self: *Self) bool {
@@ -1423,10 +1899,10 @@ fn AsyncTaskOperation(
             self.state_mutex.lockUncancelable(io);
             defer self.state_mutex.unlock(io);
 
-            while (!self.task_done and !self.cancel_requested) {
+            while (!self.task_finished.load(.acquire) and !self.cancel_requested.load(.acquire)) {
                 self.state_cond.waitUncancelable(io, &self.state_mutex);
             }
-            return self.cancel_requested and !self.task_done;
+            return self.cancel_requested.load(.acquire) and !self.task_finished.load(.acquire);
         }
 
         fn operationIo(self: *const Self) std.Io {
@@ -1476,6 +1952,19 @@ fn AsyncTaskOperation(
             switch (effectiveRuntime(runtime)) {
                 .single => self.dispatchEvent(self.env, event),
                 .thread => {
+                    if (comptime wasm_producer_shares_host_thread) {
+                        // The producer is the host thread, so a queue could
+                        // never be drained while it fills: waiting for capacity
+                        // would deadlock the event loop. Deliver the event to
+                        // the listener right here, exactly like the single
+                        // runtime does, which also keeps the producer's order
+                        // (the listener sees event N before N+1) and allocates
+                        // no queue record at all.
+                        if (!self.has_event_listener.load(.acquire)) return;
+                        self.dispatchEvent(self.env, event);
+                        return;
+                    }
+
                     // Without a listener nobody can observe the event: skip the
                     // deep copy and the queue entirely and keep producing. An
                     // explicit `undefined` listener lands here too.
@@ -1554,9 +2043,19 @@ fn AsyncTaskOperation(
         /// is already shutting down.
         fn reserveEventSlot(self: *Self) !void {
             if (comptime builtin.single_threaded) {
-                // A single threaded target has no blocking primitive to wait on
-                // (the WASI executor shares atomics with the JavaScript thread,
-                // which drains the queue): poll the counter instead.
+                // A single threaded target cannot use the blocking mutex and
+                // condition variable below: a *contended* `std.Io.Mutex` lowers
+                // to `unreachable` there, which would trap the instance instead
+                // of applying backpressure.
+                //
+                // The threaded wasi build still has real worker threads, and
+                // `memory.atomic.wait32` on the queue's own word is what waits
+                // for the JavaScript thread to drain. It is only used when the
+                // build really has atomics: without them (plain `wasm32-wasip1`)
+                // the host runs the producer on the same thread that would have
+                // to drain the queue, so a wait could never be woken and
+                // blocking would deadlock the event loop. There the counter is
+                // polled instead.
                 while (true) {
                     if (self.queue_closed.load(.acquire)) return error.Closing;
                     if (self.cancel_token.isCancelled()) return error.Cancelled;
@@ -1566,6 +2065,20 @@ fn AsyncTaskOperation(
                             noteInflightHighWater(current + 1);
                             return;
                         }
+                        continue;
+                    }
+                    if (comptime wasm_futex_available) {
+                        // Read the wake-up word *before* the last predicate
+                        // check: a release that lands in between changes the
+                        // word, so the wait below returns immediately instead
+                        // of sleeping through a free slot.
+                        const observed = self.event_queue_futex.load(.acquire);
+                        if (self.queue_closed.load(.acquire)) return error.Closing;
+                        if (self.cancel_token.isCancelled()) return error.Cancelled;
+                        if (self.inflight_events.load(.acquire) < queue_limit) continue;
+                        // Bounded: a notification lost to a race costs at most
+                        // one timeout, never a parked producer.
+                        WasmFutex.wait(&self.event_queue_futex, observed);
                         continue;
                     }
                     std.Thread.yield() catch {};
@@ -1605,9 +2118,12 @@ fn AsyncTaskOperation(
             if (comptime builtin.single_threaded) {
                 while (true) {
                     const current = self.inflight_events.load(.acquire);
-                    if (current == 0) return;
-                    if (self.inflight_events.cmpxchgWeak(current, current - 1, .acq_rel, .acquire) == null) return;
+                    if (current == 0) break;
+                    if (self.inflight_events.cmpxchgWeak(current, current - 1, .acq_rel, .acquire) == null) break;
                 }
+                // One slot is free again: release the producers parked on it.
+                if (comptime wasm_futex_available) WasmFutex.publish(&self.event_queue_futex);
+                return;
             }
 
             const io = self.operationIo();
@@ -1625,7 +2141,14 @@ fn AsyncTaskOperation(
         /// so it can neither block the JavaScript thread nor deadlock against a
         /// producer that is waiting for it to drain the queue.
         fn wakeEventProducers(self: *Self) void {
-            if (comptime builtin.single_threaded) return;
+            if (comptime builtin.single_threaded) {
+                // Producers parked on the queue futex (threaded wasm only) must
+                // be woken without a blocking mutex, which this target cannot
+                // use. A build without atomics polls instead and has nothing to
+                // wake.
+                if (comptime wasm_futex_available) WasmFutex.publish(&self.event_queue_futex);
+                return;
+            }
             const io = self.operationIo();
             self.event_queue_mutex.lockUncancelable(io);
             self.event_queue_mutex.unlock(io);
@@ -1835,11 +2358,31 @@ fn AsyncTaskOperation(
         fn postToDispatcher(self: *Self, data: *DispatchData) !void {
             if (!self.admitDispatcherPush()) return error.Closing;
 
+            // Snapshot what this record is before publishing it: a host that
+            // dispatches the item synchronously may recycle (or free) the record
+            // as soon as `napi_call_threadsafe_function` returns, so reading
+            // `data.kind` afterwards would be a use-after-free. A completion is
+            // also counted here, *before* the publish: the loader polls this
+            // counter to decide when it may destroy the environment, and a
+            // settlement that is already decided but not yet in the queue must
+            // never read as "nothing to wait for".
+            const is_completion = data.kind == .completion;
+            if (comptime use_wasm_env_cleanup) noteQueuedItem(&self.queued_items);
+            if (comptime use_wasm_env_cleanup) {
+                if (is_completion) noteSettlementQueued();
+            }
+
             self.retain();
             const status = napi.napi_call_threadsafe_function(self.tsfn_raw, @ptrCast(data), napi.napi_tsfn_nonblocking);
             self.leaveDispatcherPush();
 
             if (status != napi.napi_ok) {
+                // Balance the pre-publish count: this settlement never entered
+                // the queue, so the loader must not wait for it.
+                if (comptime use_wasm_env_cleanup) {
+                    noteQueuedItemDelivered(&self.queued_items);
+                    if (is_completion) noteSettlementDelivered();
+                }
                 if (status == napi.napi_closing) {
                     // The engine already consumed this thread's reference: the
                     // handle must never be released or called again.
@@ -1872,7 +2415,7 @@ fn AsyncTaskOperation(
                 // is the reason, not an error we synthesized afterwards.
                 return .{ .value = value, .reject = true };
             }
-            if (self.cancel_dispatched or self.cancel_requested) {
+            if (self.cancel_dispatched or self.cancel_requested.load(.acquire)) {
                 const value = AbortSignalModule.abortErrorValue(Env.from_raw(env_raw)) catch {
                     return .{
                         .value = NapiError.Error.withCodeAndMessage("AbortError", "AbortError").to_napi_error(Env.from_raw(env_raw)),
@@ -1918,10 +2461,24 @@ fn AsyncTaskOperation(
         /// join here. In particular the main JavaScript thread is never blocked
         /// on a task that may itself be waiting on JavaScript.
         fn dispatchCompletion(self: *Self, env_raw: napi.napi_env) void {
+            self.dispatchSettlement(env_raw, true);
+        }
+
+        /// Settle the promise at most once and release the JavaScript side.
+        ///
+        /// `release_async_work` is false on the one path that settles an
+        /// operation whose async-work completion callback the host has not run
+        /// yet: that callback still deletes the work itself, and freeing it here
+        /// would leave the host's pending callback holding a freed handle.
+        fn dispatchSettlement(self: *Self, env_raw: napi.napi_env, release_async_work: bool) void {
             // Teardown below may release the last reference of the operation;
             // hold one for the duration of the settlement.
             self.retain();
             defer self.dropOwner();
+
+            // The operation reaches its terminal state here: the barrier must
+            // not cancel it afterwards (it would only race a settled promise).
+            if (comptime use_wasm_env_cleanup) retireWasmOperation(&self.wasm_node);
 
             // Release the producer futures. `await`/`cancel` are what free the
             // future's own allocation, and the controller always releases the
@@ -1939,7 +2496,14 @@ fn AsyncTaskOperation(
             }
             self.future = null;
 
-            if (self.settled.swap(true, .acq_rel)) return;
+            if (self.settled.swap(true, .acq_rel)) {
+                // The pre-teardown barrier already rejected this promise (the
+                // task could not be cancelled in time). The JavaScript-side
+                // resources it deliberately left alone are released here, once,
+                // on the thread that owns them.
+                _ = self.destroyJs(env_raw, release_async_work and !self.host_owns_async_work);
+                return;
+            }
             self.setState(.settling);
 
             // The settlement reason is computed *before* cleanup: the listener's
@@ -1962,7 +2526,10 @@ fn AsyncTaskOperation(
             // exception it leaves pending is isolated here: it is cleared in
             // every case, so the engine never reports it as uncaught, and it
             // only becomes the rejection reason when the task itself had none.
-            const cleanup_failure = self.destroyJs(env_raw);
+            // The host's own completion callback deletes the async work itself,
+            // and it may still be pending: only release the handle when this
+            // settlement is the one that observed the operation's end.
+            const cleanup_failure = self.destroyJs(env_raw, release_async_work and !self.host_owns_async_work);
             if (cleanup_failure) |value| {
                 if (!settlement.reject) settlement = .{ .value = value, .reject = true };
             }
@@ -2041,6 +2608,9 @@ fn AsyncTaskOperation(
             self.closeEventQueue();
             self.js_released.store(true, .release);
             self.enqueueControllerReap();
+            // The engine is tearing this environment down on its own schedule:
+            // a later pre-teardown barrier cannot settle this operation either.
+            if (comptime use_wasm_env_cleanup) retireWasmOperation(&self.wasm_node);
             self.dropOwner();
         }
 
@@ -2099,6 +2669,9 @@ fn AsyncTaskOperation(
             // only then drains the queue with a null environment).
             const self = operationFromContext(context) orelse {
                 if (data.kind == .event) ownership.deinitValue(Event, data.payload, allocator);
+                if (comptime use_wasm_env_cleanup) {
+                    if (data.kind == .completion) noteSettlementDelivered();
+                }
                 allocator.destroy(data);
                 return;
             };
@@ -2106,6 +2679,16 @@ fn AsyncTaskOperation(
             // releasing it may free the operation.
             defer {
                 if (data.kind == .event) self.releaseEventSlot();
+                // The record is out of the queue before the settlement below is
+                // decided: a reader that sees no queued item knows every
+                // earlier event of this operation already ran its listener.
+                if (comptime use_wasm_env_cleanup) noteQueuedItemDelivered(&self.queued_items);
+                // The settlement reaches JavaScript here (or is discarded by the
+                // engine's null-environment drain below), so the loader's
+                // counter must observe it immediately.
+                if (comptime use_wasm_env_cleanup) {
+                    if (data.kind == .completion) noteSettlementDelivered();
+                }
                 self.recycleRecord(data);
                 self.dropOwner();
             }
@@ -2144,7 +2727,7 @@ fn AsyncTaskOperation(
         /// or null. The exception is always cleared from the environment, so a
         /// hostile `removeEventListener` can neither break the settlement nor be
         /// reported as an uncaught exception.
-        fn destroyJs(self: *Self, env_raw: napi.napi_env) ?napi.napi_value {
+        fn destroyJs(self: *Self, env_raw: napi.napi_env, release_async_work: bool) ?napi.napi_value {
             if (self.js_released.swap(true, .acq_rel)) return null;
 
             releaseCallbackRef(env_raw, &self.listener_ref);
@@ -2153,9 +2736,11 @@ fn AsyncTaskOperation(
                 registration.release();
                 self.abort_registration = null;
             }
-            if (self.async_work != null) {
-                _ = napi.napi_delete_async_work(env_raw, self.async_work);
-                self.async_work = null;
+            if (release_async_work) {
+                if (self.async_work != null) {
+                    _ = napi.napi_delete_async_work(env_raw, self.async_work);
+                    self.async_work = null;
+                }
             }
 
             var cleanup_failure: ?napi.napi_value = null;
@@ -2184,6 +2769,8 @@ fn AsyncTaskOperation(
         fn destroyNativeOnly(self: *Self, retire_dispatcher: bool) void {
             self.js_released.store(true, .release);
             if (retire_dispatcher) self.closeDispatcher();
+            // No promise settlement will be queued for this operation any more.
+            if (comptime use_wasm_env_cleanup) retireWasmOperation(&self.wasm_node);
         }
 
         /// Frees everything the operation owns natively.
@@ -2194,6 +2781,15 @@ fn AsyncTaskOperation(
         /// JavaScript.
         fn releaseNative(self: *Self) void {
             if (self.native_released.swap(true, .acq_rel)) return;
+
+            // The registry holds a reference while the node is linked, so the
+            // last owner can only run after the node was retired (an operation
+            // that was never registered - refused before it started - is the
+            // only other shape that reaches this point).
+            if (comptime use_wasm_env_cleanup) {
+                std.debug.assert(self.wasm_node.state.load(.acquire) == @intFromEnum(WasmNodeState.retired) or
+                    self.wasm_node.release_reference == null);
+            }
 
             const allocator = self.allocator;
             const runtime_entry = self.runtime_env;

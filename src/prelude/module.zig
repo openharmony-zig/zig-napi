@@ -107,6 +107,13 @@ pub fn NODE_API_MODULE_WITH_INIT(
             if (@hasDecl(napi, "setup")) {
                 napi.setup();
             }
+            // A new environment is registering this addon image: release the
+            // latch a previous WASI pre-teardown barrier set. emnapi runs module
+            // registration on the main thread only, so a worker thread sharing
+            // the same linear memory can never reach this mid-disposal.
+            if (comptime options.isWasmNodeAddon()) {
+                @import("../napi/async.zig").onWasmModuleRegister();
+            }
             return InitFn.inner_init(env, exports);
         }
 

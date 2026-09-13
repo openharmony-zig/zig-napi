@@ -310,6 +310,12 @@ nativeOnlyTest("thousands of threaded tasks return to the allocation baseline", 
 test("the event queue is bounded and still delivers every event in order", async (t) => {
   const limit = native.eventQueueLimit();
   t.true(limit > 0 && limit < 100000, `unexpected queue limit ${limit}`);
+  // The bound is a producer-side backpressure device. On the threadless WASI
+  // build the producer runs on the host's own thread, so nothing could drain a
+  // queue it waits on: events are delivered straight to the listener there and
+  // the in-flight observation stays at zero. Delivery order and completeness
+  // below hold on both targets.
+  const expectedInFlight = native.inlineEventDelivery() ? 0 : limit;
 
   native.resetEventQueueHighWater();
   const total = limit * 20;
@@ -323,7 +329,7 @@ test("the event queue is bounded and still delivers every event in order", async
   while (Date.now() < until) {
     // busy wait
   }
-  t.is(native.eventQueueHighWater(), limit, "the producer must stop at the queue limit");
+  t.is(native.eventQueueHighWater(), expectedInFlight, "the producer must stop at the queue limit");
   t.is(await pending, total);
   t.is(seen.length, total, "no event may be lost");
   // FIFO: the listener observes the producer's order, so a listener exception
@@ -334,12 +340,13 @@ test("the event queue is bounded and still delivers every event in order", async
       break;
     }
   }
-  t.is(native.eventQueueHighWater(), limit, "the bound holds for the whole run");
+  t.is(native.eventQueueHighWater(), expectedInFlight, "the bound holds for the whole run");
 });
 
 abortTest("cancelling releases a producer that waits for queue capacity", async (t) => {
   const controller = new AbortController();
   const limit = native.eventQueueLimit();
+  const expectedInFlight = native.inlineEventDelivery() ? 0 : limit;
   native.resetEventQueueHighWater();
   let delivered = 0;
   const pending = native.asyncAbortableSliceEvents(1000000, controller.signal, () => {
@@ -352,7 +359,7 @@ abortTest("cancelling releases a producer that waits for queue capacity", async 
   while (Date.now() < until) {
     // busy wait
   }
-  t.is(native.eventQueueHighWater(), limit, "the producer must have been blocked on a full queue");
+  t.is(native.eventQueueHighWater(), expectedInFlight, "the producer must have been blocked on a full queue");
   controller.abort();
   const outcome = await settlesWithin(pending, 5000);
   t.is(outcome.state, "rejected");

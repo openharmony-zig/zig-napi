@@ -515,6 +515,14 @@ pub fn eventQueueHighWater() usize {
     return SliceTask.asyncEventQueueHighWaterMark();
 }
 
+/// True when progress events are delivered straight to the listener instead of
+/// through the bounded queue, because the producer runs on the host's own
+/// thread (threadless WASI build): nothing is ever in flight there, so the
+/// high-water observation stays at zero.
+pub fn inlineEventDelivery() bool {
+    return SliceTask.async_events_inline;
+}
+
 pub fn resetEventQueueHighWater() void {
     SliceTask.asyncResetEventQueueHighWaterMark();
 }
