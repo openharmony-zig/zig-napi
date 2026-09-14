@@ -90,7 +90,11 @@ When reading JavaScript values into Zig arrays, slices, or `std.ArrayList(T)`, n
 napi.Promise
 ```
 
-`Promise.New(env)` creates a deferred promise wrapper.
+`try Promise.New(env)` creates a deferred promise wrapper. Copies share one
+settlement capability: only one resolve/reject may succeed. Borrowed JavaScript
+promises cannot be settled; use `napi.PromiseValue` for an explicitly read-only
+wrapper. `status()` reports the native settlement state, not the eventual state
+of a JavaScript promise adopted by resolving with another promise.
 
 | Method               | Use                                                    |
 | -------------------- | ------------------------------------------------------ |

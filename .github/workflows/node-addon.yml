@@ -39,6 +39,9 @@ jobs:
       - name: Verify Zig
         run: zig version
 
+      - name: Run Zig unit tests
+        run: zig build test-unit --summary all
+
       - name: Setup Node.js for install
         uses: actions/setup-node@v4
         with:
@@ -106,19 +109,122 @@ jobs:
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build wasm Node example
+      - name: Build wasm Node example (threaded)
         run: node packages/zig-napi/bin/zig-napi.js build --cwd examples/node --target wasm32-wasip1-threads -- --summary all
 
-      - name: Test wasm Node example
+      - name: Test wasm Node example (threaded)
         env:
           NAPI_RS_FORCE_WASI: 'error'
+          NAPI_RS_WASI_FLAVOR: 'wasi'
         run: node examples/node/test.js
 
-      - name: Build wasm node-test matrix
+      - name: Build wasm Node example (single-threaded)
+        run: node packages/zig-napi/bin/zig-napi.js build --cwd examples/node --target wasm32-wasip1 -- --summary all
+
+      - name: Test wasm Node example (single-threaded)
+        env:
+          NAPI_RS_FORCE_WASI: 'error'
+          NAPI_RS_WASI_FLAVOR: 'wasip1'
+        run: node examples/node/test.js
+
+      # Both flavors are built so every artifact and loader the suites below
+      # need exists; a build only regenerates the flavor it targets.
+      - name: Build wasm node-test matrix (threaded)
         run: node packages/zig-napi/bin/zig-napi.js build --cwd node-test --target wasm32-wasip1-threads -- --summary all
 
-      - name: Test wasm node-test matrix
+      - name: Build wasm node-test matrix (single-threaded)
+        run: node packages/zig-napi/bin/zig-napi.js build --cwd node-test --target wasm32-wasip1 -- --summary all
+
+      - name: Test wasm node-test matrix (threaded)
         working-directory: node-test
         env:
           NAPI_RS_FORCE_WASI: 'error'
+          ZIG_NAPI_WASI_FLAVOR: 'wasi'
         run: npm run test:run
+
+      - name: Test wasm node-test matrix (single-threaded)
+        working-directory: node-test
+        env:
+          NAPI_RS_FORCE_WASI: 'error'
+          ZIG_NAPI_WASI_FLAVOR: 'wasip1'
+        run: npm run test:run
+
+      - name: WASI ABI acceptance (both flavors)
+        run: node --test --test-timeout=300000 node-test/wasm/abi.test.cjs
+
+      # Several producers share one linear memory and allocate through the
+      # module's exported malloc/free from different worker instances, so this
+      # is the regression gate for the serialized allocator. It also drives the
+      # raw C allocator edges (overflow, class-limit requests, alignments) that
+      # have to return null instead of trapping.
+      - name: WASI concurrent producer and allocator acceptance (both flavors)
+        run: node --test --test-timeout=300000 node-test/wasm/concurrency.test.cjs
+
+      # The allocator's checks behave differently per optimization mode: Debug
+      # and ReleaseSafe have the checked arithmetic and the header canary,
+      # ReleaseFast has neither. Build both and run the same acceptance.
+      - name: Build optimized WASI artifacts (ReleaseSafe and ReleaseFast)
+        run: |
+          for mode in ReleaseSafe ReleaseFast; do
+            dir="zig-out/opt-$(echo "$mode" | tr 'A-Z' 'a-z' | sed 's/releasesafe/release-safe/;s/releasefast/release-fast/')"
+            mkdir -p "$dir"
+            cd node-test
+            zig build -Doptimize="$mode" -Dtarget=wasm32-wasi -Dcpu=baseline+atomics+bulk_memory+mutable_globals --summary all
+            zig build -Doptimize="$mode" -Dtarget=wasm32-wasi --summary all
+            cp async_tasks.wasm32-wasi.wasm contracts.wasm32-wasi.wasm example.wasm32-wasi.wasm "$OLDPWD/$dir/"
+            cp async_tasks.wasm32-wasip1.wasm contracts.wasm32-wasip1.wasm example.wasm32-wasip1.wasm "$OLDPWD/$dir/"
+            cd ..
+          done
+          # Restore the default (Debug) artifacts for the steps that follow.
+          cd node-test
+          zig build -Dtarget=wasm32-wasi -Dcpu=baseline+atomics+bulk_memory+mutable_globals --summary all
+          zig build -Dtarget=wasm32-wasi --summary all
+
+      # The artifact root goes through the environment: `node --test` does not
+      # forward an extra `--artifact-root=` flag to the test file, so passing it
+      # there would silently run against the default (Debug) artifacts.
+      - name: WASI allocator acceptance in ReleaseSafe and ReleaseFast
+        run: |
+          for dir in zig-out/opt-release-safe zig-out/opt-release-fast; do
+            ZIG_NAPI_WASM_ARTIFACT_ROOT="$PWD/$dir" node --test --test-timeout=300000 node-test/wasm/concurrency.test.cjs
+            ZIG_NAPI_WASM_ARTIFACT_ROOT="$PWD/$dir" node --test --test-timeout=300000 node-test/wasm/abi.test.cjs
+          done
+
+      # Runs every test in the CLI package's test directory: the real npm-pack
+      # smoke test today, plus generated-loader unit tests as they land there.
+      - name: CLI package tests (generated loaders and real npm pack)
+        run: node --test packages/zig-napi/test/*.test.cjs
+
+      - name: Async event queue benchmark (both flavors)
+        run: node node-test/wasm/queue-benchmark.cjs --flavor=both
+
+      # The out-of-memory case needs an exhaustible heap. Building it rewrites
+      # the async_tasks artifact, so it runs after every suite that loads the
+      # default artifact, and the small build is copied out before the default
+      # one is restored.
+      - name: Build and run the worker out-of-memory acceptance
+        run: |
+          cd node-test
+          zig build -Dtarget=wasm32-wasi -Dcpu=baseline+atomics+bulk_memory+mutable_globals -Dwasi-max-memory-pages=520 --summary all
+          mkdir -p ../zig-out/oom-artifacts
+          cp async_tasks.wasm32-wasi.wasm ../zig-out/oom-artifacts/
+          zig build -Dtarget=wasm32-wasi -Dcpu=baseline+atomics+bulk_memory+mutable_globals --summary all
+          cd ..
+          ZIG_NAPI_WASM_OOM_ARTIFACT_ROOT="$PWD/zig-out/oom-artifacts" node --test --test-timeout=300000 node-test/wasm/abi.test.cjs
+
+  cli-package-test:
+    runs-on: ubuntu-latest
+    name: Standalone npm package smoke test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.24.0
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run test:cli-pack

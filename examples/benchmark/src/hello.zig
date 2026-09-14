@@ -25,20 +25,20 @@ pub fn zig_bool_identity(value: bool) bool {
     return value;
 }
 
-pub fn zig_string_len(value: napi.String) usize {
+pub fn zig_string_len(value: napi.String) !usize {
     return value.utf8Len();
 }
 
-pub fn zig_object_read(value: napi.Object) i32 {
-    const count = value.GetNamed("count", i32);
-    const flag = value.GetNamed("flag", bool);
+pub fn zig_object_read(value: napi.Object) !i32 {
+    const count = try value.GetNamed("count", i32);
+    const flag = try value.GetNamed("flag", bool);
     return count + if (flag) @as(i32, 1) else 0;
 }
 
-pub fn zig_array_sum(values: napi.Array) f64 {
+pub fn zig_array_sum(values: napi.Array) !f64 {
     var total: f64 = 0;
     for (0..values.length()) |i| {
-        total += values.Get(@intCast(i), f64);
+        total += try values.Get(@intCast(i), f64);
     }
     return total;
 }

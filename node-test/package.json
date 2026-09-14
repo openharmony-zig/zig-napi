@@ -12,26 +12,32 @@
     "test:napi": "ava --serial \"napi/__tests__/**/*.spec.js\""
   },
   "devDependencies": {
-    "@emnapi/core": "^1.11.0",
-    "@emnapi/runtime": "^1.11.0",
-    "@napi-rs/wasm-runtime": "^1.1.6",
+    "@emnapi/core": "2.0.0-alpha.5",
+    "@emnapi/runtime": "2.0.0-alpha.5",
+    "@napi-rs/wasm-runtime": "1.2.4",
     "ava": "3.15.0",
-    "emnapi": "^1.11.1"
+    "emnapi": "2.0.0-alpha.5"
   },
   "napi": {
     "binaryNames": [
       "compat_mode",
-      "example"
+      "example",
+      "contracts",
+      "conversion",
+      "async_tasks",
+      "classes"
     ],
     "packageName": "zig-napi-node-test",
     "targets": [
-      "wasm32-wasip1-threads"
+      "wasm32-wasip1-threads",
+      "wasm32-wasip1"
     ]
   },
   "ava": {
     "files": [
       "napi-compat-mode/__tests__/**/*.spec.js",
-      "napi/__tests__/**/*.spec.js"
+      "napi/__tests__/**/*.spec.js",
+      "wasm/*.spec.js"
     ],
     "timeout": "30s",
     "workerThreads": false

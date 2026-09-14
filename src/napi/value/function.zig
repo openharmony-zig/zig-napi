@@ -8,6 +8,7 @@ const Undefined = @import("./undefined.zig").Undefined;
 const Reference = @import("../wrapper/reference.zig").Reference;
 const helper = @import("../util/helper.zig");
 const AbortSignal = @import("../abort_signal.zig").AbortSignal;
+const GlobalAllocator = @import("../util/allocator.zig");
 
 pub fn Function(comptime Args: type, comptime Return: type) type {
     const ArgsInfos = @typeInfo(Args);
@@ -39,13 +40,13 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                 const has_env = params.len > 0 and params[0].type.? == Env;
                 const env_index = if (has_env) 1 else 0;
 
-                fn cleanupArgs(args: *std.meta.ArgsTuple(value_type), initialized: usize) void {
+                fn cleanupArgs(args: *std.meta.ArgsTuple(value_type), initialized: usize, allocator: std.mem.Allocator) void {
                     inline for (params, 0..) |param, i| {
                         if (comptime has_env and i == 0) {
                             continue;
                         }
                         if (i < initialized) {
-                            Napi.deinit_napi_value(param.type.?, args[i]);
+                            Napi.deinit_napi_value_with_allocator(param.type.?, args[i], allocator);
                         }
                     }
                 }
@@ -59,15 +60,33 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                 }
 
                 fn undefinedValue(inner_env: napi.napi_env) napi.napi_value {
-                    return Undefined.New(Env.from_raw(inner_env)).raw;
+                    const undefined_value = Undefined.create(Env.from_raw(inner_env)) catch @panic("napi: failed to create undefined value");
+                    return undefined_value.raw;
+                }
+
+                /// Return `undefined` while a JavaScript exception is already
+                /// pending. The engine propagates the original exception object;
+                /// creating a new one here would replace it.
+                fn propagatePending(inner_env: napi.napi_env) napi.napi_value {
+                    return undefinedValue(inner_env);
+                }
+
+                fn isPending(err: anyerror) bool {
+                    return err == error.PendingException or NapiError.hasPendingException();
                 }
 
                 fn throwAndUndefined(inner_env: napi.napi_env, err: NapiError.Error) napi.napi_value {
+                    if (NapiError.hasPendingException()) {
+                        return propagatePending(inner_env);
+                    }
                     err.throwInto(Env.from_raw(inner_env));
                     return undefinedValue(inner_env);
                 }
 
                 fn throwAnyAndUndefined(inner_env: napi.napi_env, err: anyerror) napi.napi_value {
+                    if (isPending(err)) {
+                        return propagatePending(inner_env);
+                    }
                     return throwAndUndefined(inner_env, NapiError.mapAnyError(err));
                 }
 
@@ -76,15 +95,27 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                     payload: anytype,
                     event_listener: napi.napi_value,
                     abort_signal: ?AbortSignal,
-                    cleanup_params: *bool,
+                    allocator: std.mem.Allocator,
                 ) napi.napi_value {
                     if (comptime helper.isAsyncDescriptor(@TypeOf(payload))) {
-                        cleanup_params.* = false;
                         var task = payload;
                         const promise = task.scheduleWithListenerAndSignal(Env.from_raw(inner_env), event_listener, abort_signal) catch |err| {
                             return throwAnyAndUndefined(inner_env, err);
                         };
                         return promise.raw;
+                    }
+
+                    // A plain return is borrowed: its container, literals and
+                    // aliases are never freed. Only explicit `Owned` nodes (at
+                    // the top level or nested inside the returned value) transfer
+                    // ownership to this call, and they are disposed after the
+                    // JavaScript value has been built - on success and on a
+                    // failed output conversion alike.
+                    if (comptime Napi.containsOwnedValue(@TypeOf(payload))) {
+                        defer Napi.disposeOwnedParts(@TypeOf(payload), payload, allocator);
+                        return Napi.to_napi_value_auto(inner_env, payload, null) catch |err| {
+                            return throwAnyAndUndefined(inner_env, err);
+                        };
                     }
 
                     return Napi.to_napi_value_auto(inner_env, payload, null) catch |err| {
@@ -97,19 +128,26 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                     ret: anytype,
                     event_listener: napi.napi_value,
                     abort_signal: ?AbortSignal,
-                    cleanup_params: *bool,
+                    allocator: std.mem.Allocator,
                 ) napi.napi_value {
                     if (comptime NapiError.isResult(@TypeOf(ret))) {
                         return switch (ret) {
-                            .ok => |payload| completePayload(inner_env, payload, event_listener, abort_signal, cleanup_params),
+                            .ok => |payload| completePayload(inner_env, payload, event_listener, abort_signal, allocator),
                             .err => |err| throwAndUndefined(inner_env, err),
                         };
                     }
 
-                    return completePayload(inner_env, ret, event_listener, abort_signal, cleanup_params);
+                    return completePayload(inner_env, ret, event_listener, abort_signal, allocator);
                 }
 
                 fn inner_fn(inner_env: napi.napi_env, info: napi.napi_callback_info) callconv(.c) napi.napi_value {
+                    // Callback entry is a nested JavaScript entry point: keep the
+                    // error state of the embedding frame intact and never leak
+                    // callback local errors into it.
+                    const outer_frame = NapiError.ErrorFrame.save();
+                    defer outer_frame.restore();
+                    NapiError.clearLastError();
+
                     const return_info = infos.@"fn".return_type.?;
                     const return_payload = returnPayloadType(return_info);
                     const async_returns_descriptor = comptime helper.isAsyncDescriptor(return_payload);
@@ -132,10 +170,36 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                         }
                     }
 
+                    // Every converted argument is a native copy owned by this call
+                    // scope: it is released on both the success and the failure
+                    // path. The allocator is captured *once* here and threaded
+                    // through the conversion and the cleanup, so a reentrant
+                    // JavaScript callback that replaces this thread's operation
+                    // allocator cannot make cleanup use a different allocator than
+                    // the one that produced the copies. Async descriptors clone
+                    // what they capture themselves.
+                    const frame_allocator = GlobalAllocator.capture();
+
+                    // Argument conversion is a transaction. Converting a
+                    // parameter may *create* a JavaScript resource - a strong
+                    // reference for `napi.Reference(T)`/`napi.ObjectRef`, an
+                    // active thread-safe function for a TSFN pointer - and none
+                    // of those may survive a call that never reached its body
+                    // (audit H04). The frame releases them before the native
+                    // cleanup runs and is committed once the body is about to be
+                    // entered: from that point on the resources belong to the
+                    // body (a TSFN is routinely handed to another thread).
+                    var conversion = helper.ConversionFrame{};
+                    conversion.start(frame_allocator);
+                    defer conversion.end();
+
                     var napi_params: std.meta.ArgsTuple(value_type) = undefined;
                     var initialized_params: usize = 0;
-                    var cleanup_params = true;
-                    defer if (cleanup_params) cleanupArgs(&napi_params, initialized_params);
+                    defer cleanupArgs(&napi_params, initialized_params, frame_allocator);
+                    // Registered after the native cleanup so it runs *before* it:
+                    // a rollback handle may live inside memory the cleanup frees
+                    // (for example a slice of references).
+                    defer conversion.rollbackUncommitted();
 
                     if (comptime has_env) {
                         napi_params[0] = Env.from_raw(inner_env);
@@ -145,12 +209,14 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                     var abort_signal: ?AbortSignal = null;
                     inline for (params[env_index..], env_index..) |param_index, i| {
                         NapiError.clearLastError();
-                        const converted = Napi.from_napi_value_auto(inner_env, args_raw[i - env_index], param_index.type.?);
-                        if (NapiError.last_error) |last_err| {
-                            last_err.throwInto(Env.from_raw(inner_env));
-                            const undefined_value = Undefined.New(Env.from_raw(inner_env));
-                            return undefined_value.raw;
-                        }
+                        const converted = Napi.from_napi_value_auto_with_allocator(
+                            inner_env,
+                            args_raw[i - env_index],
+                            param_index.type.?,
+                            frame_allocator,
+                        ) catch |err| {
+                            return throwAnyAndUndefined(inner_env, err);
+                        };
                         napi_params[i] = converted;
                         initialized_params = i + 1;
                         if (comptime helper.isAbortSignal(param_index.type.?)) {
@@ -164,13 +230,15 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                         null;
 
                     if (@typeInfo(return_info) == .error_union) {
+                        conversion.commit();
                         const ret = @call(.auto, value, napi_params) catch |err| {
                             return throwAnyAndUndefined(inner_env, err);
                         };
-                        return completeReturn(inner_env, ret, event_listener, abort_signal, &cleanup_params);
+                        return completeReturn(inner_env, ret, event_listener, abort_signal, frame_allocator);
                     } else {
+                        conversion.commit();
                         const ret = @call(.auto, value, napi_params);
-                        return completeReturn(inner_env, ret, event_listener, abort_signal, &cleanup_params);
+                        return completeReturn(inner_env, ret, event_listener, abort_signal, frame_allocator);
                     }
                 }
             };
@@ -194,6 +262,9 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
         /// std.debug.print("result: {}\n", .{result});
         /// ```
         /// Args should be a tuple.
+        ///
+        /// When the callback throws, `error.PendingException` is returned and the
+        /// original JavaScript exception stays pending in the environment.
         pub fn Call(self: Self, args: Args) !Return {
             const isTuple = ArgsInfos == .@"struct" and ArgsInfos.@"struct".is_tuple;
             const isEmptyStruct = ArgsInfos == .@"struct" and ArgsInfos.@"struct".fields.len == 0;
@@ -212,24 +283,24 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                 args_raw[0] = try Napi.to_napi_value_auto(self.env, args, null);
             }
 
-            const this = Undefined.New(Env.from_raw(self.env));
+            const this = try Undefined.create(Env.from_raw(self.env));
 
             var result: napi.napi_value = undefined;
 
             const args_ptr = if (args_len == 0) null else args_raw[0..].ptr;
             const status = napi.napi_call_function(self.env, this.raw, self.raw, args_len, args_ptr, &result);
             if (status != napi.napi_ok) {
-                return NapiError.Error.fromStatus(NapiError.Status.New(status));
+                return NapiError.failStatus(status);
             }
 
-            if (comptime @typeInfo(Return) == .@"union") {
-                NapiError.clearLastError();
-                const converted = Napi.from_napi_value_auto(self.env, result, Return);
-                if (NapiError.last_error) |_| {
-                    return error.GenericFailure;
-                }
-                return converted;
+            // Discard error state produced by nested callbacks; only the outcome
+            // of this call may decide whether `Call` fails.
+            NapiError.clearLastError();
+
+            if (comptime Return == void) {
+                return;
             }
+
             return Napi.from_napi_value_auto(self.env, result, Return);
         }
 

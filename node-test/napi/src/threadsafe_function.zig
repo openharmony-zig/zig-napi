@@ -13,7 +13,11 @@ fn executeThreadSafeFunction(tsfn: *Tsfn) void {
 }
 
 fn queueThreadSafeFunction(tsfn: *Tsfn) void {
-    const worker = napi.Worker(napi.Env.from_raw(tsfn.env), .{
+    // The thread safe function is a capability the caller acquired
+    // (`callThreadsafeFunction` below); the runner releases it. It must not be
+    // captured: a JavaScript handle cannot be deep-copied, and the worker would
+    // not know how to release a second copy of the acquisition.
+    const worker = napi.WorkerBorrowed(napi.Env.from_raw(tsfn.env), .{
         .data = tsfn,
         .Execute = executeThreadSafeFunction,
     });

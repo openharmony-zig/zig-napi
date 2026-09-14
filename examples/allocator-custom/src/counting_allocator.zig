@@ -1,3 +1,18 @@
+//! Counting allocator used by the examples and the regression fixtures.
+//!
+//! The counters are atomics, so the wrapper itself is safe to use from every
+//! thread - but the wrapper only *forwards* to `backing`, so the backing has to
+//! be thread safe as well. On WebAssembly that is not `std.heap.page_allocator`
+//! itself: it is the break allocator, whose free lists live in one
+//! unsynchronized global that emnapi's worker threads share with the JavaScript
+//! thread. Pass `napi.safePageAllocator()` (native: the page allocator itself;
+//! WebAssembly: the same allocator behind one module lock) instead:
+//!
+//! ```zig
+//! var counter = CountingAllocator.init(napi.safePageAllocator());
+//! pub const napi_allocator = counter.allocator();
+//! ```
+
 const std = @import("std");
 
 pub const Stats = struct {

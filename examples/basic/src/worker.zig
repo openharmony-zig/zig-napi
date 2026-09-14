@@ -11,7 +11,7 @@ fn fibonacci_execute(data: f64) f64 {
 }
 
 fn fibonacci_on_complete(_: napi.Env, data: f64) void {
-    const allocator = std.heap.page_allocator;
+    const allocator = napi.globalAllocator();
     const message = std.fmt.allocPrint(allocator, "Fibonacci result: {d}", .{data}) catch @panic("OOM");
     defer allocator.free(message);
 }

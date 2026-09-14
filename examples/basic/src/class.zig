@@ -26,8 +26,9 @@ const TestFactory = struct {
         return TestFactory{ .name = name, .age = age };
     }
 
-    pub fn format(self: *Self) []u8 {
-        return std.fmt.allocPrint(std.heap.page_allocator, "TestFactory {{ name = {s}, age = {d} }}", .{ self.name, self.age }) catch @panic("OOM");
+    pub fn format(self: *Self) !napi.Owned([]u8) {
+        const allocator = napi.globalAllocator();
+        return .init(try std.fmt.allocPrint(allocator, "TestFactory {{ name = {s}, age = {d} }}", .{ self.name, self.age }), allocator);
     }
 };
 

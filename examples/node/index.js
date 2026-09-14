@@ -53,49 +53,71 @@ nativeBinding = requireNative();
 const forceWasi =
   process.env.NAPI_RS_FORCE_WASI === "true" || process.env.NAPI_RS_FORCE_WASI === "error";
 
+// WASI flavors, the same two the CLI generates loaders for:
+//   'wasi'   -> threaded, shared memory, async work on the JavaScript worker pool
+//   'wasip1' -> single-threaded, unshared memory, no workers
+// NAPI_RS_WASI_FLAVOR pins one of them; unset tries the threaded flavor first and
+// falls back to the single-threaded one. A pinned flavor never falls back to the
+// other flavor, and an unknown value is an error rather than a silent default.
+const WASI_FLAVOR_SUFFIXES = { wasi: "wasi", wasip1: "wasip1" };
+const wasiFlavorEnv = process.env.NAPI_RS_WASI_FLAVOR;
+let wasiFlavorOrder;
+if (wasiFlavorEnv === undefined || wasiFlavorEnv === "") {
+  wasiFlavorOrder = ["wasi", "wasip1"];
+} else if (Object.prototype.hasOwnProperty.call(WASI_FLAVOR_SUFFIXES, wasiFlavorEnv)) {
+  wasiFlavorOrder = [wasiFlavorEnv];
+} else {
+  throw new Error(
+    `NAPI_RS_WASI_FLAVOR must be one of ${Object.keys(WASI_FLAVOR_SUFFIXES).join(", ")} ` +
+      `(got ${JSON.stringify(wasiFlavorEnv)})`,
+  );
+}
+
+function requireWasiFlavor(flavor) {
+  const suffix = WASI_FLAVOR_SUFFIXES[flavor];
+  const candidates = [
+    path.join(__dirname, "zig-out", "node", `hello.${suffix}.cjs`),
+    path.join(__dirname, `hello.${suffix}.cjs`),
+    `zig-napi-node-example-wasm32-${suffix}`,
+  ];
+  let lastError = null;
+  for (const candidate of candidates) {
+    try {
+      return require(candidate);
+    } catch (error) {
+      if (!lastError) {
+        lastError = error;
+      } else {
+        lastError.cause = error;
+      }
+    }
+  }
+  throw lastError ?? new Error(`no WASI ${flavor} binding available`);
+}
+
 if (!nativeBinding || forceWasi) {
   let wasiBinding = null;
   let wasiBindingError = null;
-  try {
-    wasiBinding = require(path.join(__dirname, "zig-out", "node", "hello.wasi.cjs"));
-    nativeBinding = wasiBinding;
-  } catch (error) {
-    if (forceWasi) {
-      wasiBindingError = error;
-    }
-  }
-  if (!nativeBinding || forceWasi) {
+  for (const flavor of wasiFlavorOrder) {
     try {
-      wasiBinding = require("./hello.wasi.cjs");
+      wasiBinding = requireWasiFlavor(flavor);
       nativeBinding = wasiBinding;
+      break;
     } catch (error) {
-      if (forceWasi) {
-        if (!wasiBindingError) {
-          wasiBindingError = error;
-        } else {
-          wasiBindingError.cause = error;
-        }
-        loadErrors.push(error);
+      if (!wasiBindingError) {
+        wasiBindingError = error;
+      } else {
+        wasiBindingError.cause = error;
       }
-    }
-  }
-  if (!nativeBinding || forceWasi) {
-    try {
-      wasiBinding = require("zig-napi-node-example-wasm32-wasi");
-      nativeBinding = wasiBinding;
-    } catch (error) {
-      if (forceWasi) {
-        if (!wasiBindingError) {
-          wasiBindingError = error;
-        } else {
-          wasiBindingError.cause = error;
-        }
-        loadErrors.push(error);
-      }
+      loadErrors.push(error);
     }
   }
   if (process.env.NAPI_RS_FORCE_WASI === "error" && !wasiBinding) {
-    const error = new Error("WASI binding not found and NAPI_RS_FORCE_WASI is set to error");
+    const error = new Error(
+      `WASI binding not found (flavor${wasiFlavorOrder.length > 1 ? "s" : ""} ` +
+        `${wasiFlavorOrder.join(", ")} are built by ` +
+        "`zig-napi build --target wasm32-wasip1[-threads]`) and NAPI_RS_FORCE_WASI is set to error",
+    );
     error.cause = wasiBindingError;
     throw error;
   }

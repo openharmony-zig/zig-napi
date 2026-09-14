@@ -10,5 +10,7 @@
         "package.json",
         "napi-compat-mode",
         "napi",
+        "wasm",
+        "benchmarks",
     },
 }

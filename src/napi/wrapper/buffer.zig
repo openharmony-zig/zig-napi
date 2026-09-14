@@ -1,6 +1,8 @@
 const std = @import("std");
 const napi = @import("napi-sys").napi_sys;
 const Env = @import("../env.zig").Env;
+const arraybuffer_mod = @import("./arraybuffer.zig");
+const ArrayBuffer = arraybuffer_mod.ArrayBuffer;
 const NapiError = @import("error.zig");
 const GlobalAllocator = @import("../util/allocator.zig");
 const options = @import("../options.zig");
@@ -11,12 +13,36 @@ pub const Buffer = struct {
     data: [*]u8,
     len: usize,
 
-    /// Create a Buffer from a raw napi_value
+    /// Whether this wrapper refers to a usable Buffer.
+    pub fn isValid(self: Buffer) bool {
+        return self.raw != null;
+    }
+
+    /// Create a Buffer from a raw napi_value.
+    ///
+    /// Kept for source compatibility with the previous infallible API: the
+    /// N-API status is checked, and a value that is not a Buffer throws a
+    /// JavaScript `TypeError` and yields an invalid wrapper. Prefer
+    /// `tryFromRaw` when the failure has to be handled in Zig.
     pub fn from_raw(env: napi.napi_env, raw: napi.napi_value) Buffer {
+        return Buffer.tryFromRaw(env, raw) catch |err| {
+            arraybuffer_mod.recordBinaryFailure("Buffer expected", err);
+            return invalid(env, null);
+        };
+    }
+
+    /// Create a Buffer from a raw napi_value, reporting the N-API status.
+    pub fn tryFromRaw(env: napi.napi_env, raw: napi.napi_value) !Buffer {
         var data: ?*anyopaque = null;
         var len: usize = 0;
-        _ = napi.napi_get_buffer_info(env, raw, &data, &len);
-        if (len == 0) {
+        const status = napi.napi_get_buffer_info(env, raw, &data, &len);
+        if (status != napi.napi_ok) {
+            if (NapiError.Status.New(status) == .InvalidArg) {
+                return arraybuffer_mod.BinaryError.InvalidBinaryValue;
+            }
+            return NapiError.toError(NapiError.Status.New(status));
+        }
+        if (len == 0 or data == null) {
             return Buffer{
                 .env = env,
                 .raw = raw,
@@ -32,9 +58,25 @@ pub const Buffer = struct {
         };
     }
 
-    /// Convert from napi_value to the specified type ([]u8 or [N]u8)
-    pub fn from_napi_value(env: napi.napi_env, raw: napi.napi_value, comptime T: type) T {
+    pub fn invalid(env: napi.napi_env, raw: napi.napi_value) Buffer {
+        return Buffer{
+            .env = env,
+            .raw = raw,
+            .data = &[_]u8{},
+            .len = 0,
+        };
+    }
+
+    /// Convert from napi_value to the specified type ([]u8 or [N]u8).
+    ///
+    /// Fails when the value is not a Buffer. A value that cannot be read is
+    /// never reported as zero filled data: silently returning zeros made an
+    /// invalid input look like a successful conversion.
+    pub fn from_napi_value(env: napi.napi_env, raw: napi.napi_value, comptime T: type) !T {
         const infos = @typeInfo(T);
+
+        const buffer = try Buffer.tryFromRaw(env, raw);
+        const source = buffer.data[0..buffer.len];
 
         switch (infos) {
             // Handle fixed-size array: [N]u8
@@ -43,14 +85,9 @@ pub const Buffer = struct {
                     @compileError("Buffer only supports u8 arrays, got: " ++ @typeName(arr.child));
                 }
 
-                var data: ?*anyopaque = null;
-                var len: usize = 0;
-                _ = napi.napi_get_buffer_info(env, raw, &data, &len);
-
                 var result: T = undefined;
-                const copy_len = @min(len, arr.len);
-                const src: [*]const u8 = @ptrCast(data);
-                @memcpy(result[0..copy_len], src[0..copy_len]);
+                const copy_len = @min(source.len, arr.len);
+                @memcpy(result[0..copy_len], source[0..copy_len]);
 
                 // Zero-fill remaining bytes if buffer is smaller than array
                 if (copy_len < arr.len) {
@@ -68,14 +105,9 @@ pub const Buffer = struct {
                     @compileError("Buffer only supports u8 slices, got: " ++ @typeName(ptr.child));
                 }
 
-                var data: ?*anyopaque = null;
-                var len: usize = 0;
-                _ = napi.napi_get_buffer_info(env, raw, &data, &len);
-
                 const allocator = GlobalAllocator.globalAllocator();
-                const buf = allocator.alloc(u8, len) catch @panic("OOM");
-                const src: [*]const u8 = @ptrCast(data);
-                @memcpy(buf, src[0..len]);
+                const buf = allocator.alloc(u8, source.len) catch @panic("OOM");
+                @memcpy(buf, source);
 
                 return buf;
             },
@@ -231,14 +263,43 @@ pub const Buffer = struct {
         };
     }
 
-    /// Get the buffer data as a mutable slice
-    pub fn asSlice(self: Buffer) []u8 {
-        return self.data[0..self.len];
+    /// Re-query the buffer and refresh the cached pointer and length.
+    pub fn refresh(self: *Buffer) !void {
+        const refreshed = try Buffer.tryFromRaw(self.env, self.raw);
+        self.data = refreshed.data;
+        self.len = refreshed.len;
     }
 
-    /// Get the buffer data as a const slice
+    /// Borrowed native view of the buffer contents, re-validated on every call.
+    ///
+    /// Fails when the wrapper is invalid or when the backing store reported by
+    /// the runtime changed (a Buffer over a detached or transferred
+    /// ArrayBuffer reports a zero length). The returned slice stays valid only
+    /// until the next JavaScript reentry.
+    pub fn tryAsSlice(self: Buffer) ![]u8 {
+        if (self.raw == null) return arraybuffer_mod.BinaryError.InvalidBinaryValue;
+        const refreshed = try Buffer.tryFromRaw(self.env, self.raw);
+        if (refreshed.len != self.len) return arraybuffer_mod.BinaryError.InvalidatedBackingStore;
+        return refreshed.data[0..refreshed.len];
+    }
+
+    /// Safe variant of `asConstSlice`.
+    pub fn tryAsConstSlice(self: Buffer) ![]const u8 {
+        return try self.tryAsSlice();
+    }
+
+    /// Get the buffer data as a mutable slice.
+    ///
+    /// The buffer is re-validated on every call; when the backing store is no
+    /// longer valid the result is an empty slice rather than a dangling
+    /// pointer. Use `tryAsSlice` to observe the failure.
+    pub fn asSlice(self: Buffer) []u8 {
+        return self.tryAsSlice() catch &[_]u8{};
+    }
+
+    /// Const variant of `asSlice`. See `asSlice` for the empty-slice rule.
     pub fn asConstSlice(self: Buffer) []const u8 {
-        return self.data[0..self.len];
+        return self.tryAsSlice() catch &[_]u8{};
     }
 
     /// Get the length of the buffer

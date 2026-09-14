@@ -9,13 +9,13 @@ pub fn makeBigInt(env: napi.Env) napi.BigInt {
     return createBigInt(env);
 }
 
-pub fn bigintToI64(value: napi.BigInt) i64 {
-    return napi.BigInt.from_napi_value(value.env, value.raw, i64);
+pub fn bigintToI64(value: napi.BigInt) !i64 {
+    return try napi.BigInt.from_napi_value(value.env, value.raw, i64);
 }
 
-pub fn bigintAdd(env: napi.Env, left: napi.BigInt, right: napi.BigInt) napi.BigInt {
-    const left_value = napi.BigInt.from_napi_value(left.env, left.raw, i64);
-    const right_value = napi.BigInt.from_napi_value(right.env, right.raw, i64);
+pub fn bigintAdd(env: napi.Env, left: napi.BigInt, right: napi.BigInt) !napi.BigInt {
+    const left_value = try napi.BigInt.from_napi_value(left.env, left.raw, i64);
+    const right_value = try napi.BigInt.from_napi_value(right.env, right.raw, i64);
     return napi.BigInt.New(env, @as(i128, left_value + right_value));
 }
 

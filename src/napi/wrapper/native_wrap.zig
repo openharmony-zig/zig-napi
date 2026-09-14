@@ -3,6 +3,7 @@ const napi = @import("napi-sys").napi_sys;
 const Napi = @import("../util/napi.zig").Napi;
 const NapiError = @import("error.zig");
 const GlobalAllocator = @import("../util/allocator.zig");
+const Registry = @import("../util/payload_registry.zig").PayloadRegistry(TaggedHeader);
 
 const native_wrap_magic: u64 = 0x5a_4e_41_50_49_57_52_50;
 
@@ -102,6 +103,7 @@ fn createHeader(comptime T: type, payload: T, size_hint: usize) !*TaggedHeader {
     }
 
     const header = try allocator.create(TaggedHeader);
+    errdefer allocator.destroy(header);
     const type_name = @typeName(T);
     header.* = .{
         .magic = native_wrap_magic,
@@ -113,6 +115,7 @@ fn createHeader(comptime T: type, payload: T, size_hint: usize) !*TaggedHeader {
         .memory_adjusted = false,
         .destroy = destroyTypedHeader(T),
     };
+    try Registry.add(header);
     return header;
 }
 
@@ -145,6 +148,10 @@ fn headerFromObjectInternal(
     }
 
     const data_ptr = data.?;
+    if (!Registry.contains(data_ptr)) {
+        if (report_error) NapiError.last_error = NapiError.Error.withReason("Wrapped object was not created by zig-napi");
+        return null;
+    }
     if (@intFromPtr(data_ptr) % @alignOf(TaggedHeader) != 0) {
         if (report_error) {
             NapiError.last_error = NapiError.Error.withReason("Wrapped object was not created by zig-napi");
@@ -170,15 +177,15 @@ fn headerFromObjectInternal(
 }
 
 fn destroyHeaderRaw(header: *TaggedHeader) void {
+    Registry.remove(header);
     header.destroy(header);
 }
 
 fn destroyStoredValue(comptime T: type, allocator: std.mem.Allocator, stored: *T) void {
-    const previous_allocator = GlobalAllocator.globalAllocator();
-    GlobalAllocator.global_manager.set(allocator);
-    defer GlobalAllocator.global_manager.set(previous_allocator);
-
-    Napi.deinit_napi_value(T, stored.*);
+    // Release with the allocator that created the payload instead of rewriting
+    // the current thread's operation allocator: the payload may be released on a
+    // different thread than the one that wrapped it.
+    Napi.deinit_napi_value_with_allocator(T, stored.*, allocator);
     allocator.destroy(stored);
 }
 

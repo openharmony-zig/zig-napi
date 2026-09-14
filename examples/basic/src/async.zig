@@ -31,7 +31,7 @@ pub const AsyncMathResult = struct {
 pub const FileReadSummary = struct {
     path: []u8,
     bytes: usize,
-    text: []u8,
+    text: napi.Owned([]u8),
 };
 
 pub const ParallelReadInput = struct {
@@ -44,7 +44,7 @@ pub const ParallelReadSummary = struct {
     first_bytes: usize,
     second_bytes: usize,
     total_bytes: usize,
-    preview: []u8,
+    preview: napi.Owned([]u8),
 };
 
 fn fibonacci_execute(data: f64) f64 {
@@ -58,15 +58,15 @@ fn fibonacci_execute_with_progress(ctx: napi.AsyncContext(FibProgress), data: f6
     return result;
 }
 
-fn read_file_execute(ctx: napi.AsyncContext(void), path: []u8) ![]u8 {
-    return try std.Io.Dir.cwd().readFileAlloc(ctx.io, path, ctx.allocator, .limited(1024 * 1024));
+fn read_file_execute(ctx: napi.AsyncContext(void), path: []u8) !napi.Owned([]u8) {
+    return .init(try std.Io.Dir.cwd().readFileAlloc(ctx.io, path, ctx.allocator, .limited(1024 * 1024)), ctx.allocator);
 }
 
 fn read_file_summary_execute(ctx: napi.AsyncContext(void), path: []u8) !FileReadSummary {
     const text = try read_file_execute(ctx, path);
     return .{
         .path = path,
-        .bytes = text.len,
+        .bytes = text.value.len,
         .text = text,
     };
 }
@@ -107,6 +107,13 @@ fn append_preview(output: []u8, offset: *usize, text: []const u8, limit: usize) 
 fn parallel_read_execute(ctx: napi.AsyncContext(void), input: ParallelReadInput) !ParallelReadSummary {
     var first: ReadSlot = .{};
     var second: ReadSlot = .{};
+    defer {
+        // Drain producers before their stack-backed slots and buffers disappear,
+        // including when starting the second read or awaiting either read fails.
+        ctx.group.cancel(ctx.io);
+        ctx.allocator.free(first.text);
+        ctx.allocator.free(second.text);
+    }
 
     try ctx.group.concurrent(ctx.io, read_file_slot, .{ ctx, input.first_path, &first });
     try ctx.group.concurrent(ctx.io, read_file_slot, .{ ctx, input.second_path, &second });
@@ -130,7 +137,7 @@ fn parallel_read_execute(ctx: napi.AsyncContext(void), input: ParallelReadInput)
         .first_bytes = first.text.len,
         .second_bytes = second.text.len,
         .total_bytes = first.text.len + second.text.len,
-        .preview = preview,
+        .preview = .init(preview, ctx.allocator),
     };
 }
 
@@ -161,8 +168,8 @@ pub fn fib_async_progress(n: f64) napi.AsyncWithEvents(f64, FibProgress, .single
     return napi.AsyncWithEvents(f64, FibProgress, .single).from(n, fibonacci_execute_with_progress);
 }
 
-pub fn read_file_async(path: []u8) napi.Async([]u8, .thread) {
-    return napi.Async([]u8, .thread).from(path, read_file_execute);
+pub fn read_file_async(path: []u8) napi.Async(napi.Owned([]u8), .thread) {
+    return napi.Async(napi.Owned([]u8), .thread).from(path, read_file_execute);
 }
 
 pub fn read_file_summary_async(path: []u8) napi.Async(FileReadSummary, .thread) {

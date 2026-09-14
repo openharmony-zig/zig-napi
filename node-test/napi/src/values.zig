@@ -184,8 +184,8 @@ pub fn getMapping(env: napi.Env) !napi.Object {
     return object;
 }
 
-pub fn sumMapping(object: napi.Object) i32 {
-    return object.Get("a", i32) + object.Get("b", i32) + object.Get("\x00c", i32);
+pub fn sumMapping(object: napi.Object) !i32 {
+    return try object.Get("a", i32) + try object.Get("b", i32) + try object.Get("\x00c", i32);
 }
 
 pub fn indexmapPassthrough(object: napi.Object) napi.Object {
@@ -553,14 +553,14 @@ pub fn createBigIntI64(env: napi.Env) napi.BigInt {
     return napi.BigInt.New(env, @as(i128, 100));
 }
 
-pub fn bigintAdd(env: napi.Env, left: napi.BigInt, right: napi.BigInt) napi.BigInt {
-    const left_value = napi.BigInt.from_napi_value(left.env, left.raw, i64);
-    const right_value = napi.BigInt.from_napi_value(right.env, right.raw, i64);
+pub fn bigintAdd(env: napi.Env, left: napi.BigInt, right: napi.BigInt) !napi.BigInt {
+    const left_value = try napi.BigInt.from_napi_value(left.env, left.raw, i64);
+    const right_value = try napi.BigInt.from_napi_value(right.env, right.raw, i64);
     return napi.BigInt.New(env, @as(i128, left_value + right_value));
 }
 
 pub fn bigintGetU64AsString(value: napi.BigInt) ![]u8 {
-    const raw = napi.BigInt.from_napi_value(value.env, value.raw, u64);
+    const raw = try napi.BigInt.from_napi_value(value.env, value.raw, u64);
     return try std.fmt.allocPrint(allocator(), "{d}", .{raw});
 }
 

@@ -1,7 +1,8 @@
 const std = @import("std");
 const napi = @import("napi-sys").napi_sys;
 const Env = @import("../env.zig").Env;
-const ArrayBuffer = @import("./arraybuffer.zig").ArrayBuffer;
+const arraybuffer_mod = @import("./arraybuffer.zig");
+const ArrayBuffer = arraybuffer_mod.ArrayBuffer;
 const NapiError = @import("./error.zig");
 const options = @import("../options.zig");
 
@@ -46,19 +47,30 @@ pub fn elementByteSize(raw_type: napi.napi_typedarray_type) usize {
 }
 
 pub fn normalizeElementLength(raw_len: usize, raw_type: napi.napi_typedarray_type, arraybuffer_byte_length: usize, byte_offset: usize) usize {
-    const remaining_byte_len = arraybuffer_byte_length -| byte_offset;
-    const element_size = elementByteSize(raw_type);
-    if (element_size == 0) return 0;
+    return tryNormalizeElementLength(raw_len, raw_type, arraybuffer_byte_length, byte_offset) catch 0;
+}
 
-    if (raw_len * element_size <= remaining_byte_len) {
+/// Fallible variant of `normalizeElementLength`; the multiplication and the
+/// offset addition are checked so that a hostile length cannot wrap around and
+/// turn into a valid looking view.
+pub fn tryNormalizeElementLength(raw_len: usize, raw_type: napi.napi_typedarray_type, arraybuffer_byte_length: usize, byte_offset: usize) !usize {
+    const element_size = elementByteSize(raw_type);
+    if (element_size == 0) return error.InvalidTypedArrayType;
+    if (byte_offset > arraybuffer_byte_length) return error.InvalidTypedArrayView;
+
+    const remaining_byte_len = arraybuffer_byte_length - byte_offset;
+    const byte_len = std.math.mul(usize, raw_len, element_size) catch return error.InvalidTypedArrayView;
+
+    if (byte_len <= remaining_byte_len) {
         return raw_len;
     }
 
+    // Some runtimes report the length in bytes instead of elements.
     if (raw_len <= remaining_byte_len and raw_len % element_size == 0) {
         return raw_len / element_size;
     }
 
-    return 0;
+    return error.InvalidTypedArrayView;
 }
 
 fn validateElementType(comptime T: type) void {
@@ -117,7 +129,28 @@ fn TypedArrayWithRawType(comptime T: type, comptime raw_type: napi.napi_typedarr
             };
         }
 
+        /// Whether this wrapper refers to a usable TypedArray.
+        pub fn isValid(self: Self) bool {
+            return self.raw != null;
+        }
+
+        /// Create a wrapper from a raw napi_value.
+        ///
+        /// Kept for source compatibility with the previous infallible API: the
+        /// N-API status and the raw TypedArray type are validated, and a value
+        /// that is not a matching TypedArray throws a JavaScript `TypeError`
+        /// and yields an invalid wrapper. Prefer `tryFromRaw` when the failure
+        /// has to be handled in Zig.
         pub fn from_raw(env: napi.napi_env, raw: napi.napi_value) Self {
+            return Self.tryFromRaw(env, raw) catch |err| {
+                arraybuffer_mod.recordBinaryFailure("matching TypedArray expected", err);
+                return invalid(env, null);
+            };
+        }
+
+        /// Create a wrapper from a raw napi_value, validating the N-API status,
+        /// the element type and the view length.
+        pub fn tryFromRaw(env: napi.napi_env, raw: napi.napi_value) !Self {
             var typedarray_type: napi.napi_typedarray_type = undefined;
             var len: usize = 0;
             var data: ?*anyopaque = null;
@@ -134,18 +167,33 @@ fn TypedArrayWithRawType(comptime T: type, comptime raw_type: napi.napi_typedarr
                 &byte_offset,
             );
             if (status != napi.napi_ok) {
-                NapiError.last_error = NapiError.Error.withStatus(NapiError.Status.New(status));
-                return invalid(env, raw);
+                // A value that is not a TypedArray at all is a type error; any
+                // other status is reported as it came in.
+                if (NapiError.Status.New(status) == .InvalidArg) {
+                    return arraybuffer_mod.BinaryError.InvalidBinaryValue;
+                }
+                return NapiError.toError(NapiError.Status.New(status));
             }
             if (typedarray_type != raw_type) {
-                NapiError.last_error = NapiError.Error{
-                    .JsTypeError = NapiError.JsTypeError.fromMessage("TypedArray raw type mismatch"),
-                };
-                return invalid(env, raw);
+                return arraybuffer_mod.BinaryError.InvalidBinaryValue;
             }
 
-            const arraybuffer = ArrayBuffer.from_raw(env, arraybuffer_raw);
-            const element_len = normalizeElementLength(len, typedarray_type, arraybuffer.length(), byte_offset);
+            const backing = ArrayBuffer.tryFromRaw(env, arraybuffer_raw) catch {
+                return arraybuffer_mod.BinaryError.InvalidatedBackingStore;
+            };
+            if (try arraybuffer_mod.backingIsDetached(env, arraybuffer_raw)) {
+                return arraybuffer_mod.BinaryError.InvalidatedBackingStore;
+            }
+
+            const element_len = tryNormalizeElementLength(len, typedarray_type, backing.length(), byte_offset) catch {
+                return arraybuffer_mod.BinaryError.InvalidBinaryValue;
+            };
+
+            // A reported length without a backing pointer is the shape of a
+            // detached view; it must never turn into a slice.
+            if (element_len > 0 and data == null) {
+                return arraybuffer_mod.BinaryError.InvalidatedBackingStore;
+            }
 
             return Self{
                 .env = env,
@@ -154,17 +202,25 @@ fn TypedArrayWithRawType(comptime T: type, comptime raw_type: napi.napi_typedarr
                 .len = element_len,
                 .typedarray_type = typedarray_type,
                 .byte_offset = byte_offset,
-                .arraybuffer = arraybuffer,
+                .arraybuffer = backing,
             };
         }
 
         pub fn fromArrayBuffer(env: Env, arraybuffer: ArrayBuffer, len: usize, byte_offset: usize) !Self {
-            if (byte_offset % @sizeOf(T) != 0) {
+            const element_size = @sizeOf(T);
+            if (byte_offset % element_size != 0) {
                 return NapiError.Error.fromStatus(NapiError.Status.InvalidArg);
             }
 
-            const byte_length = len * @sizeOf(T);
-            if (byte_offset + byte_length > arraybuffer.length()) {
+            // Checked so that a huge `len` cannot wrap around and look like a
+            // view inside the buffer.
+            const byte_length = std.math.mul(usize, len, element_size) catch {
+                return NapiError.Error.rangeError("TypedArray length overflows the byte range");
+            };
+            const end = std.math.add(usize, byte_offset, byte_length) catch {
+                return NapiError.Error.rangeError("TypedArray offset overflows the byte range");
+            };
+            if (end > arraybuffer.length()) {
                 return NapiError.Error.fromStatus(NapiError.Status.InvalidArg);
             }
 
@@ -182,25 +238,23 @@ fn TypedArrayWithRawType(comptime T: type, comptime raw_type: napi.napi_typedarr
                 return NapiError.Error.fromStatus(NapiError.Status.New(status));
             }
 
-            return Self{
-                .env = env.raw,
-                .raw = raw,
-                .data = if (len == 0) &[_]T{} else @ptrCast(@alignCast(arraybuffer.data + byte_offset)),
-                .len = len,
-                .typedarray_type = raw_type,
-                .byte_offset = byte_offset,
-                .arraybuffer = arraybuffer,
-            };
+            // Re-read the view from the runtime instead of deriving the pointer
+            // from the ArrayBuffer wrapper: the created view is the authority
+            // for its own pointer, length and offset.
+            return Self.tryFromRaw(env.raw, raw);
         }
 
         pub fn New(env: Env, len: usize) !Self {
-            const arraybuffer = try ArrayBuffer.New(env, len * @sizeOf(T));
+            const byte_length = std.math.mul(usize, len, @sizeOf(T)) catch {
+                return NapiError.Error.rangeError("TypedArray length overflows the byte range");
+            };
+            const arraybuffer = try ArrayBuffer.New(env, byte_length);
             return Self.fromArrayBuffer(env, arraybuffer, len, 0);
         }
 
         pub fn copy(env: Env, data: []const T) !Self {
             var result = try Self.New(env, data.len);
-            @memcpy(result.asSlice(), data);
+            @memcpy(try result.tryAsSlice(), data);
             try result.flush();
             return result;
         }
@@ -210,20 +264,65 @@ fn TypedArrayWithRawType(comptime T: type, comptime raw_type: napi.napi_typedarr
             return Self.fromArrayBuffer(env, arraybuffer, data.len, 0);
         }
 
-        pub fn asSlice(self: Self) []T {
-            return self.data[0..self.len];
+        /// Re-query the view and refresh the cached pointer, length and offset.
+        ///
+        /// JavaScript code that ran after this wrapper was created (a callback,
+        /// a getter, a Proxy trap) may have detached or transferred the backing
+        /// ArrayBuffer. The cached pointer is only valid until the next
+        /// JavaScript reentry.
+        pub fn refresh(self: *Self) !void {
+            const refreshed = try Self.tryFromRaw(self.env, self.raw);
+            self.data = refreshed.data;
+            self.len = refreshed.len;
+            self.typedarray_type = refreshed.typedarray_type;
+            self.byte_offset = refreshed.byte_offset;
+            self.arraybuffer = refreshed.arraybuffer;
         }
 
+        /// Borrowed native view of the TypedArray contents, re-validated
+        /// against the backing store on every call.
+        ///
+        /// Fails when the wrapper is invalid, when the element type no longer
+        /// matches, or when the backing store was detached, transferred or
+        /// resized since the wrapper was created. The returned slice stays
+        /// valid only until the next JavaScript reentry.
+        pub fn tryAsSlice(self: Self) ![]T {
+            if (self.raw == null) return arraybuffer_mod.BinaryError.InvalidBinaryValue;
+            const refreshed = try Self.tryFromRaw(self.env, self.raw);
+            if (refreshed.len != self.len) return arraybuffer_mod.BinaryError.InvalidatedBackingStore;
+            return refreshed.data[0..refreshed.len];
+        }
+
+        /// Safe variant of `asConstSlice`.
+        pub fn tryAsConstSlice(self: Self) ![]const T {
+            return try self.tryAsSlice();
+        }
+
+        /// Borrowed native view of the TypedArray contents.
+        ///
+        /// The view is re-validated on every call; when the backing store is no
+        /// longer valid the result is an empty slice rather than a dangling
+        /// pointer. Use `tryAsSlice` to observe the failure.
+        pub fn asSlice(self: Self) []T {
+            return self.tryAsSlice() catch &[_]T{};
+        }
+
+        /// Const variant of `asSlice`. See `asSlice` for the empty-slice rule.
         pub fn asConstSlice(self: Self) []const T {
-            return self.data[0..self.len];
+            return self.tryAsSlice() catch &[_]T{};
         }
 
         pub fn length(self: Self) usize {
             return self.len;
         }
 
+        /// Byte length of the view with checked arithmetic.
+        pub fn tryByteLength(self: Self) !usize {
+            return std.math.mul(usize, self.len, @sizeOf(T)) catch arraybuffer_mod.BinaryError.InvalidBinaryValue;
+        }
+
         pub fn byteLength(self: Self) usize {
-            return self.len * @sizeOf(T);
+            return self.tryByteLength() catch 0;
         }
 
         /// Sync wasm-side mutations back to the JavaScript TypedArray when running on emnapi.
@@ -234,7 +333,8 @@ fn TypedArrayWithRawType(comptime T: type, comptime raw_type: napi.napi_typedarr
         /// Sync wasm-side mutations for a byte range relative to this TypedArray view.
         pub fn flushRange(self: Self, byte_offset: usize, byte_length: usize) !void {
             if (comptime !options.isWasmNodeAddon()) return;
-            if (byte_offset > self.byteLength() or byte_length > self.byteLength() - byte_offset) {
+            const view_byte_length = try self.tryByteLength();
+            if (byte_offset > view_byte_length or byte_length > view_byte_length - byte_offset) {
                 return NapiError.Error.fromStatus(NapiError.Status.InvalidArg);
             }
             if (byte_length == 0) return;

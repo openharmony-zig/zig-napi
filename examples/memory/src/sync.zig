@@ -32,7 +32,7 @@ const FnArgs = struct { i32, i32 };
 const FnReturn = i32;
 
 pub fn hello(env: napi.Env, name: []u8) napi.String {
-    const allocator = std.heap.page_allocator;
+    const allocator = napi.globalAllocator();
     const message = std.fmt.allocPrint(allocator, "Hello, {s}!", .{name}) catch @panic("OOM");
     defer allocator.free(message);
     return napi.String.New(env, message);
@@ -120,12 +120,12 @@ pub fn create_small_bigint_value(env: napi.Env) napi.BigInt {
     return napi.BigInt.New(env, @as(i128, 42));
 }
 
-pub fn bigint_to_i64(value: napi.BigInt) i64 {
-    return napi.BigInt.from_napi_value(value.env, value.raw, i64);
+pub fn bigint_to_i64(value: napi.BigInt) !i64 {
+    return try napi.BigInt.from_napi_value(value.env, value.raw, i64);
 }
 
 pub fn manual_resolved_promise(env: napi.Env) !napi.Promise {
-    var promise = napi.Promise.New(env);
+    var promise = try napi.Promise.New(env);
     try promise.Resolve(@as(i32, 42));
     return promise;
 }

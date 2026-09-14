@@ -1,3 +1,8 @@
+// Worker side of the threaded WASI flavor, for `async-lifecycle.spec.js`.
+//
+// Same shape as the generated `wasi-worker.mjs`, with the emnapi 2 plugins that
+// every thread instantiating an emnapi 2 archive needs. Kept next to the spec so
+// the async lifecycle tests do not depend on the generated loader files.
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import { parse } from "node:path";
@@ -10,6 +15,8 @@ const {
   instantiateNapiModuleSync,
   MessageHandler,
   getDefaultContext,
+  emnapiAsyncWorkPlugin,
+  emnapiTSFNPlugin,
 } = require("@napi-rs/wasm-runtime");
 
 if (parentPort) {
@@ -23,6 +30,7 @@ Object.assign(globalThis, {
   require,
   Worker,
   importScripts(f) {
+    // eslint-disable-next-line no-eval
     (0, eval)(fs.readFileSync(f, "utf8") + "//# sourceURL=" + f);
   },
   postMessage(msg) {
@@ -33,7 +41,7 @@ Object.assign(globalThis, {
 });
 
 const emnapiContext = getDefaultContext();
-const __rootDir = parse(process.cwd()).root;
+const rootDir = parse(process.cwd()).root;
 
 const handler = new MessageHandler({
   onLoad({ wasmModule, wasmMemory }) {
@@ -41,7 +49,7 @@ const handler = new MessageHandler({
       version: "preview1",
       env: process.env,
       preopens: {
-        [__rootDir]: __rootDir,
+        [rootDir]: rootDir,
       },
     });
 
@@ -49,6 +57,7 @@ const handler = new MessageHandler({
       childThread: true,
       wasi,
       context: emnapiContext,
+      plugins: [emnapiAsyncWorkPlugin, emnapiTSFNPlugin],
       overwriteImports(importObject) {
         importObject.env = {
           ...importObject.env,

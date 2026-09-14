@@ -6,6 +6,18 @@ This project can help us to build native module libraries for OpenHarmony/Harmon
 
 For openharmony, we must use a patched zig library to build. See detail with [zig-patch](https://github.com/openharmony-zig/zig-patch).
 
+### Node.js requirements
+
+The build CLI and the artifacts it produces are separate: the CLI runs on the
+Node.js versions its dependencies support, while an addon only needs the runtime
+of the host that loads it.
+
+| Component | Node.js |
+| --- | --- |
+| `zig-napi` build CLI | `^20.17.0 \|\| ^22.13.0 \|\| >=23.5.0` — the range `@napi-rs/cli` 3.9.1 and `@inquirer/prompts` require (Node 21 and 22.0–22.12 are not supported by them) |
+| Native addons (`*.node`) | any Node.js exposing the N-API version the addon targets; see the supported runtime matrix in the repository README |
+| WASI loaders (`*.wasi.cjs`, `*.wasip1.cjs`, `*-browser.js`) | `^20.19.0 \|\| ^22.13.0 \|\| >=23.5.0`, the range `@napi-rs/wasm-runtime` 1.2.4 requires. The threaded flavor additionally needs `SharedArrayBuffer`; the threadless `wasm32-wasip1` flavor runs without cross-origin isolation |
+
 ## Install
 
 We recommend you use ZON(Zig Package Manager) to install it.
@@ -148,6 +160,10 @@ pnpm test
 
 It installs the addon as `zig-out/node/hello.<platform-arch-abi>.node`, for example `hello.darwin-arm64.node`, `hello.linux-x64-gnu.node`, or `hello.win32-x64-msvc.node`. For WASI threads, use `zig-napi build --target wasm32-wasip1-threads`; the CLI maps that to Zig's `wasm32-wasi` target with atomics/shared-memory features, and the output follows napi-rs naming as `hello.wasm32-wasi.wasm`.
 
+WASI addons link emnapi's `libemnapi-basic-napi-rs.a` from a `node_modules/emnapi` install (`emnapi` `2.0.0-alpha.5`, a prerelease to pin exactly, with `@emnapi/core` and `@emnapi/runtime` at the same version and `@napi-rs/wasm-runtime` `1.2.4` for the loaders), which the build looks for next to the addon project and upwards. `--target wasm32-wasip1` builds the single-threaded flavor as `hello.wasm32-wasip1.wasm` (`hello.wasip1.cjs`, unshared imported memory), and `--target wasm32-wasip1-threads` builds the shared-memory flavor as `hello.wasm32-wasi.wasm` (`hello.wasi.cjs`, worker pool); the single-threaded flavor additionally ships a deferred ESM binding (`hello.wasip1-deferred.js`) with `instantiate()`/`createInstance()`/`dispose()`. Both are passed to Zig as `-Dtarget=wasm32-wasi` — Zig only knows that spelling — with `-Dcpu=baseline+atomics+bulk_memory+mutable_globals` on the threaded one, which is also the flag that selects the flavor.
+
+Async work and thread-safe functions come from the `@emnapi/core` plugins in both flavors; the threaded flavor runs them on the plugin's JavaScript worker threads through the `emnapi_async_worker_create` / `emnapi_async_worker_init` exports. That is deliberately **not** napi-rs' implementation, which links emnapi's full C composition and uses the uv/libuv thread pool over real wasi pthreads: Zig 0.16 cannot build a multithreaded wasm module, so a zig-napi WASI addon has no libuv/Tokio-style async API. Memory stays a loader decision — the module imports memory with the linker minimum (257 pages by default) and a 4 GiB maximum, and the loader's `wasm.initialMemory` (4000 pages by default) must stay below `wasm.maximumMemory`, because the Zig allocator grows the linear memory past its current size. A **single** allocation is capped at 1 GiB − 64 KiB (a wasm32 bump-allocator size-class limit: `malloc`/Zig `Allocator` return null/an out-of-memory error instead of trapping above it, and a failed `realloc` keeps the old block), while the total memory can still be 4 GiB across many allocations. Build-side overrides: `-Dwasi-initial-memory-pages=<pages>`, `-Dwasi-max-memory-pages=<pages>`, `-Dwasi-stack-size=<bytes>`, plus `-Demnapi-link-dir=<dir>` (or `EMNAPI_LINK_DIR`) and `-Demnapi-archive=<name-or-path>` to select a different emnapi archive.
+
 The package also provides a `zig-napi` CLI for Node.js addons. Zig-specific commands such as `new` and `build` are implemented by this project. Packaging commands reuse the community `@napi-rs/cli` API for npm package directory creation, artifact collection, and pre-publish processing.
 
 The CLI requires Node.js 20.17 or newer.
@@ -156,7 +172,7 @@ Create a new Node addon project:
 
 ```bash
 pnpm install
-pnpm --filter zig-napi cli new ../../my-addon
+pnpm --filter @ohos-rs/zig-cli cli new ../../my-addon
 cd my-addon
 pnpm install
 pnpm build
@@ -166,7 +182,7 @@ pnpm test
 `zig-napi new` asks for the package name, native addon binary name, and target platforms interactively by default, matching napi-rs' `new` workflow. For scripted usage, pass `--no-interactive` with explicit options:
 
 ```bash
-pnpm --filter zig-napi cli new ../../my-addon --no-interactive --name my-addon --addon my_addon --targets x86_64-unknown-linux-gnu
+pnpm --filter @ohos-rs/zig-cli cli new ../../my-addon --no-interactive --name my-addon --addon my_addon --targets x86_64-unknown-linux-gnu
 ```
 
 Pass `--targets <triple>` repeatedly or as a comma-separated list to choose the generated package targets manually, or pass `--enable-all-targets` to enable every napi-rs target known to the CLI.
@@ -189,6 +205,8 @@ Node.js matrix tests live in `node-test`. It mirrors the NAPI-RS example split w
 - `node-test/napi` covers the non compat-mode example surface such as values, strict validation, async, ThreadSafeFunction, and worker-thread loading.
 
 The Node addon CI runs those tests on Linux, macOS, and Windows for Node.js 12, 14, 16, 18, 20, 22, and 24. It also builds `wasm32-wasip1-threads` addons and runs `node-test` with `NAPI_RS_FORCE_WASI=error` to verify the napi-rs compatible wasm runtime path.
+
+See [node-test/README.md](node-test/README.md) for the addon list, the WASI flavor layout and the native/WASI test commands.
 
 ## Website
 

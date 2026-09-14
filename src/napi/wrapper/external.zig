@@ -3,6 +3,7 @@ const napi = @import("napi-sys").napi_sys;
 const Napi = @import("../util/napi.zig").Napi;
 const NapiError = @import("error.zig");
 const GlobalAllocator = @import("../util/allocator.zig");
+const Registry = @import("../util/payload_registry.zig").PayloadRegistry(TaggedHeader);
 
 const external_magic: u64 = 0x5a_4e_41_50_49_45_58_54;
 
@@ -155,6 +156,10 @@ pub fn External(comptime T: type) type {
             }
 
             const data_ptr = data.?;
+            if (!Registry.contains(data_ptr)) {
+                if (report_error) NapiError.last_error = NapiError.Error.withCodeAndMessage("InvalidArg", "External value was not created by zig-napi");
+                return null;
+            }
             if (@intFromPtr(data_ptr) % @alignOf(TaggedHeader) != 0) {
                 if (report_error) {
                     NapiError.last_error = NapiError.Error.withCodeAndMessage("InvalidArg", "External value was not created by zig-napi");
@@ -216,11 +221,12 @@ pub fn External(comptime T: type) type {
             const stored = try allocator.create(T);
             stored.* = payload;
             errdefer {
-                Napi.deinit_napi_value(T, stored.*);
+                Napi.deinit_napi_value_with_allocator(T, stored.*, allocator);
                 allocator.destroy(stored);
             }
 
             const header = try allocator.create(TaggedHeader);
+            errdefer allocator.destroy(header);
             const type_name = @typeName(T);
             header.* = .{
                 .magic = external_magic,
@@ -234,14 +240,16 @@ pub fn External(comptime T: type) type {
                 .adjusted_size = 0,
                 .destroy = destroyHeader,
             };
+            try Registry.add(header);
             return header;
         }
 
         fn destroyHeader(header: *TaggedHeader) void {
+            Registry.remove(header);
             const allocator = header.allocator;
             if (header.value_ptr) |ptr| {
                 const stored: *T = @ptrCast(@alignCast(ptr));
-                Napi.deinit_napi_value(T, stored.*);
+                Napi.deinit_napi_value_with_allocator(T, stored.*, allocator);
                 allocator.destroy(stored);
                 header.value_ptr = null;
             }

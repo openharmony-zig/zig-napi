@@ -42,14 +42,14 @@ pub fn return_nullable() NullableField {
     return NullableField{ .name = null };
 }
 
-pub fn raw_object_read(config: napi.Object, key: napi.String) i32 {
-    const key_bytes = key.copyUtf8();
+pub fn raw_object_read(config: napi.Object, key: napi.String) !i32 {
+    const key_bytes = try key.copyUtf8();
     defer napi.globalAllocator().free(key_bytes);
     return config.Get(key_bytes, i32);
 }
 
 pub fn raw_object_create(env: napi.Env, key: napi.String, value: i32) !napi.Object {
-    const key_bytes = key.copyUtf8();
+    const key_bytes = try key.copyUtf8();
     defer napi.globalAllocator().free(key_bytes);
 
     var object = try napi.Object.Create(env);

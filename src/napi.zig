@@ -20,6 +20,7 @@ const native_wrap = @import("./napi/wrapper/native_wrap.zig");
 const global_allocator = @import("./napi/util/allocator.zig");
 const options = @import("./napi/options.zig");
 const dts_override = @import("./napi/dts.zig");
+const ownership = @import("./napi/ownership.zig");
 
 pub const napi_sys = @import("napi-sys");
 pub const NapiVersion = options.NapiVersion;
@@ -34,6 +35,7 @@ pub const BigInt = value.BigInt;
 pub const Null = value.Null;
 pub const Undefined = value.Undefined;
 pub const Promise = value.Promise;
+pub const PromiseValue = value.PromiseValue;
 pub const Bool = value.Bool;
 pub const Array = value.Array;
 
@@ -47,6 +49,16 @@ pub const JsRangeError = err.JsRangeError;
 pub const Function = function.Function;
 pub const CallbackInfo = callback_info.CallbackInfo;
 pub const Worker = worker.Worker;
+/// `Worker` with explicitly borrowed data: the worker never releases it, the
+/// caller keeps it alive until `OnComplete` returned.
+pub const WorkerBorrowed = worker.WorkerBorrowed;
+/// Fallible `Worker`/`WorkerBorrowed`: creation failures are returned (creation
+/// through `Worker`/`WorkerBorrowed` follows the documented OOM panic policy).
+pub const tryWorker = worker.tryWorker;
+pub const tryWorkerBorrowed = worker.tryWorkerBorrowed;
+/// Transfer mode of the `data` field; declare it on a named init struct:
+/// `pub const data_transfer: napi.WorkerDataTransfer = .borrowed;`
+pub const WorkerDataTransfer = worker.DataTransfer;
 pub const ThreadSafeFunction = thread_safe_function.ThreadSafeFunction;
 pub const ThreadSafeFunctionMode = thread_safe_function.ThreadSafeFunctionMode;
 pub const ThreadSafeFunctionReleaseMode = thread_safe_function.ThreadSafeFunctionReleaseMode;
@@ -56,6 +68,9 @@ pub const AbortSignal = abort_signal.AbortSignal;
 pub const resolveRequestedRuntime = async.resolveRequestedRuntime;
 pub const Class = class.Class;
 pub const ClassWithoutInit = class.ClassWithoutInit;
+/// Policy for the converted `init`/factory arguments of a class; declare it on
+/// the class: `pub const arg_ownership: napi.ArgOwnership = .transient;`
+pub const ArgOwnership = class.ArgOwnership;
 pub const Buffer = buffer.Buffer;
 pub const ArrayBuffer = arraybuffer.ArrayBuffer;
 pub const TypedArray = typedarray.TypedArray;
@@ -86,6 +101,46 @@ pub fn globalAllocator() std.mem.Allocator {
     return global_allocator.globalAllocator();
 }
 
+/// The page allocator of this target, safe to call from every thread.
+///
+/// Native targets get `std.heap.page_allocator` itself (no lock, no wrapper).
+/// WebAssembly gets the same allocator behind one module-global lock, because
+/// emnapi runs native work on real threads while Zig reports the target as
+/// single threaded - and the WebAssembly page allocator keeps its free lists in
+/// one unsynchronized global. Use it as the backing of a custom
+/// `napi_allocator`:
+///
+/// ```zig
+/// var counter = CountingAllocator.init(napi.safePageAllocator());
+/// pub const napi_allocator = counter.allocator();
+/// ```
+pub fn safePageAllocator() std.mem.Allocator {
+    return global_allocator.safePageAllocator();
+}
+
+/// Explicitly owned native value.
+///
+/// Conversion results that were allocated natively (for example by
+/// `allocator.dupe`) must be returned as `Owned(T)`: the conversion layer
+/// converts the payload and then releases it with its own allocator. Plain
+/// slices are treated as borrowed and are never freed, so literals and input
+/// aliases stay safe.
+pub fn Owned(comptime T: type) type {
+    return ownership.Owned(T);
+}
+
+/// True when `T` is an `napi.Owned` wrapper.
+pub fn isOwned(comptime T: type) bool {
+    return ownership.isOwned(T);
+}
+
+/// Deep-copy a native value shape into memory owned by `allocator`.
+/// JavaScript handles are rejected at compile time: they must not become shared
+/// state between threads.
+pub fn cloneOwned(comptime T: type, source: T, allocator: std.mem.Allocator) !Owned(T) {
+    return ownership.Owned(T).clone(source, allocator);
+}
+
 /// Override only short-lived conversion/operation allocations.
 /// This is mainly useful for scoped allocator tests; applications should use a
 /// root `napi_allocator` declaration instead.
@@ -96,6 +151,16 @@ pub fn setOperationAllocator(new_allocator: std.mem.Allocator) void {
 pub fn resetOperationAllocator() void {
     global_allocator.global_manager.set(global_allocator.defaultAllocator());
 }
+
+/// Read the operation allocator of the current thread once, so a value that is
+/// released later can use exactly the allocator that produced it.
+pub fn captureOperationAllocator() std.mem.Allocator {
+    return global_allocator.capture();
+}
+
+/// Temporarily replace the current thread's operation allocator; the previous
+/// one is restored when the scope exits. Overrides are per thread and nest.
+pub const ScopedAllocatorOverride = global_allocator.ScopedOverride;
 
 pub fn AsyncContext(comptime Event: type) type {
     return async.AsyncContext(Event);
@@ -109,3 +174,12 @@ pub fn AsyncWithEvents(comptime AsyncResult: type, comptime Event: type, comptim
 
 pub const NODE_API_MODULE = module.NODE_API_MODULE;
 pub const NODE_API_MODULE_WITH_INIT = module.NODE_API_MODULE_WITH_INIT;
+
+test {
+    // Pull in the native unit tests of the conversion layer so
+    // `zig test src/napi.zig` runs them.
+    _ = @import("./napi/util/allocator.zig");
+    _ = @import("./napi/util/napi.zig");
+    _ = @import("./napi/wrapper/error.zig");
+    _ = @import("./napi/ownership.zig");
+}

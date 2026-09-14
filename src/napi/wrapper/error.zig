@@ -7,11 +7,169 @@ pub const Status = @import("status.zig").Status;
 
 // Save the last error to the threadlocal variable and throw it when the error is not null
 pub threadlocal var last_error: ?Error = null;
+/// Status of the N-API call that produced `last_error`.
+/// `PendingException` is used as a marker for "a JavaScript exception is already
+/// pending in the environment and must be propagated as is".
 pub threadlocal var last_error_status: ?Status = null;
 
 pub fn clearLastError() void {
     last_error = null;
     last_error_status = null;
+}
+
+/// Snapshot of the threadlocal error state, used to save/restore error frames
+/// around nested entries into JavaScript (callbacks, getters, module init).
+///
+/// A frame also *pins* the rotating message slot its error points into, so
+/// nested reentries that format more messages cannot overwrite the text of an
+/// error that is still waiting to be thrown by an outer frame.
+pub const ErrorFrame = struct {
+    error_value: ?Error,
+    status: ?Status,
+    pinned_slot: ?usize,
+
+    pub fn save() ErrorFrame {
+        return pinFrame(.{
+            .error_value = last_error,
+            .status = last_error_status,
+            .pinned_slot = null,
+        });
+    }
+
+    /// Restore this frame and release its message pin.
+    ///
+    /// Frames must be restored in reverse order of `save` (the usual
+    /// `defer frame.restore();` pattern).
+    pub fn restore(self: ErrorFrame) void {
+        unpinFrame(self);
+        last_error = self.error_value;
+        last_error_status = self.status;
+    }
+};
+
+/// Copy of `frame` whose message slot is pinned (reference counted) for as long
+/// as the frame is alive.
+fn pinFrame(frame: ErrorFrame) ErrorFrame {
+    var result = frame;
+    const message = if (frame.error_value) |err| messageOf(err) else "";
+    if (message.len == 0) return result;
+    if (messageSlotOf(message)) |slot| {
+        message_slot_pins[slot] += 1;
+        result.pinned_slot = slot;
+    }
+    return result;
+}
+
+fn unpinFrame(frame: ErrorFrame) void {
+    if (frame.pinned_slot) |slot| {
+        if (message_slot_pins[slot] > 0) message_slot_pins[slot] -= 1;
+    }
+}
+
+fn messageOf(err: Error) []const u8 {
+    return switch (err) {
+        .JsError => |inner| inner.message,
+        .JsTypeError => |inner| inner.message,
+        .JsRangeError => |inner| inner.message,
+    };
+}
+
+/// Mark that the environment already holds a pending JavaScript exception.
+/// The conversion layer must not create a new error in that case, otherwise the
+/// original exception object (for example one thrown by a getter) is replaced.
+pub fn setPendingException() void {
+    last_error = null;
+    last_error_status = .PendingException;
+}
+
+pub fn hasPendingException() bool {
+    return last_error == null and last_error_status != null and last_error_status.? == .PendingException;
+}
+
+/// Message storage for dynamically formatted error messages.
+///
+/// `Error` stores a `[]const u8`, so formatted messages need stable storage for
+/// the lifetime of the error state. A rotating set of threadlocal slots keeps
+/// nested conversions from overwriting each other; slots referenced by a live
+/// `ErrorFrame` are pinned and skipped, so an error saved by an outer frame
+/// keeps its text across any number of nested reentries.
+const message_slot_count = 8;
+const message_slot_len = 256;
+threadlocal var message_slots: [message_slot_count][message_slot_len]u8 = undefined;
+threadlocal var message_slot_index: usize = 0;
+threadlocal var message_slot_pins: [message_slot_count]u16 = .{0} ** message_slot_count;
+
+pub fn formatMessage(comptime fmt: []const u8, args: anytype) []const u8 {
+    const index = takeMessageSlot() orelse return "Native conversion error (nested error storage exhausted)";
+    const slot = &message_slots[index];
+    return std.fmt.bufPrint(slot, fmt, args) catch fmt;
+}
+
+/// Which ring slot (if any) stores `message`.
+fn messageSlotOf(message: []const u8) ?usize {
+    const pointer = @intFromPtr(message.ptr);
+    for (&message_slots, 0..) |*slot, index| {
+        const base = @intFromPtr(slot);
+        if (pointer >= base and pointer < base + message_slot_len) return index;
+    }
+    return null;
+}
+
+/// Never overwrite text referenced by a saved outer error frame.
+fn takeMessageSlot() ?usize {
+    var candidate: usize = 0;
+    while (candidate < message_slot_count) : (candidate += 1) {
+        const slot = (message_slot_index + candidate) % message_slot_count;
+        if (message_slot_pins[slot] == 0) {
+            message_slot_index = (slot + 1) % message_slot_count;
+            return slot;
+        }
+    }
+
+    return null;
+}
+
+/// Record a failed N-API call. A pending JavaScript exception is preserved
+/// instead of being replaced by a freshly created error.
+pub fn failWithStatus(status: Status) anyerror {
+    if (status == .PendingException) {
+        setPendingException();
+        return error.PendingException;
+    }
+    last_error = Error{ .JsError = JsError.fromStatus(status) };
+    last_error_status = status;
+    return toError(status);
+}
+
+pub fn failStatus(status: anytype) anyerror {
+    return failWithStatus(Status.New(status));
+}
+
+pub fn failTypeError(comptime fmt: []const u8, args: anytype) anyerror {
+    last_error = Error{ .JsTypeError = JsTypeError.fromMessage(formatMessage(fmt, args)) };
+    last_error_status = .GenericFailure;
+    return error.GenericFailure;
+}
+
+pub fn failRangeError(comptime fmt: []const u8, args: anytype) anyerror {
+    last_error = Error{ .JsRangeError = JsRangeError.fromMessage(formatMessage(fmt, args)) };
+    last_error_status = .GenericFailure;
+    return error.GenericFailure;
+}
+
+pub fn failError(comptime fmt: []const u8, args: anytype) anyerror {
+    last_error = Error{ .JsError = JsError.fromMessage(formatMessage(fmt, args)) };
+    last_error_status = .GenericFailure;
+    return error.GenericFailure;
+}
+
+/// Throw the recorded error into the environment unless a JavaScript exception
+/// is already pending, in which case the pending exception is left untouched.
+pub fn throwCurrent(env: Env) void {
+    if (last_error) |err| {
+        clearLastError();
+        err.throwInto(env);
+    }
 }
 
 pub const ErrorStatus = error{
@@ -77,11 +235,16 @@ pub fn toError(status: Status) anyerror {
 fn napiError(comptime T: type) type {
     return struct {
         status: ?Status,
+        /// Borrowed message. Static literals are never freed; dynamically
+        /// formatted messages live in `message()` slots.
         message: []const u8,
         mode: T,
         custom_status: ?[]const u8,
 
         const Self = @This();
+
+        /// Marks the error payload as borrowed data for ownership handling.
+        pub const is_napi_error = true;
 
         pub fn to_napi_error(self: Self, env: Env) napi.napi_value {
             var e: napi.napi_value = undefined;
@@ -144,7 +307,10 @@ fn napiError(comptime T: type) type {
             std.debug.assert(create_status == napi.napi_ok);
 
             const throw_status = napi.napi_throw(env.raw, e);
-            std.debug.assert(throw_status == napi.napi_ok);
+            // `napi_throw` reports `napi_pending_exception` when JavaScript already
+            // holds one. The existing exception wins; overwriting it would replace
+            // the original error object (for example the one thrown by a getter).
+            std.debug.assert(throw_status == napi.napi_ok or throw_status == napi.napi_pending_exception);
         }
     };
 }
@@ -181,6 +347,10 @@ pub const Error = union(enum) {
     JsError: JsError,
     JsTypeError: JsTypeError,
     JsRangeError: JsRangeError,
+
+    /// Error payloads only borrow their message strings, so ownership handling
+    /// must never free them.
+    pub const is_napi_error = true;
 
     pub fn to_napi_error(self: Error, env: Env) napi.napi_value {
         return switch (self) {
@@ -318,4 +488,76 @@ pub fn resultPayload(comptime T: type) type {
         @compileError("Type is not napi.Result: " ++ @typeName(T));
     }
     return T.payload_type;
+}
+
+// ---------------------------------------------------------------------- tests
+
+test "error frames keep the outer message across nested reentry" {
+    clearLastError();
+    last_error = Error{ .JsTypeError = JsTypeError.fromMessage(formatMessage("outer failure {d}", .{7})) };
+    const expected = messageOf(last_error.?);
+
+    const outer = ErrorFrame.save();
+
+    // Nested JavaScript reentry formats far more messages than the ring holds.
+    var i: usize = 0;
+    while (i < message_slot_count * 4) : (i += 1) {
+        last_error = Error{ .JsRangeError = JsRangeError.fromMessage(formatMessage("nested {d}", .{i})) };
+    }
+
+    outer.restore();
+
+    try std.testing.expect(last_error != null);
+    try std.testing.expectEqualStrings("outer failure 7", messageOf(last_error.?));
+    try std.testing.expect(expected.len != 0);
+}
+
+test "nested error frames restore in order and release their pins" {
+    clearLastError();
+    last_error = Error{ .JsError = JsError.fromMessage(formatMessage("first", .{})) };
+    const first = ErrorFrame.save();
+
+    last_error = Error{ .JsError = JsError.fromMessage(formatMessage("second", .{})) };
+    const second = ErrorFrame.save();
+
+    last_error = Error{ .JsError = JsError.fromMessage(formatMessage("third", .{})) };
+    second.restore();
+    try std.testing.expectEqualStrings("second", messageOf(last_error.?));
+
+    first.restore();
+    try std.testing.expectEqualStrings("first", messageOf(last_error.?));
+
+    clearLastError();
+    for (message_slot_pins) |pins| {
+        try std.testing.expectEqual(@as(u16, 0), pins);
+    }
+}
+
+test "pending exception marker survives a frame" {
+    clearLastError();
+    setPendingException();
+    const frame = ErrorFrame.save();
+    clearLastError();
+    try std.testing.expect(!hasPendingException());
+    frame.restore();
+    try std.testing.expect(hasPendingException());
+    clearLastError();
+}
+
+test "saturated error storage preserves every saved frame" {
+    clearLastError();
+    var frames: [message_slot_count]ErrorFrame = undefined;
+    for (&frames, 0..) |*frame, i| {
+        last_error = Error.withReason(formatMessage("frame {d}", .{i}));
+        frame.* = ErrorFrame.save();
+    }
+    try std.testing.expectEqualStrings("Native conversion error (nested error storage exhausted)", formatMessage("overflow", .{}));
+    var index = frames.len;
+    while (index > 0) {
+        index -= 1;
+        frames[index].restore();
+        var expected: [32]u8 = undefined;
+        try std.testing.expectEqualStrings(try std.fmt.bufPrint(&expected, "frame {d}", .{index}), messageOf(last_error.?));
+    }
+    clearLastError();
 }

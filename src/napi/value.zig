@@ -8,6 +8,7 @@ pub const BigInt = @import("./value/bigint.zig").BigInt;
 pub const Null = @import("./value/null.zig").Null;
 pub const Undefined = @import("./value/undefined.zig").Undefined;
 pub const Promise = @import("./value/promise.zig").Promise;
+pub const PromiseValue = @import("./value/promise.zig").PromiseValue;
 pub const Bool = @import("./value/bool.zig").Bool;
 pub const Array = @import("./value/array.zig").Array;
 
@@ -22,7 +23,7 @@ pub const NapiValue = struct {
         };
     }
 
-    pub fn As(self: NapiValue, comptime T: type) T {
+    pub fn As(self: NapiValue, comptime T: type) !T {
         return Napi.from_napi_value(self.env, self.raw, T);
     }
 };
