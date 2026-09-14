@@ -33,12 +33,12 @@ valid data and are not repaired by the wrapper.
 
 ## JavaScript Resources Created By Conversion
 
-Two parameter shapes do not copy data - they *create* a JavaScript resource:
+Two parameter shapes do not copy data - they _create_ a JavaScript resource:
 
-| Parameter                     | Created resource                     | Release with              |
-| ----------------------------- | ------------------------------------ | ------------------------- |
+| Parameter                                                 | Created resource                           | Release with                  |
+| --------------------------------------------------------- | ------------------------------------------ | ----------------------------- |
 | `napi.Reference(T)`, `napi.ObjectRef`, `napi.FunctionRef` | strong reference (`napi_create_reference`) | `Unref(env)` or `Delete(env)` |
-| `*napi.ThreadSafeFunction(...)` | active thread-safe function       | `release(mode)` / `abort()` |
+| `*napi.ThreadSafeFunction(...)`                           | active thread-safe function                | `release(mode)` / `abort()`   |
 
 Both are tracked by the argument-conversion transaction
 ([Conversion Model](./conversion-model)). When the call is rejected before the
@@ -58,7 +58,7 @@ pub fn remember(reference: napi.ObjectRef) void {
 }
 ```
 
-`napi.Reference(T)` is a value type that holds the reference *handle*, not the
+`napi.Reference(T)` is a value type that holds the reference _handle_, not the
 ownership. Copying one copies the handle: releasing through one copy
 (`Unref`/`Delete`) deletes the reference for all of them, while the other copies
 still hold the deleted handle and will pass it to N-API. That is undefined
@@ -93,7 +93,7 @@ Exports a Zig struct type as a JavaScript class with constructor initialization 
 | `pub fn staticMethod(...)`           | static method                                 |
 | static factory returning `T` or `*T` | static factory returning a class instance     |
 | `pub const value = ...`              | static readonly value                         |
-| `pub const arg_ownership = ...`      | wrapper configuration, not a class member      |
+| `pub const arg_ownership = ...`      | wrapper configuration, not a class member     |
 | `pub fn deinit(self: *T)`            | called when the wrapped instance is finalized |
 
 ```zig
@@ -174,6 +174,7 @@ pub const CounterClass = napi.Class(Counter);
   `allocator.dupe`, `napi.Owned(T).clone`) or allocate an explicitly owned field
   in `init`. The declaration configures the wrapper and is not part of the
   JavaScript class or its type declarations.
+
 - Converting an argument can create a JavaScript resource (a strong reference
   for `napi.ObjectRef`/`napi.Reference(T)`, an active thread-safe function for a
   TSFN pointer). Every callback converts its arguments as one transaction and
@@ -334,7 +335,7 @@ var counter = CountingAllocator.init(napi.safePageAllocator());
 pub const napi_allocator = counter.allocator();
 ```
 
-On native targets it *is* `std.heap.page_allocator` (no lock, no wrapper). On
+On native targets it _is_ `std.heap.page_allocator` (no lock, no wrapper). On
 WebAssembly it is the same allocator behind one module-global lock, which every
 user of that shared state has to take - a lock of your own would not be the same
 lock. The default allocator already uses it.

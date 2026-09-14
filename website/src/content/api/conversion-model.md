@@ -111,7 +111,7 @@ borrowed literals or instance-retained constructor arguments. See [Ownership](./
 ## Conversion Transactions
 
 Argument conversion is a transaction. Some conversions do not copy data, they
-*create* JavaScript resources: `napi.Reference(T)`, `napi.ObjectRef` and
+_create_ JavaScript resources: `napi.Reference(T)`, `napi.ObjectRef` and
 `napi.FunctionRef` create a strong reference, and a
 `*napi.ThreadSafeFunction(...)` parameter creates an active thread-safe
 function. Those resources are recorded while the arguments are converted and
@@ -137,7 +137,7 @@ transactions too:
   halfway instead of leaking what it had already created.
 
 One consequence of the ordering: a custom `deinit` of a converted value (a
-struct that releases its own native memory) runs *after* the resource rollback,
+struct that releases its own native memory) runs _after_ the resource rollback,
 during the ordinary native cleanup. It must only release native memory it owns -
 never a reference or TSFN the conversion created, which the transaction releases
 itself and the body owns after the commit.

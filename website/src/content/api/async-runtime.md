@@ -178,8 +178,8 @@ torn down observes an inactive registration instead of a freed one.
 
 ## `AbortRegistration`
 
-| Method               | Use                                                                            |
-| -------------------- | ------------------------------------------------------------------------------ |
+| Method               | Use                                                                             |
+| -------------------- | ------------------------------------------------------------------------------- |
 | `requestAbort()`     | Invoke the registered native callback.                                          |
 | `release()`          | Remove the registration and delete the signal reference (JavaScript thread).    |
 | `releaseWithoutJs()` | Detach without touching JavaScript, for teardown while the environment is gone. |
@@ -241,11 +241,11 @@ A `data` value that is a compile time constant (`.{ .data = @as(u32, 1), ... }`)
 
 A worker belongs to the JavaScript thread and environment that created it, and the handle is valid from creation until its completion callback ran - or until a reported setup failure released it. `Execute` is the only callback that runs on the worker thread; it must not call JavaScript (the `napi.Env` a two-parameter `Execute` receives is only for explicitly thread-safe N-API entry points such as `napi_call_threadsafe_function`).
 
-| Method         | Use                                                                          |
-| -------------- | ---------------------------------------------------------------------------- |
-| `Queue()`      | Queue work without returning a Promise. A worker that cannot be queued releases itself (this entry point has no failure channel). |
-| `AsyncQueue()` | Queue work and return a `napi.Promise`. Setup failures are thrown instead of publishing a promise that would never settle, and release the worker. |
-| `Cancel()`     | Cooperatively cancel a queued work item; the promise settles with an `AbortError` when the runner had not started. |
+| Method         | Use                                                                                                                                                                     |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Queue()`      | Queue work without returning a Promise. A worker that cannot be queued releases itself (this entry point has no failure channel).                                       |
+| `AsyncQueue()` | Queue work and return a `napi.Promise`. Setup failures are thrown instead of publishing a promise that would never settle, and release the worker.                      |
+| `Cancel()`     | Cooperatively cancel a queued work item; the promise settles with an `AbortError` when the runner had not started.                                                      |
 | `deinit()`     | Release work item, captured data and wrapper. While the work item is running the release is deferred to the completion callback, so `deinit` from `OnComplete` is safe. |
 
 A worker can only be queued once: a second `Queue`/`AsyncQueue` is refused instead of settling one promise twice. The runner's result is released after the conversion on every path (`Queue`, `AsyncQueue`, rejection and cancellation), so native memory returned as `napi.Owned` is never leaked.
