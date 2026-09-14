@@ -15,7 +15,9 @@ The normal flow is:
 
 1. Export Zig functions, constants, classes, and wrappers from a root struct.
 2. Register that root with `napi.NODE_API_MODULE`.
-3. Build an OpenHarmony library with `nativeAddonBuild`, a Node addon with `nodeAddonBuild`, or both.
+3. Build an OpenHarmony library with `nativeAddonBuild`, a Node addon with
+   `nodeAddonBuild`, or a WebAssembly module by giving `nodeAddonBuild` a
+   `wasm32-wasi` target (see [WASM Runtime](./wasm-runtime)).
 4. Run `generateTypeDefinition` when the JavaScript consumer needs an `index.d.ts`.
 
 ## Public Modules
@@ -82,4 +84,28 @@ The `napi` module re-exports the runtime-facing API:
 
 ## Read Order
 
-Start with `Conversion Model` if you are exporting normal Zig functions. Use the value wrapper pages when you need manual `Env` or raw N-API work. Use `Ownership` when JavaScript values must carry native state or native code must hold references across calls.
+Start with [Conversion Model](./conversion-model) if you are exporting normal Zig
+functions. Use the value wrapper pages when you need manual `Env` or raw N-API
+work. Use [Ownership](./classes-ownership) when JavaScript values must carry
+native state or native code must hold references across calls. Use
+[Async Runtime](./async-runtime) when work returns a promise, emits progress
+events, or has to be cancelled. Use [WASM Runtime](./wasm-runtime) when the
+addon is built for WebAssembly.
+
+## Runtime Targets
+
+One addon root compiles for three runtimes. The wrapper API is the same on all of
+them; the artifact, the loader, and the thread that runs async work are not.
+
+| Target                  | Build helper                                                                 | Artifact                                                                | Guide                                          |
+| ----------------------- | ---------------------------------------------------------------------------- | ----------------------------------------------------------------------- | ---------------------------------------------- |
+| Node.js native          | `nodeAddonBuild`                                                             | `<name>.<platform>-<arch>[-<abi>].node`                                 | [Node Addon Build](./build-node)               |
+| OpenHarmony             | `nativeAddonBuild`                                                           | shared library for `aarch64-linux-ohos`, `arm-linux-ohoseabi`, `x86_64-linux-ohos` | [OpenHarmony Build](./build-openharmony)       |
+| WebAssembly (WASI)      | `nodeAddonBuild` for a `wasm32-wasi` target                                   | `<name>.wasm32-wasi.wasm` (threaded) or `<name>.wasm32-wasip1.wasm` (single-threaded) | [WASM Runtime](./wasm-runtime)                 |
+
+Async work follows the target: on native Node, `.thread` descriptors run on the
+addon's own IO runtime threads; on threaded WASI they run on the emnapi
+JavaScript worker pool; on single-threaded WASI they run on the host's
+JavaScript thread, where cancellation happens at checkpoints rather than
+through preemption. [Async Runtime](./async-runtime) documents the descriptors
+and those scheduling differences.

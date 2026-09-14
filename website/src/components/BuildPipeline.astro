@@ -1,0 +1,103 @@
+---
+import { apiHref } from "../lib/site-paths";
+
+/**
+ * Home page build pipeline.
+ *
+ * An overview, not a tutorial: one shared Zig root, the build targets that are
+ * configured separately, the artifact each one produces, and the guide that
+ * carries the detail. Commands, options and runtime behavior stay in the
+ * guides; the figure is semantic HTML with no image and no script, so it stays
+ * readable at 320px, where the bitmap it replaces was illegible.
+ */
+type Build = {
+  /** File the target's build writes. */
+  artifact: string;
+  /** Short flavor note; only the WASI flavors need one. */
+  label?: string;
+};
+
+type Target = {
+  id: string;
+  name: string;
+  /** Zig build helper or target this route is configured with. */
+  helper: string;
+  builds: Build[];
+  guide: { href: string; label: string };
+};
+
+const TARGETS: Target[] = [
+  {
+    id: "openharmony",
+    name: "OpenHarmony",
+    helper: "napi_build.nativeAddonBuild",
+    builds: [{ artifact: "libhello.so" }],
+    guide: { href: apiHref("build-openharmony"), label: "OpenHarmony build guide" },
+  },
+  {
+    id: "node",
+    name: "Node.js",
+    helper: "napi_build.nodeAddonBuild",
+    builds: [{ artifact: "hello.<platform-arch-abi>.node" }],
+    guide: { href: apiHref("build-node"), label: "Node addon build guide" },
+  },
+  {
+    id: "wasi",
+    name: "WASI",
+    helper: "wasm32-wasi target",
+    builds: [
+      { artifact: "hello.wasm32-wasip1.wasm", label: "Unshared · no workers" },
+      { artifact: "hello.wasm32-wasi.wasm", label: "Shared · worker pool" },
+    ],
+    guide: { href: apiHref("wasm-runtime"), label: "WASI runtime guide" },
+  },
+];
+---
+
+<figure class="pipeline" id="build-pipeline">
+  <div class="pipeline-flow">
+    <div class="pipeline-root">
+      <p class="pipeline-label">Shared root</p>
+      <p class="pipeline-node">Zig export root</p>
+      <p class="pipeline-source">
+        <code>src/hello.zig</code>
+      </p>
+    </div>
+    <ul class="pipeline-lanes" aria-label="Separately configured build targets">
+      {TARGETS.map((target) => (
+        <li class="pipeline-lane" data-target={target.id}>
+          <p class="pipeline-node">{target.name}</p>
+          <p class="pipeline-helper">
+            <code>{target.helper}</code>
+          </p>
+          <ul class="pipeline-builds">
+            {target.builds.map((build) => (
+              <li class="pipeline-build">
+                <code class="pipeline-artifact">{build.artifact}</code>
+                {build.label && <span class="pipeline-flavor">{build.label}</span>}
+              </li>
+            ))}
+          </ul>
+          <p class="pipeline-guide">
+            <a href={target.guide.href}>{target.guide.label}</a>
+          </p>
+        </li>
+      ))}
+    </ul>
+  </div>
+  <div class="pipeline-step">
+    <p class="pipeline-label">Separate step</p>
+    <p class="pipeline-node">TypeScript declarations</p>
+    <p class="pipeline-build">
+      <code class="pipeline-helper">napi_build.generateTypeDefinition</code>
+      <code class="pipeline-artifact">index.d.ts</code>
+    </p>
+    <p class="pipeline-guide">
+      <a href={apiHref("declaration-generation")}>Declaration generation guide</a>
+    </p>
+  </div>
+  <figcaption>
+    One Zig root with separately configured build targets. Each guide covers its target's build
+    call, options, and artifacts; declarations are generated from the same root file.
+  </figcaption>
+</figure>

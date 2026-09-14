@@ -38,18 +38,26 @@ import {
   HOME_REQUIRED_COPY,
   HOME_REQUIRED_PATTERNS,
   HOME_SECTION_ORDER,
+  KEY_DOC_FACTS,
+  LEGACY_TOPIC_IDS,
   NAV_NAMES,
+  PIPELINE,
+  PUBLISHED_ANCHORS,
+  PUBLISHED_ANCHOR_TOTAL,
   TOPICS,
   TOPIC_IDS,
   collapseWhitespace,
   containsText,
   distinctiveProseSamples,
   extractRelativeTopicLinks,
+  legacyHeadingSlugs,
   loadApiDocs,
   loadSnippets,
+  markdownInlineToText,
   nextTopic,
   normalizeForCompare,
   previousTopic,
+  publishedAnchorProblems,
   resolveDistDir,
   resolveDistFile,
   resolveReportDir,
@@ -268,6 +276,30 @@ function idsForRoute(routeRelative) {
 // look the raw value up first and only then the decoded one, and the previous
 // site published ids that literally contain `%2C`. Both forms are accepted
 // here; test/browser.mjs additionally proves navigation really works.
+// Dist id counts per route: the published-anchor check needs "exactly one
+// element", and the current-source check needs the same set as `idsForRoute`.
+const pageIdCache = new Map();
+
+function pageIdIndex(routeRelative, { optional = false } = {}) {
+  if (pageIdCache.has(routeRelative)) return pageIdCache.get(routeRelative);
+  const file = resolveDistFile(distDir, routeRelative);
+  if (!file) {
+    assert.ok(optional, `expected a built page for "${base}${routeRelative}"`);
+    return undefined;
+  }
+  const counts = new Map();
+  const headingIds = [];
+  for (const element of elements(parseHtml(readFileSync(file, "utf8")))) {
+    const id = attr(element, "id");
+    if (!id) continue;
+    counts.set(id, (counts.get(id) ?? 0) + 1);
+    if (/^h[1-6]$/.test(element.tag)) headingIds.push(id);
+  }
+  const index = { ids: new Set(counts.keys()), counts, headingIds };
+  pageIdCache.set(routeRelative, index);
+  return index;
+}
+
 function fragmentTarget(ids, fragment) {
   if (!fragment) return true;
   const raw = fragment.startsWith("#") ? fragment.slice(1) : fragment;
@@ -912,7 +944,7 @@ function collectJsAssets(directory) {
 // other check, so it aborts the run once with a clear message.
 function detectBuiltBase() {
   const page = loadPage("");
-  const patterns = ["_astro/", "logo/", "assets/", "zig-napi-pipeline.svg"];
+  const patterns = ["_astro/", "logo/", "assets/"];
   const seen = new Set();
   for (const element of elements(page.root)) {
     const value = attr(element, "href") ?? attr(element, "src");
@@ -1040,9 +1072,87 @@ describe("home page", () => {
         `home page no longer references ${asset}`,
       );
     }
+    // The retired pipeline bitmap is not fetched by anything on the page.
+    const retired = elements(page.root).flatMap((element) =>
+      Object.entries(element.attrs ?? {})
+        .filter(([, value]) => value.includes(PIPELINE.retiredImage))
+        .map(([name, value]) => `${element.tag}[${name}="${value}"]`),
+    );
+    assert.deepEqual(
+      retired,
+      [],
+      `home page still references the retired pipeline bitmap ${PIPELINE.retiredImage}`,
+    );
     metrics.homeAnchors = {
       present: HOME_REQUIRED_ANCHORS.filter((anchor) => ids.has(anchor)),
       optional: HOME_OPTIONAL_ANCHORS.filter((anchor) => ids.has(anchor)),
+    };
+  });
+
+  it("renders the build pipeline as an overview figure with real guide links", () => {
+    const page = loadPage(route);
+    const figure = elements(page.root).find(
+      (element) => attr(element, "id") === PIPELINE.figureId,
+    );
+    assert.ok(
+      figure,
+      `home page has no #${PIPELINE.figureId} figure to read the build pipeline from`,
+    );
+
+    // Native HTML on purpose: no bitmap or inline SVG to shrink on a phone and
+    // no script to run. The figure has to stay readable as text.
+    const media = elements(figure)
+      .map((element) => element.tag)
+      .filter((tag) => ["img", "svg", "picture", "canvas", "script", "iframe"].includes(tag));
+    assert.deepEqual(
+      media,
+      [],
+      `the pipeline figure must stay semantic HTML, found: ${JSON.stringify(media)}`,
+    );
+
+    const text = collapseWhitespace(pageText(figure, { skip: new Set(["script", "style"]) }));
+    const missing = PIPELINE.labels.filter((label) => !containsText(text, label));
+    assert.deepEqual(missing, [], `pipeline labels missing:\n- ${missing.join("\n- ")}`);
+
+    // An overview, not a tutorial: command lines, flags and runtime plugin
+    // behavior belong to the guides the figure links to.
+    const leaked = PIPELINE.deferredToGuides.filter((entry) => entry.pattern.test(text));
+    assert.deepEqual(
+      leaked.map((entry) => entry.expected),
+      [],
+      "the pipeline figure carries detail that belongs to the guides it links to",
+    );
+
+    // Every node links to the guide that owns its detail, resolved against the
+    // deployment base rather than hard-coded.
+    const anchors = linkElements(figure);
+    const problems = [];
+    for (const guide of PIPELINE.guides) {
+      const expectedPath = `${base}${routesForTopic(guide.topic).route}`;
+      const match = anchors.find((anchor) => {
+        const href = attr(anchor, "href") ?? "";
+        const resolved = new URL(href, urlForPage(route));
+        if (resolved.pathname !== expectedPath) return false;
+        const label = collapseWhitespace(pageText(anchor, { skip: new Set() }));
+        return containsText(label, guide.label);
+      });
+      if (!match) {
+        problems.push(
+          `no link to ${expectedPath} labelled ${JSON.stringify(guide.label)}; ` +
+            `found ${JSON.stringify(anchors.map((anchor) => attr(anchor, "href")))}`,
+        );
+      }
+    }
+    assert.deepEqual(problems, []);
+    assert.ok(
+      anchors.length >= PIPELINE.guides.length,
+      `pipeline figure has ${anchors.length} links, expected at least ${PIPELINE.guides.length}`,
+    );
+    metrics.pipeline = {
+      figureId: PIPELINE.figureId,
+      labels: PIPELINE.labels.length,
+      links: anchors.length,
+      guides: PIPELINE.guides.map((guide) => guide.topic),
     };
   });
 
@@ -1297,8 +1407,268 @@ describe("API documentation pages", () => {
   });
 });
 
+describe("published documentation contract", () => {
+  it("keeps the original topic routes and the WASM guide that was added to Build", () => {
+    // The 15 pre-migration documents keep their ids, their order and their
+    // routes; `wasm-runtime` is the added topic and sits in the Build group
+    // directly after the Node addon build.
+    assert.deepEqual(
+      LEGACY_TOPIC_IDS.filter((id) => !TOPIC_IDS.includes(id)),
+      [],
+      "a pre-migration topic lost its id",
+    );
+    assert.deepEqual(
+      TOPICS.filter((topic) => topic.group === "Build").map((topic) => topic.id),
+      ["build-openharmony", "build-node", "wasm-runtime", "declaration-generation"],
+      "the Build group no longer reads OpenHarmony, Node, WASM, Declarations",
+    );
+  });
+
+  it("keeps every heading id the published site exposed", () => {
+    // Fixed baseline, not a derivation: `published-anchors.json` holds the 120
+    // heading ids a browser render captured from the published pages before the
+    // migration. New sections may be appended, but an old heading that is
+    // renamed or dropped has to fail here — that is what keeps published
+    // fragment URLs working.
+    const idsByTopic = new Map();
+    for (const topic of Object.keys(PUBLISHED_ANCHORS.topics)) {
+      const { ids } = pageIdIndex(routesForTopic(topic).route);
+      idsByTopic.set(topic, ids);
+    }
+    const { checked, problems } = publishedAnchorProblems(PUBLISHED_ANCHORS, idsByTopic);
+    assert.equal(
+      checked,
+      PUBLISHED_ANCHOR_TOTAL,
+      `the fixture pins ${PUBLISHED_ANCHOR_TOTAL} heading ids but ${checked} were compared`,
+    );
+    assert.equal(checked, 120, `the published set is ${checked} heading ids, expected 120`);
+    assert.deepEqual(problems, [], `published heading ids missing:\n- ${problems.join("\n- ")}`);
+
+    // One target each, and the published reading order is unchanged.
+    const orderProblems = [];
+    let ordered = 0;
+    for (const [topic, anchors] of Object.entries(PUBLISHED_ANCHORS.topics)) {
+      const { counts, headingIds } = pageIdIndex(routesForTopic(topic).route);
+      for (const id of anchors) {
+        const encoded = encodeURIComponent(id);
+        // A published id may be stored encoded; do not count it twice when the
+        // two spellings are the same string.
+        const matches = (counts.get(id) ?? 0) + (encoded === id ? 0 : (counts.get(encoded) ?? 0));
+        if (matches !== 1) {
+          orderProblems.push(`${topic}: #${id} matches ${matches} elements, expected exactly 1`);
+        }
+      }
+      const wanted = new Set(anchors.flatMap((id) => [id, encodeURIComponent(id)]));
+      const rendered = headingIds.filter((id) => wanted.has(id));
+      const expected = anchors.map((id) => (counts.has(id) ? id : encodeURIComponent(id)));
+      if (rendered.join("\n") !== expected.join("\n")) {
+        orderProblems.push(`${topic}: published heading order changed`);
+      } else {
+        ordered += rendered.length;
+      }
+    }
+    assert.deepEqual(orderProblems, []);
+    metrics.publishedAnchors = {
+      checked,
+      ordered,
+      topics: Object.keys(PUBLISHED_ANCHORS.topics).length,
+    };
+  });
+
+  it("resolves every heading the current sources publish", () => {
+    // The other direction, for new headings: whatever the canonical Markdown
+    // says today — appended sections included — must be reachable at its own
+    // slug. This derives from the sources, so it can never replace the fixed
+    // baseline above.
+    const problems = [];
+    let checked = 0;
+    for (const doc of docs) {
+      const { route } = routesForTopic(doc.id);
+      const index = pageIdIndex(route, { optional: true });
+      if (!index) {
+        problems.push(`${doc.id}: no built page at ${base}${route}`);
+        continue;
+      }
+      const { ids } = index;
+      const slugs = legacyHeadingSlugs(doc.headings);
+      doc.headings.forEach((heading, index) => {
+        checked += 1;
+        if (!fragmentTarget(ids, `#${slugs[index]}`)) {
+          problems.push(`${doc.id}: ${JSON.stringify(heading.text)} -> #${slugs[index]}`);
+        }
+      });
+    }
+    assert.ok(checked >= PUBLISHED_ANCHOR_TOTAL, `only ${checked} headings were resolved`);
+    assert.deepEqual(problems, [], `heading anchors missing:\n- ${problems.join("\n- ")}`);
+    metrics.currentHeadingAnchors = { checked, documents: docs.length };
+  });
+
+  it("fails on a renamed published heading even though the page grew (mutation check)", () => {
+    // Proof that the fixed baseline can fail: rename one published id in the
+    // (in-memory) page ids while keeping the total count — the check reports
+    // exactly that heading and nothing else. No production file is touched.
+    const idsByTopic = new Map();
+    for (const topic of Object.keys(PUBLISHED_ANCHORS.topics)) {
+      const { ids } = pageIdIndex(routesForTopic(topic).route);
+      idsByTopic.set(topic, ids);
+    }
+    const [topic, anchors] = Object.entries(PUBLISHED_ANCHORS.topics)[0];
+    const renamed = new Set(idsByTopic.get(topic));
+    renamed.delete(anchors[0]);
+    renamed.add("heading-renamed-in-a-later-revision");
+    const mutated = new Map(idsByTopic);
+    mutated.set(topic, renamed);
+    const { checked, problems } = publishedAnchorProblems(PUBLISHED_ANCHORS, mutated);
+    assert.equal(checked, 120, "the mutated input must keep the published count");
+    assert.deepEqual(problems, [`${topic}: #${anchors[0]} is missing from the built page`]);
+
+    // And the unmutated input is clean, so the failure above is the rename.
+    assert.deepEqual(publishedAnchorProblems(PUBLISHED_ANCHORS, idsByTopic).problems, []);
+    metrics.publishedAnchorMutation = { topic, renamedFrom: anchors[0], problems: problems.length };
+  });
+
+  it("keeps the key capability of every guide it publishes", () => {
+    // Source-level nets over the canonical Markdown: a short factual pattern
+    // per capability, so a rewrite cannot silently drop one. Prose stays the
+    // writer's; these are the facts the pages exist for.
+    const problems = [];
+    const checked = [];
+    for (const entry of KEY_DOC_FACTS) {
+      const doc = docsById.get(entry.id);
+      assert.ok(doc, `no canonical document for ${entry.id}`);
+      for (const fact of entry.facts) {
+        if (!fact.pattern.test(doc.source)) {
+          problems.push(`${entry.id}: ${fact.expected}`);
+        } else {
+          checked.push(`${entry.id}: ${fact.expected}`);
+        }
+      }
+    }
+    assert.deepEqual(problems, [], `documented capabilities missing:\n- ${problems.join("\n- ")}`);
+    metrics.keyDocFacts = { checked: checked.length, documents: KEY_DOC_FACTS.length };
+  });
+});
+
 describe("site-wide contract", () => {
-  it("publishes all 16 canonical pages plus a 404 document", () => {
+describe("Markdown inline parsing (content oracle)", () => {
+  // The oracle turns one Markdown fragment into the text a renderer shows. Code
+  // spans are literal text, while the emphasis and link syntax around them is
+  // still syntax; the old backtick-splitting parser got both wrong at once, so
+  // `**`.single` runtime.**` kept its `**` and `` [`Buffer`](#buffer) `` kept
+  // its brackets. These cases pin the behaviour, not any particular document.
+  const cases = [
+    {
+      name: "strips emphasis that wraps a code span",
+      markdown: "**`.single` runtime.** The body runs on the calling thread.",
+      text: ".single runtime. The body runs on the calling thread.",
+    },
+    {
+      name: "strips bold-italic that wraps a code span",
+      markdown: "***`both`*** markers",
+      text: "both markers",
+    },
+    {
+      name: "keeps the label of a link whose label is a code span",
+      markdown: "the fallback note under [`Buffer`](#buffer)), so the",
+      text: "the fallback note under Buffer), so the",
+    },
+    {
+      name: "keeps a plain code span verbatim",
+      markdown: "Run `napi_build.nodeAddonBuild` once.",
+      text: "Run napi_build.nodeAddonBuild once.",
+    },
+    {
+      name: "keeps markdown-looking characters inside code",
+      markdown: "`a*b*` and `<T>` and `__init__` and `[x](y)`",
+      text: "a*b* and <T> and __init__ and [x](y)",
+    },
+    {
+      name: "strips emphasis around code next to real emphasis",
+      markdown: "**imports** its memory (`env.memory`) and **allocates** it",
+      text: "imports its memory (env.memory) and allocates it",
+    },
+    {
+      name: "reads a padded span and a span holding a backtick",
+      markdown: "Use `` ` `` and `` code `` for quotes.",
+      text: "Use ` and code for quotes.",
+    },
+    {
+      name: "leaves an unmatched backtick as ordinary text",
+      markdown: "a ` b",
+      text: "a ` b",
+    },
+    {
+      name: "drops raw inline HTML and keeps link labels",
+      markdown: "<span>plain</span> [label](target) text",
+      text: "plain label text",
+    },
+    {
+      name: "keeps entity references literal inside a code span and decodes them outside",
+      markdown: "`a&amp;b` and a&amp;b",
+      text: "a&amp;b and a&b",
+    },
+    {
+      name: "keeps a backslash literal inside a code span",
+      markdown: "`a\\` b",
+      text: "a\\ b",
+    },
+    {
+      name: "folds a line ending and drops the padding space inside a code span",
+      markdown: "` padded ` and `two\nlines`",
+      text: "padded and two lines",
+    },
+  ];
+
+  for (const entry of cases) {
+    it(entry.name, () => {
+      assert.equal(
+        markdownInlineToText(entry.markdown),
+        entry.text,
+        `oracle text for ${JSON.stringify(entry.markdown)}`,
+      );
+    });
+  }
+
+  it("still reports prose the page does not contain", () => {
+  it("does not let an escaped backtick open a code span", () => {
+    // Outside a code span a backslash still escapes, so an escaped backtick is
+    // not a delimiter and the emphasis after it stays ordinary syntax. (Turning
+    // the escape back into the character it escapes is separate, pre-existing
+    // behaviour of this oracle; no published source relies on it.)
+    const text = markdownInlineToText("The \\`*not emphasis*\\` tag");
+    assert.ok(
+      !text.includes("*not emphasis*"),
+      `an escaped backtick swallowed the syntax around it: ${JSON.stringify(text)}`,
+    );
+    assert.ok(text.includes("not emphasis"), JSON.stringify(text));
+  });
+    // A parser that swallowed everything would pass every prose check; this
+    // proves the comparison still fails on text that is really absent, both on
+    // a synthetic string and on a block taken from a shipped document.
+    const synthetic = matchProseBlocks("<p>the page text</p>", [
+      { type: "paragraph", text: "the page text" },
+      { type: "paragraph", text: "prose that this page does not contain" },
+    ]);
+    assert.deepEqual(synthetic.missing, ["prose that this page does not contain"]);
+
+    const doc = docsById.get("binary-data");
+    const page = loadPage(routesForTopic(doc.id).route);
+    const main = elements(page.root).filter(isMainLandmark)[0];
+    const rendered = pageText(main, { skip: new Set() });
+    const block = doc.blocks.find((entry) => entry.type === "paragraph" && entry.text.length >= 40);
+    assert.ok(block, "binary-data has no paragraph block to probe");
+    assert.deepEqual(matchProseBlocks(rendered, [block]).missing, []);
+    const tampered = { ...block, text: block.text.replace(/\bthe\b/, "zzzz-not-in-the-page") };
+    assert.notEqual(tampered.text, block.text, "the probe did not change the block text");
+    assert.deepEqual(
+      matchProseBlocks(rendered, [tampered]).missing,
+      [tampered.text],
+      "a tampered block must still be reported missing",
+    );
+  });
+});
+
+  it("publishes all 17 canonical pages plus a 404 document", () => {
     const routes = ["", ...TOPICS.map((topic) => routesForTopic(topic.id).route)];
     for (const route of routes) {
       const file = resolveDistFile(distDir, route);

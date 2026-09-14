@@ -9,9 +9,9 @@
 export const SITE = {
   name: "zig-napi",
   /** Eyebrow line used on the landing page and in the short site title. */
-  category: "OpenHarmony and Node.js native addons",
+  category: "OpenHarmony, Node.js, and WebAssembly addons",
   description:
-    "Documentation website for zig-napi, a Zig toolkit for OpenHarmony and Node.js native addons.",
+    "Documentation website for zig-napi, a Zig toolkit for OpenHarmony, Node.js, and WebAssembly addons.",
   repository: "https://github.com/openharmony-zig/zig-napi",
   license: "MIT",
   /** Fallback author/publisher for `<meta name="generator">`-free metadata. */

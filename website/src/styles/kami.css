@@ -188,6 +188,8 @@ svg {
   text-transform: uppercase;
   color: var(--stone);
   margin: 0 0 22px;
+  /* Category line: wraps evenly instead of orphaning its last word. */
+  text-wrap: pretty;
 }
 
 .hero h1 {
@@ -326,34 +328,199 @@ svg {
   text-wrap: pretty;
 }
 
-/* ========== Figure (product pipeline diagram) ========== */
+/* ========== Build pipeline (home page figure) ========== */
 
-.figure {
+.pipeline {
   margin: 0;
 }
 
-.figure-frame {
-  background: var(--shot-bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  overflow: hidden;
+/* Root on the left, the separately configured targets on one thin rail. */
+.pipeline-flow {
+  display: grid;
+  grid-template-columns: minmax(0, 12rem) minmax(0, 1fr);
+  gap: 0 56px;
+  align-items: start;
 }
 
-.figure-frame img {
-  display: block;
-  width: 100%;
-  height: auto;
+.pipeline-root {
+  position: relative;
+  background: var(--ivory);
+  border-radius: 6px;
+  padding: 16px 20px;
 }
 
-.figure figcaption {
+/* The rail belongs to the target list; this stub carries the root into it. */
+.pipeline-root::after {
+  content: "";
+  position: absolute;
+  top: 44px;
+  left: 100%;
+  width: 56px;
+  height: 1px;
+  background: var(--line);
+}
+
+.pipeline-label {
+  font-family: var(--latin-ui);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--stone);
+  margin: 0 0 6px;
+}
+
+.pipeline-node {
   font-family: var(--serif);
-  font-size: 14px;
-  font-style: italic;
-  color: var(--olive);
-  line-height: 1.5;
-  margin-top: 14px;
+  font-weight: 500;
+  font-size: 17px;
+  line-height: 1.25;
+  color: var(--near-black);
+  margin: 0;
 }
 
+.pipeline code {
+  font-family: var(--mono);
+  font-size: inherit;
+  color: inherit;
+}
+
+/* Qualified so the rule outranks `.pipeline code`, which inherits the body
+   size back onto every code element. */
+.pipeline .pipeline-source,
+.pipeline .pipeline-helper,
+.pipeline .pipeline-artifact,
+.pipeline .pipeline-flavor,
+.pipeline .pipeline-guide {
+  font-size: 12.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.pipeline-source,
+.pipeline-helper {
+  font-family: var(--mono);
+  color: var(--stone);
+  margin: 4px 0 0;
+}
+
+.pipeline-lanes {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 24px;
+  border-left: 1px solid var(--line);
+}
+
+.pipeline-lane {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 13.5rem) minmax(0, 1fr) auto;
+  column-gap: 20px;
+  row-gap: 2px;
+  align-items: start;
+  padding: 13px 0;
+  border-top: 1px solid var(--border-soft);
+}
+
+.pipeline-lane:first-child {
+  border-top: 0;
+}
+
+/* One stub per lane, level with its name: the branch, not an ornament. */
+.pipeline-lane::before {
+  content: "";
+  position: absolute;
+  top: 24px;
+  left: -24px;
+  width: 24px;
+  height: 1px;
+  background: var(--line);
+}
+
+.pipeline-lane > .pipeline-node {
+  grid-area: 1 / 1;
+}
+
+.pipeline-lane > .pipeline-helper {
+  grid-area: 2 / 1;
+}
+
+.pipeline-builds {
+  grid-area: 1 / 2 / span 2 / auto;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.pipeline-build {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  margin: 0;
+}
+
+.pipeline-artifact {
+  font-family: var(--mono);
+  color: var(--brand);
+  /* Long artifact names wrap instead of widening the page. */
+  overflow-wrap: anywhere;
+}
+
+/* Keeps the two WASI flavors distinguishable at every width. */
+.pipeline-flavor {
+  font-family: var(--latin-ui);
+  color: var(--stone);
+}
+
+.pipeline-guide {
+  grid-area: 1 / 3 / span 2 / auto;
+  align-self: center;
+  font-family: var(--latin-ui);
+  letter-spacing: 0.2px;
+  margin: 0;
+}
+
+.pipeline-step {
+  display: grid;
+  grid-template-columns: minmax(0, 13.5rem) minmax(0, 1fr) auto;
+  column-gap: 20px;
+  row-gap: 2px;
+  align-items: start;
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.pipeline-step > .pipeline-label {
+  grid-area: 1 / 1;
+  margin: 0;
+}
+
+.pipeline-step > .pipeline-node {
+  grid-area: 2 / 1;
+}
+
+.pipeline-step > .pipeline-build {
+  grid-area: 1 / 2 / span 2 / auto;
+}
+
+.pipeline-step > .pipeline-guide {
+  grid-area: 1 / 3 / span 2 / auto;
+}
+
+.pipeline figcaption {
+  font-family: var(--serif);
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--olive);
+  margin-top: 20px;
+  max-width: 68ch;
+  /* Reading copy: keep the last line from stranding one word. */
+  text-wrap: pretty;
+}
 /* ========== Feature list (capability map) ========== */
 
 .features {
@@ -1058,6 +1225,33 @@ svg {
 
 /* ========== Responsive: tablet ========== */
 
+/* The three-column lane (target, artifacts, guide) needs room for a full
+   artifact name; below this width the lane stacks instead of squeezing the
+   file names, while the root keeps its own column. */
+@media (max-width: 1020px) {
+  .pipeline-lane,
+  .pipeline-step {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 4px;
+  }
+
+  /* One column: the explicit desktop placement has to go. */
+  .pipeline-lane > .pipeline-node,
+  .pipeline-lane > .pipeline-helper,
+  .pipeline-lane > .pipeline-builds,
+  .pipeline-lane > .pipeline-guide,
+  .pipeline-step > .pipeline-label,
+  .pipeline-step > .pipeline-node,
+  .pipeline-step > .pipeline-build,
+  .pipeline-step > .pipeline-guide {
+    grid-area: auto;
+  }
+
+  .pipeline-guide {
+    align-self: start;
+  }
+}
+
 @media (max-width: 880px) {
   .site-header .bar {
     padding: 0 32px;
@@ -1092,6 +1286,26 @@ svg {
     grid-template-columns: minmax(0, 1fr);
     gap: 8px;
     padding: 18px 0;
+  }
+
+  /* The pipeline stacks: the root first, then each target under the same rail. */
+  .pipeline-flow,
+  .pipeline-step {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 20px;
+  }
+
+  .pipeline-root::after {
+    display: none;
+  }
+
+  .pipeline-lanes {
+    padding-left: 18px;
+  }
+
+  .pipeline-lane::before {
+    left: -18px;
+    width: 18px;
   }
 
   .foot {

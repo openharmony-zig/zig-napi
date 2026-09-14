@@ -59,6 +59,15 @@ The harness serves the freshly built `dist/` with its own static server; it does
 not need a running dev server. `WEBSITE_SCREENSHOT_DIR` optionally writes the
 375px/1280px captures it takes.
 
+What the two suites cover, beyond the route sweep: the static suite compares
+every page against the canonical Markdown (headings, prose, code fences), pins
+the 120 pre-migration heading ids and the landing-page copy and links, and
+checks the build-pipeline figure stays semantic HTML with real guide links. The
+browser suite drives the same figure at 320/375/1280 (reflow, no horizontal
+overflow, 12px label floor), follows its guide links, and then covers
+navigation, deep links, the no-JavaScript path, keyboard focus, the clipboard
+states and the 404 page.
+
 ## Deployment path (`base`)
 
 Routes and asset URLs are all built from one base path helper
@@ -100,7 +109,7 @@ artifact is verified exactly as it will be served.
 The published copy is plain Markdown and is never generated or duplicated:
 
 ```
-src/content/api/*.md       15 API documents (unchanged since before the migration)
+src/content/api/*.md       16 API documents (the 15 pre-migration ones plus the WASM guide)
 src/content/snippets/*.md  4 build recipes shown on the landing page
 ```
 
@@ -126,6 +135,10 @@ means editing its Markdown file; nothing else needs to change.
   produced, including percent-encoded ones such as
   `#jserror%2C-jstypeerror%2C-jsrangeerror`, so previously published fragment
   URLs keep working.
+- The 120 heading ids the pre-migration pages published are pinned as a fixture
+  (`test/lib/published-anchors.json`, captured from a browser render). The
+  static suite compares the built pages against that fixed list — appending a
+  section is fine, renaming or dropping a published heading is not.
 - Relative cross-document links written in the Markdown (`./classes-ownership`)
   are rewritten against the deployment base path at render time; the Markdown
   sources are not edited.
@@ -143,10 +156,19 @@ rules — warm paper (`#f5f4ed` / `#faf9f5`), a single ink-blue accent
 (`#1B365D`), Charter/Georgia for text, the system UI font for labels, and mono
 for code. It is a translation of an existing design, not a new theme.
 
-- The landing page keeps the original product copy, the original logo files
-  (`public/logo/`), and the original pipeline diagram
-  (`public/zig-napi-pipeline.svg`) with its own colours. The diagram sits in a
-  dark frame, which is the surface kami gives code and product imagery.
+- The landing page keeps the original product copy and the original logo files
+  (`public/logo/`). Its build-pipeline figure is a responsive HTML overview
+  (`src/components/BuildPipeline.astro`, styled from `src/styles/kami.css`):
+  one shared Zig root, the targets that are configured separately, the artifact
+  each one produces, and a link into the guide that owns the detail. It carries
+  no bitmap and no script, reflows to one column on a phone, and keeps every
+  label at 12px or larger.
+- The same figure is maintained as a standalone asset trio under
+  `public/diagrams/build-pipeline/` (`index.html` source, a 2400px `index.png`
+  exported from it, and `prompt.md` as the redraw brief) for reuse outside the
+  site. Nothing on the site links to or loads those files. The retired bitmap
+  (`public/zig-napi-pipeline.svg`, dark frame, original colours) is kept only
+  as repository artwork; no page references it.
 - The documentation shell is two columns: a 178px navigation rail with the
   in-flow "On this page" list beneath it, and a reading column capped at about
   720px. Below 880px the rail becomes a horizontally scrolling strip and the
@@ -158,8 +180,11 @@ for code. It is a translation of an existing design, not a new theme.
 
 ## Preservation boundaries
 
-- The 15 API documents and 4 snippets are the published copy; they are byte
-  identical to the pre-migration sources and are not rewritten by the build.
+- The API documents and snippets are the published copy and are not generated or
+  rewritten by the build. The 15 documents that predate the migration keep their
+  routes and their published heading anchors; `wasm-runtime.md` is the document
+  added afterwards, and revisions since the migration append sections to the
+  existing documents instead of reworking them.
 - `/api/` serves the overview document; every other document is served at
   `/api/<id>/`. `/api/overview/` is kept as an alias for links published before
   the migration and points its canonical URL at `/api/`.

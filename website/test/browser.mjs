@@ -40,6 +40,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
+  PIPELINE,
   TOPICS,
   collapseWhitespace,
   loadApiDocs,
@@ -89,9 +90,9 @@ const metrics = {
     required: true,
     screenshots: [],
     hints: [
-      "375px and 1280px first-viewport screenshots for all 16 canonical pages",
+      "375px and 1280px first-viewport screenshots for all 17 canonical pages",
       "320px home call-to-action and documentation table screenshots",
-      "home #build section, long documentation code block, table and pager regions",
+      "home build pipeline at 320/375/1280, home #build section, long documentation code block, table and pager regions",
       "compare against the kami landing page tokens (parchment, ink blue, serif body)",
     ],
   },
@@ -918,7 +919,7 @@ async function main() {
       try {
         await page.goto(`${origin}${base}`, { waitUntil: "load" });
         const prefixes = await page.evaluate(() => {
-          const markers = ["_astro/", "logo/", "assets/", "zig-napi-pipeline.svg"];
+          const markers = ["_astro/", "logo/", "assets/"];
           const found = new Set();
           for (const element of document.querySelectorAll("link[href], script[src], img[src]")) {
             const value = element.getAttribute("href") ?? element.getAttribute("src") ?? "";
@@ -975,6 +976,134 @@ async function main() {
       } finally {
         await page.close();
       }
+    });
+
+    await check("home build pipeline reflows, stays legible and links to the guides", async () => {
+      // The overview figure is native HTML: it reflows into one column on a
+      // phone, never shrinks below the 12px label floor, and carries no bitmap
+      // or script (the retired zig-napi-pipeline.svg is gone).
+      const heightBudget = new Map([
+        [NARROW.width, 1000],
+        [MOBILE.width, 1000],
+        [DESKTOP.width, 550],
+      ]);
+      const viewports = [];
+      for (const viewport of [DESKTOP, MOBILE, NARROW]) {
+        const { page } = await openPage(context, origin, "", viewport);
+        try {
+          const figure = page.locator(`#${PIPELINE.figureId}`);
+          assert.equal(
+            await figure.count(),
+            1,
+            `home page has no #${PIPELINE.figureId} figure (navigation may have failed)`,
+          );
+          assert.equal(
+            await figure.locator("img, svg, picture, canvas, script, iframe").count(),
+            0,
+            "the pipeline figure renders an image or a script instead of semantic HTML",
+          );
+          assert.equal(
+            await page.locator(`[src*="${PIPELINE.retiredImage}"]`).count(),
+            0,
+            `the home page still fetches the retired bitmap ${PIPELINE.retiredImage}`,
+          );
+          const measured = await figure.evaluate((element) => {
+            let smallest = { size: Number.POSITIVE_INFINITY, text: "" };
+            for (const node of element.querySelectorAll("*")) {
+              const text = (node.textContent ?? "").trim();
+              if (!text) continue;
+              const size = Number.parseFloat(getComputedStyle(node).fontSize);
+              if (size < smallest.size) smallest = { size, text: text.slice(0, 30) };
+            }
+            const rootRect = element.querySelector(".pipeline-root").getBoundingClientRect();
+            const lanesRect = element.querySelector(".pipeline-lanes").getBoundingClientRect();
+            const figureRect = element.getBoundingClientRect();
+            return {
+              height: Math.round(figureRect.height),
+              smallestFont: smallest.size,
+              smallestText: smallest.text,
+              labels: [...element.querySelectorAll(".pipeline-node")].map((node) =>
+                (node.textContent ?? "").trim(),
+              ),
+              sideBySide: rootRect.right <= lanesRect.left + 1,
+              stacked: rootRect.bottom <= lanesRect.top + 1,
+            };
+          });
+          assert.ok(
+            measured.smallestFont >= 12,
+            `pipeline text ${JSON.stringify(measured.smallestText)} renders at ${measured.smallestFont}px at ${viewport.width}px, below the 12px floor`,
+          );
+          for (const label of ["Zig export root", "OpenHarmony", "Node.js", "WASI"]) {
+            assert.ok(
+              measured.labels.some((value) => value.includes(label)),
+              `the pipeline figure lost its ${JSON.stringify(label)} label at ${viewport.width}px`,
+            );
+          }
+          if (viewport.width >= 880) {
+            assert.ok(
+              measured.sideBySide,
+              `at ${viewport.width}px the shared root and the build targets are not side by side`,
+            );
+          } else {
+            assert.ok(
+              measured.stacked,
+              `at ${viewport.width}px the pipeline did not reflow into a single column`,
+            );
+          }
+          const overflow = await pageOverflow(page);
+          assert.ok(
+            overflow.documentScrollWidth <= overflow.documentClientWidth + 1,
+            `the pipeline makes the page scroll horizontally at ${viewport.width}px: ${JSON.stringify(overflow.offenders)}`,
+          );
+          const budget = heightBudget.get(viewport.width) ?? 1000;
+          assert.ok(
+            measured.height <= budget,
+            `the pipeline figure is ${measured.height}px tall at ${viewport.width}px (budget ${budget}px); it is an overview, not a tutorial`,
+          );
+          await screenshotLocator(figure, `home-pipeline-${viewport.width}`);
+          viewports.push({
+            width: viewport.width,
+            height: measured.height,
+            smallestFont: measured.smallestFont,
+            labels: measured.labels.length,
+          });
+        } finally {
+          await page.close();
+        }
+      }
+
+      // The links are real guides, resolved against the deployment base: each
+      // one opens a page whose heading is the document the oracle named.
+      const guides = [];
+      const { page } = await openPage(context, origin, "", DESKTOP);
+      try {
+        const figure = page.locator(`#${PIPELINE.figureId}`);
+        for (const guide of PIPELINE.guides) {
+          const href = `${base}${routesForTopic(guide.topic).route}`;
+          const anchor = figure.locator(`a[href="${href}"]`);
+          assert.equal(await anchor.count(), 1, `no pipeline link to ${href}`);
+          const label = collapseWhitespace(await anchor.innerText());
+          assert.ok(
+            label.includes(guide.label),
+            `pipeline link to ${href} reads ${JSON.stringify(label)}, expected ${JSON.stringify(guide.label)}`,
+          );
+          await anchor.click();
+          await page.waitForLoadState("load");
+          const heading = collapseWhitespace(await page.locator("main h1").first().innerText());
+          const title = docsById.get(guide.topic)?.title;
+          assert.equal(
+            heading,
+            title,
+            `${href} opened ${JSON.stringify(heading)}, expected the ${guide.topic} document`,
+          );
+          guides.push({ topic: guide.topic, href, heading });
+          await page.goto(`${origin}${base}`, { waitUntil: "load" });
+        }
+      } finally {
+        await page.close();
+      }
+      metrics.pipeline = { viewports, guides };
+      return `${viewports.length} widths (${viewports.map((entry) => `${entry.width}px/${entry.height}px`).join(", ")}), ${guides.length} guides`;
     });
 
     await check("long documentation page shows code, table and pager regions", async () => {

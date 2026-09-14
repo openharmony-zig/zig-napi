@@ -1,6 +1,7 @@
 ---
 import { getCollection, render } from "astro:content";
 
+import BuildPipeline from "../components/BuildPipeline.astro";
 import SiteFooter from "../components/SiteFooter.astro";
 import SiteHeader from "../components/SiteHeader.astro";
 import { SITE } from "../consts";
@@ -21,8 +22,8 @@ const SNIPPET_TABS = [
 
 const capabilities = [
   {
-    title: "Dual runtime output",
-    body: "Use one Zig export surface to build OpenHarmony shared libraries and Node.js addons.",
+    title: "Three runtime outputs",
+    body: "Use one Zig export surface to build OpenHarmony shared libraries, Node.js addons, and WASI modules in single-threaded or threaded flavors.",
   },
   {
     title: "Typed JavaScript boundary",
@@ -41,6 +42,10 @@ const capabilities = [
 const surfaces = [
   ["OpenHarmony", "aarch64-linux-ohos, arm-linux-ohoseabi, x86_64-linux-ohos"],
   ["Node.js", "host target by default, with platform-specific .node output names"],
+  [
+    "WASI",
+    "wasm32-wasip1 (single-threaded) and wasm32-wasip1-threads (shared memory) builds with generated wasi/wasip1 loaders",
+  ],
   ["TypeScript", "index.d.ts generation from the same addon root"],
   ["Examples", "basic, init, node, allocator, memory, and benchmark fixtures"],
 ];
@@ -66,8 +71,8 @@ for (const tab of SNIPPET_TABS) {
       <p class="eyebrow">{SITE.category}</p>
       <h1>{SITE.name}</h1>
       <p class="tagline">
-        Build N-API modules with Zig, ship OpenHarmony artifacts, compile Node.js addons, and
-        generate TypeScript declarations from the same exported surface.
+        Build N-API modules with Zig for OpenHarmony, Node.js, and WASI, and generate the matching
+        TypeScript declarations from the same exported surface.
       </p>
       <ul class="hero-tokens">
         <li>
@@ -93,21 +98,9 @@ for (const tab of SNIPPET_TABS) {
     <section class="section">
       <div class="section-head">
         <p class="section-num">00 &middot; Build pipeline</p>
+        <h2 class="section-title">One root, distinct build targets</h2>
       </div>
-      <figure class="figure">
-        <div class="figure-frame">
-          <img
-            src={withBase("zig-napi-pipeline.svg")}
-            alt="Zig source flowing through zig-napi into OpenHarmony libraries, Node addons, and TypeScript definitions"
-            width="960"
-            height="520"
-          />
-        </div>
-        <figcaption>
-          One addon root produces the OpenHarmony shared library, the Node.js addon, and the
-          matching TypeScript declarations.
-        </figcaption>
-      </figure>
+      <BuildPipeline />
     </section>
 
     <section class="section">

@@ -2,9 +2,11 @@
 //
 // This module is the independent oracle used by `test/static.test.mjs` and
 // `test/browser.mjs`. It deliberately does not import anything from the site
-// implementation sources: the English copy, the 15 topic ids, the route order
-// and navigation names below were captured from the pre-migration site and are
-// asserted as an external contract.
+// implementation sources: the English copy, the topic ids, the route order and
+// navigation names below were captured from the pre-migration site and are
+// asserted as an external contract. The 15 pre-migration topics and their
+// published heading anchors stay in place; `wasm-runtime` is the one added
+// topic and is listed where it is published, in the Build group.
 //
 // The canonical Markdown under `website/src/content/{api,snippets}` is the
 // content oracle: headings, prose blocks and code fences are compared against
@@ -16,6 +18,40 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const WEBSITE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+
+// The heading ids the pages published before the migration, captured from a
+// browser render and checked in as a fixture (`published-anchors.json`). This
+// is a fixed contract, not a derivation: outside links point at these ids, and
+// a renamed or deleted one has to fail the suite instead of quietly
+// re-baselining itself. New headings are checked against the canonical
+// Markdown separately (see `legacyHeadingSlugs`).
+export const PUBLISHED_ANCHORS = JSON.parse(
+  readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "published-anchors.json"), "utf8"),
+);
+
+/** Number of heading ids the fixture pins (120, the published set). */
+export const PUBLISHED_ANCHOR_TOTAL = PUBLISHED_ANCHORS.total;
+
+/**
+ * Compares the fixed published-anchor fixture against the ids a built page
+ * exposes (`idsByTopic`: topic id -> Set of element ids). A published id may
+ * appear literally or percent-encoded, which is how the previous renderer
+ * slugged headings containing punctuation.
+ */
+export function publishedAnchorProblems(anchors, idsByTopic) {
+  const problems = [];
+  let checked = 0;
+  for (const [topicId, ids] of Object.entries(anchors.topics)) {
+    const pageIds = idsByTopic.get(topicId) ?? new Set();
+    for (const id of ids) {
+      checked += 1;
+      if (!pageIds.has(id) && !pageIds.has(encodeURIComponent(id))) {
+        problems.push(`${topicId}: #${id} is missing from the built page`);
+      }
+    }
+  }
+  return { checked, problems };
+}
 
 // Canonical content locations. The migration keeps these directories as they
 // were; a source that is not there is a failure, not something to search for.
@@ -34,6 +70,7 @@ export const TOPICS = [
   { id: "module-registration", group: "Entry", navTitle: "Module Registration" },
   { id: "build-openharmony", group: "Build", navTitle: "OpenHarmony Build" },
   { id: "build-node", group: "Build", navTitle: "Node Addon Build" },
+  { id: "wasm-runtime", group: "Build", navTitle: "WASM Runtime" },
   { id: "declaration-generation", group: "Build", navTitle: "Declaration Generation" },
   { id: "dts-overrides", group: "TypeScript", navTitle: "d.ts Overrides" },
   { id: "versioning", group: "TypeScript", navTitle: "Versioning" },
@@ -44,6 +81,26 @@ export const TOPICS = [
   { id: "async-runtime", group: "Control Flow", navTitle: "Async Runtime" },
   { id: "classes-ownership", group: "Native State", navTitle: "Ownership" },
   { id: "errors-results", group: "Native State", navTitle: "Errors" },
+];
+
+// The 15 topics the site published before the WASM guide was added. Their
+// routes and heading anchors are a published contract and never move.
+export const LEGACY_TOPIC_IDS = [
+  "overview",
+  "conversion-model",
+  "module-registration",
+  "build-openharmony",
+  "build-node",
+  "declaration-generation",
+  "dts-overrides",
+  "versioning",
+  "values-primitives",
+  "values-objects",
+  "binary-data",
+  "callback-functions",
+  "async-runtime",
+  "classes-ownership",
+  "errors-results",
 ];
 
 export const TOPIC_IDS = TOPICS.map((topic) => topic.id);
@@ -269,21 +326,89 @@ function stripLinkAndEmphasisSyntax(text) {
   return out;
 }
 
-// Convert one Markdown fragment (line, cell or paragraph) into the text a
-// renderer would place in the document. Inline code keeps its literal text,
-// raw inline HTML is dropped, links keep their label.
-export function markdownInlineToText(text) {
-  const parts = text.split("`");
-  let out = "";
-  for (let index = 0; index < parts.length; index += 1) {
-    const segment = parts[index];
-    // Odd indexes are inside code spans: literal text, no emphasis stripping.
-    out +=
-      index % 2 === 1
-        ? decodeEntities(segment)
-        : decodeEntities(stripLinkAndEmphasisSyntax(stripHtmlTags(segment)));
+// Inline code is literal text: `**` or `[x](y)` inside backticks must survive
+// untouched, while the emphasis and link syntax around a code span
+// (`**`.single` runtime.**`, `[`Buffer`](#buffer)`) must still be stripped.
+// Splitting on backticks cannot do both, so every code span is masked first and
+// its exact text is restored last. The mask is a private-use character pair
+// that no Markdown source contains; it is written as a code point so the
+// fixture file stays plain ASCII.
+const CODE_SPAN_OPEN = String.fromCharCode(0xe000);
+const CODE_SPAN_CLOSE = String.fromCharCode(0xe001);
+const CODE_SPAN_PATTERN = new RegExp(`${CODE_SPAN_OPEN}(\\d+)${CODE_SPAN_CLOSE}`, "g");
+
+function maskCodeSpans(text) {
+  const spans = [];
+  let masked = "";
+  let index = 0;
+  while (index < text.length) {
+    const character = text[index];
+    // A backslash escapes the next character, so an escaped backtick is text.
+    if (character === "\\" && index + 1 < text.length) {
+      masked += text.slice(index, index + 2);
+      index += 2;
+      continue;
+    }
+    if (character !== "`") {
+      masked += character;
+      index += 1;
+      continue;
+    }
+    let openEnd = index;
+    while (openEnd < text.length && text[openEnd] === "`") openEnd += 1;
+    const marker = openEnd - index;
+    let cursor = openEnd;
+    let closeStart = -1;
+    while (cursor < text.length) {
+      if (text[cursor] !== "`") {
+        cursor += 1;
+        continue;
+      }
+      let runEnd = cursor;
+      while (runEnd < text.length && text[runEnd] === "`") runEnd += 1;
+      // Only a run of the same length closes the span; a longer one is content.
+      // There is no escape handling in here: a code span is literal, so a
+      // backslash in front of a backtick does not protect it.
+      if (runEnd - cursor === marker) {
+        closeStart = cursor;
+        break;
+      }
+      cursor = runEnd;
+    }
+    if (closeStart === -1) {
+      // No closing run: those backticks are ordinary text.
+      masked += text.slice(index, openEnd);
+      index = openEnd;
+      continue;
+    }
+    // A code span is literal text: line endings become spaces, one leading and
+    // one trailing space are dropped unless the span is all spaces, and neither
+    // backslash escapes nor entity references are interpreted — `&amp;` inside
+    // a span stays the five characters it was written as.
+    let content = text.slice(openEnd, closeStart).replace(/\r\n?|\n/g, " ");
+    if (content.startsWith(" ") && content.endsWith(" ") && content.trim() !== "") {
+      content = content.slice(1, -1);
+    }
+    spans.push(content);
+    masked += `${CODE_SPAN_OPEN}${spans.length - 1}${CODE_SPAN_CLOSE}`;
+    index = closeStart + marker;
   }
-  return out;
+  return { masked, spans };
+}
+
+function restoreCodeSpans(text, spans) {
+  return text.replace(CODE_SPAN_PATTERN, (match, index) => spans[Number(index)] ?? match);
+}
+
+// Convert one Markdown fragment (line, cell or paragraph) into the text a
+// renderer would place in the document. Inline code keeps its literal text
+// (`<T>`, `a*b*`, `__init__`, backticks and entity references included), raw
+// inline HTML is dropped, links keep their label — including a label that is a
+// code span — and entity references in ordinary text are decoded.
+export function markdownInlineToText(text) {
+  const { masked, spans } = maskCodeSpans(text);
+  const stripped = decodeEntities(stripHtmlTags(stripLinkAndEmphasisSyntax(masked)));
+  return restoreCodeSpans(stripped, spans);
 }
 
 export function extractHeadings(markdown) {
@@ -462,6 +587,32 @@ export function extractTextBlocks(markdown) {
   return blocks;
 }
 
+// Heading anchors published by the renderer the site used before the
+// migration (`markdown-it-anchor`'s default slug: trimmed, lower-cased,
+// whitespace to "-", then percent-encoded, with repeats suffixed -1, -2, …).
+// Fragments such as `#jserror%2C-jstypeerror%2C-jsrangeerror` were linked from
+// outside the site, so the same slugs are re-derived here and checked against
+// the built pages.
+export function legacyHeadingSlug(text) {
+  return encodeURIComponent(text.trim().toLowerCase().replace(/\s+/g, "-"));
+}
+
+/** The slug of every heading in a document, repeats disambiguated in order. */
+export function legacyHeadingSlugs(headings) {
+  const seen = new Set();
+  return headings.map((heading) => {
+    const base = legacyHeadingSlug(heading.text);
+    let slug = base;
+    let index = 1;
+    while (seen.has(slug)) {
+      slug = `${base}-${index}`;
+      index += 1;
+    }
+    seen.add(slug);
+    return slug;
+  });
+}
+
 // Relative Markdown cross-links such as `[Ownership](./classes-ownership)`.
 // The migration normalises these at render time instead of editing the
 // Markdown, so the rendered href must become `/api/<topic>/`.
@@ -504,14 +655,14 @@ export function distinctiveProseSamples(docs, minimumLength = 60) {
 // ---------------------------------------------------------------------------
 
 export const HOME_REQUIRED_COPY = [
-  "OpenHarmony and Node.js native addons",
-  "Build N-API modules with Zig, ship OpenHarmony artifacts, compile Node.js addons, and generate TypeScript declarations from the same exported surface.",
+  "OpenHarmony, Node.js, and WebAssembly addons",
+  "Build N-API modules with Zig for OpenHarmony, Node.js, and WASI, and generate the matching TypeScript declarations from the same exported surface.",
   "Start with ZON",
   "API Reference",
   "Capability map",
   "One addon surface, multiple outputs",
-  "Dual runtime output",
-  "Use one Zig export surface to build OpenHarmony shared libraries and Node.js addons.",
+  "Three runtime outputs",
+  "Use one Zig export surface to build OpenHarmony shared libraries, Node.js addons, and WASI modules in single-threaded or threaded flavors.",
   "Typed JavaScript boundary",
   "Generate declaration files from functions, classes, enums, async descriptors, structs, and unions.",
   "N-API version gates",
@@ -542,6 +693,8 @@ export const HOME_REQUIRED_COPY = [
   "index.d.ts generation from the same addon root",
   "Examples",
   "basic, init, node, allocator, memory, and benchmark fixtures",
+  "WASI",
+  "wasm32-wasip1 (single-threaded) and wasm32-wasip1-threads (shared memory) builds with generated wasi/wasip1 loaders",
   "Reference",
   "API docs live on their own path",
   "The standalone API reference covers module registration, build helpers, runtime values, binary wrappers, async descriptors, native ownership, errors, and custom TypeScript declaration overrides.",
@@ -576,8 +729,126 @@ export const HOME_REQUIRED_ANCHORS = ["install", "build"];
 export const HOME_OPTIONAL_ANCHORS = ["types"];
 
 export const HOME_NAV_LABELS = ["API", "GitHub"];
-export const HOME_ASSETS = ["zig-napi-pipeline.svg", "logo/icon-256.png"];
+// The home page keeps the product logo. The build pipeline is rendered from
+// source now, so the retired bitmap is no longer fetched by any page.
+export const HOME_ASSETS = ["logo/icon-256.png"];
 export const GITHUB_URL = "https://github.com/openharmony-zig/zig-napi";
+
+// ---------------------------------------------------------------------------
+// Home page build pipeline
+// ---------------------------------------------------------------------------
+
+// The figure is an overview: one shared root, the routes that are configured
+// separately, the artifact each one produces, and a link into the guide that
+// carries the detail. Labels are the copy a reader has to be able to read out
+// of the rendered figure.
+export const PIPELINE = {
+  /** Id of the figure the home page renders in section 00. */
+  figureId: "build-pipeline",
+  labels: [
+    "Shared root",
+    "Zig export root",
+    "src/hello.zig",
+    "OpenHarmony",
+    "napi_build.nativeAddonBuild",
+    "libhello.so",
+    "Node.js",
+    "napi_build.nodeAddonBuild",
+    "hello.<platform-arch-abi>.node",
+    "WASI",
+    "hello.wasm32-wasip1.wasm",
+    "Unshared · no workers",
+    "hello.wasm32-wasi.wasm",
+    "Shared · worker pool",
+    "Separate step",
+    "TypeScript declarations",
+    "napi_build.generateTypeDefinition",
+    "index.d.ts",
+  ],
+  /** One guide per node; the route comes from the fixed topic map. */
+  guides: [
+    { topic: "build-openharmony", label: "OpenHarmony build guide" },
+    { topic: "build-node", label: "Node addon build guide" },
+    { topic: "wasm-runtime", label: "WASI runtime guide" },
+    { topic: "declaration-generation", label: "Declaration generation guide" },
+  ],
+  // Detail the guides own, which the overview figure must not carry: command
+  // lines, flag lists and runtime plugin behavior.
+  deferredToGuides: [
+    { pattern: /(?:zig build|zig-napi build|--target)/, expected: "build command lines" },
+    { pattern: /@emnapi\/core/, expected: "the emnapi plugin detail" },
+    { pattern: /SharedArrayBuffer/i, expected: "shared-memory requirements" },
+  ],
+  /** Retired bitmap artwork: no page may fetch it again. */
+  retiredImage: "zig-napi-pipeline.svg",
+};
+
+// ---------------------------------------------------------------------------
+// Key documentation capabilities (read from the canonical Markdown)
+// ---------------------------------------------------------------------------
+
+// Short factual patterns, matched against the Markdown source of each topic, so
+// a guide cannot silently lose a capability the site documents today. They are
+// deliberately not prose assertions: the wording stays the writer's.
+export const KEY_DOC_FACTS = [
+  {
+    id: "overview",
+    facts: [{ pattern: /wasm|WASI/, expected: "the WASI runtime route" }],
+  },
+  {
+    id: "build-openharmony",
+    facts: [
+      { pattern: /napi_build\.nativeAddonBuild/, expected: "the OpenHarmony build helper" },
+      { pattern: /aarch64-linux-ohos/, expected: "a supported OpenHarmony target triple" },
+      { pattern: /OHOS_NDK_HOME/, expected: "the OHOS SDK resolution rule" },
+    ],
+  },
+  {
+    id: "build-node",
+    facts: [
+      { pattern: /napi_build\.nodeAddonBuild/, expected: "the Node addon build helper" },
+      { pattern: /\.(darwin-arm64|linux-x64-gnu|win32-x64-msvc)\.node/, expected: "a platform .node output name" },
+      { pattern: /nodePlatformArchAbi|platform-arch-abi/, expected: "the output-name helper" },
+    ],
+  },
+  {
+    id: "wasm-runtime",
+    facts: [
+      { pattern: /wasm32-wasip1-threads/, expected: "the threaded WASI target" },
+      { pattern: /wasm32-wasip1(?!-)/, expected: "the single-threaded WASI target" },
+      { pattern: /SharedArrayBuffer/i, expected: "the threaded flavor's memory requirement" },
+      { pattern: /emnapi/, expected: "the emnapi runtime a WASI addon links" },
+    ],
+  },
+  {
+    id: "declaration-generation",
+    facts: [
+      { pattern: /napi_build\.generateTypeDefinition/, expected: "the declaration generator" },
+      { pattern: /index\.d\.ts/, expected: "the declaration output file" },
+    ],
+  },
+  {
+    id: "async-runtime",
+    facts: [
+      { pattern: /ThreadSafeFunction/, expected: "thread-safe function support" },
+      { pattern: /CancelToken|cancel/i, expected: "async cancellation" },
+    ],
+  },
+  {
+    id: "classes-ownership",
+    facts: [
+      { pattern: /ClassWithoutInit/, expected: "the no-init class shape" },
+      { pattern: /NativeWrap|Reference/, expected: "native ownership handling" },
+    ],
+  },
+  {
+    id: "binary-data",
+    facts: [
+      { pattern: /ArrayBuffer/, expected: "ArrayBuffer support" },
+      { pattern: /TypedArray/, expected: "typed-array support" },
+    ],
+  },
+];
 
 // Placeholders that must never survive into rendered prose. The two build
 // recipe placeholders (`<GIT_TAG>`, `HASH_GOES_HERE`) are intentional sample

@@ -28,7 +28,8 @@ export const apiDocGroups: ApiDocGroup[] = [
       {
         id: "overview",
         title: "Overview",
-        summary: "What the public API exports and how the pieces fit together.",
+        summary:
+          "What the public API exports and how the native, OpenHarmony, and WASM targets fit together.",
       },
       {
         id: "conversion-model",
@@ -54,6 +55,12 @@ export const apiDocGroups: ApiDocGroup[] = [
         id: "build-node",
         title: "Node Addon Build",
         summary: "Build platform-specific Node.js .node addons.",
+      },
+      {
+        id: "wasm-runtime",
+        title: "WASM Runtime",
+        summary:
+          "WASI flavors and artifacts, generated loaders, memory limits, and teardown for WebAssembly addons.",
       },
       {
         id: "declaration-generation",

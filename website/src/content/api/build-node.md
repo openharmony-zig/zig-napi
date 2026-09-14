@@ -79,6 +79,9 @@ The `atomics` CPU feature is the only flavor signal, and it is what
 (single-threaded), together with the loader file names `<binary>.wasi.cjs` and
 `<binary>.wasip1.cjs`.
 
+Artifacts, loaders, browser deployment, memory sizing and teardown are covered
+in [WASM Runtime](./wasm-runtime).
+
 ### Runtime Prerequisites
 
 WASI addons link emnapi's archive, so the project needs matching runtime
@@ -88,43 +91,43 @@ packages — `emnapi` `2.0.0-alpha.5` (a prerelease, pin the exact version),
 `node_modules/emnapi/lib` from the addon project upwards; `-Demnapi-link-dir=<dir>`
 (or `EMNAPI_LINK_DIR`) selects another archive directory, `-Demnapi-archive=<name-or-path>`
 another archive. A missing archive fails the build with the searched paths and
-the versions it found.
+the versions it found. [WASM Runtime](./wasm-runtime#prerequisites) lists the
+archive layout and the version checks the CLI performs.
 
 ### Memory
 
 The module imports its memory; the loader decides how much to create.
 
-| Setting                                     | Default                    | Meaning                                                  |
-| ------------------------------------------- | -------------------------- | -------------------------------------------------------- |
-| `-Dwasi-initial-memory-pages=<n>`           | linker minimum (257 pages) | imported memory minimum, 64 KiB pages                    |
-| `-Dwasi-max-memory-pages=<n>`               | `65536` (4 GiB)            | imported memory maximum                                  |
-| `-Dwasi-stack-size=<bytes>`                 | toolchain default (16 MiB) | module stack                                             |
-| `.wasi_memory`                              | same defaults              | the programmatic form of the three above                 |
-| `wasm.initialMemory` / `wasm.maximumMemory` | `4000` / `65536`           | what the generated loader passes to `WebAssembly.Memory` |
+| Setting                                     | Default                                     | Meaning                                                  |
+| ------------------------------------------- | ------------------------------------------- | -------------------------------------------------------- |
+| `-Dwasi-initial-memory-pages=<n>`           | the linker minimum (linked data plus stack) | imported memory minimum, 64 KiB pages                    |
+| `-Dwasi-max-memory-pages=<n>`               | `65536` (4 GiB)                             | imported memory maximum                                  |
+| `-Dwasi-stack-size=<bytes>`                 | toolchain default (16 MiB)                  | module stack                                             |
+| `.wasi_memory`                              | same defaults                               | the programmatic form of the three above                 |
+| `wasm.initialMemory` / `wasm.maximumMemory` | `4000` / `65536`                            | what the generated loader passes to `WebAssembly.Memory` |
 
 Keep the loader's initial size **below** its maximum: a Zig wasi module
 allocates through `sbrk`, which grows the linear memory past its current size,
 so equal limits leave no headroom and every allocation after the linked image
 fails (the environment, then the worker blocks). The build rejects such option
 combinations with that explanation instead of emitting a loader that traps.
+[WASM Runtime](./wasm-runtime#memory-model) covers sizing, the import-matching
+rules and the single-allocation limit.
 
 ### Single allocation limit
 
-On WebAssembly a single allocation is capped at **1 GiB − 64 KiB** (1 073 676 288
-bytes) in both allocators: the C `malloc`/`calloc`/`realloc` family the emnapi
-plugins call, and the Zig-side page allocator that addon code reaches through
-`napi.safePageAllocator()`. That is a wasm32 property, not a policy: the
-allocator behind both is a bump allocator whose biggest size class covers
-`2^14` pages of 64 KiB, and a request that rounds past it would index outside
-its table. Requests above the limit fail the normal way — `null` (or `ENOMEM`)
-for the C functions, an out-of-memory error for a Zig `Allocator` — instead of
-trapping, and a failed `realloc`/`remap` leaves the original block valid.
+On WebAssembly a single allocation is capped at **1 GiB − 64 KiB**
+(1 073 676 288 bytes) in both allocators: the C `malloc`/`calloc`/`realloc`
+family the emnapi plugins call, and the Zig-side page allocator that addon code
+reaches through `napi.safePageAllocator()`. Requests above the limit fail the
+normal way - `null` (or `ENOMEM`) for the C functions, an out-of-memory error
+for a Zig `Allocator` - instead of trapping, and a failed `realloc`/`remap`
+leaves the original block valid. The cap is per allocation, not a total: the
+module can still import up to 4 GiB and serve many allocations that together
+exceed 1 GiB.
 
-The cap applies to the requested length, so a C allocation also spends a small
-header on top of it (16 bytes of alignment/header padding). It is independent
-of the total memory: the module can still import up to 4 GiB and serve many
-allocations that together exceed 1 GiB, as long as none of them alone asks for
-more than the cap. Multi-gigabyte single buffers need several allocations.
+[WASM Runtime](./wasm-runtime#single-allocation-limit) explains which size class
+sets the bound and how it interacts with the imported memory.
 
 ### What runs where
 
@@ -149,7 +152,9 @@ The CLI also emits `<binary>.wasip1-deferred.js` and its types for the
 single-threaded flavor: an ESM binding with `instantiate()`, `createInstance()`
 and `dispose()` that performs no top-level I/O, so a browser can defer
 instantiation and destroy instances explicitly. The Node loaders stay
-synchronous for both flavors (`require` returns the binding).
+synchronous for both flavors (`require` returns the binding). See
+[WASM Runtime](./wasm-runtime#deferred-loader) for its contract and for the
+async-work paths of both flavors.
 
 ## Windows Linking
 

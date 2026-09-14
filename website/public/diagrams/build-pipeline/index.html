@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>zig-napi build pipeline · kami diagram</title>
+    <!--
+      Maintained diagram source (trio: index.html + index.png + prompt.md).
+
+      This page is the standalone twin of the live home-page figure
+      (website/src/components/BuildPipeline.astro): same markup, same tokens,
+      same facts, same CSS block copied out of website/src/styles/kami.css.
+      Edit the component first, mirror the change here and re-export index.png
+      from this file — never the other way round.
+
+      The canvas is fixed (976px of diagram inside two 112px safe margins) so
+      the export is reproducible; the responsive behaviour — lanes stacking
+      below 1020px, the whole flow below 880px — lives in the live component
+      and its stylesheet.
+
+      No script, no external fetch, no bitmap: the diagram is HTML + CSS so it
+      stays legible when the export is scaled up or the page is read narrow.
+      Guide links are relative so the page works under a domain root and under
+      a repository sub-path alike.
+    -->
+    <style>
+      :root {
+        --parchment: #f5f4ed;
+        --ivory: #faf9f5;
+        --near-black: #141413;
+        --dark-warm: #3d3d3a;
+        --olive: #504e49;
+        --stone: #6b6a64;
+        --brand: #1b365d;
+        --border: #e8e6dc;
+        --border-soft: #e5e3d8;
+        --line: #d8d5c8;
+
+        --serif: Charter, Georgia, Palatino, "Times New Roman", serif;
+        --mono: "JetBrains Mono", "Fira Code", "SF Mono", Consolas, Monaco, monospace;
+        --latin-ui: system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+
+      body {
+        /* 976px of diagram + two 112px safe margins = a 2400px PNG at 2x. */
+        width: 1200px;
+        margin: 0 auto;
+        padding: 112px;
+        background: var(--parchment);
+        color: var(--near-black);
+        font-family: var(--serif);
+        font-size: 15px;
+        line-height: 1.55;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      a {
+        color: var(--brand);
+        text-decoration: none;
+      }
+
+      /* The diagram keeps the live reading width (the home page column is
+         992px), so the export differs from the site only in resolution. */
+      .frame {
+        width: 976px;
+        margin: 0 auto;
+      }
+
+      .eyebrow {
+        font-family: var(--latin-ui);
+        font-size: 12px;
+        font-weight: 500;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+        color: var(--stone);
+        margin: 0 0 10px;
+      }
+
+      h1 {
+        font-family: var(--serif);
+        font-weight: 500;
+        font-size: 32px;
+        line-height: 1.2;
+        color: var(--near-black);
+        margin: 0 0 32px;
+        text-wrap: balance;
+      }
+
+      .pipeline {
+        margin: 0;
+      }
+
+      /* Root on the left, the separately configured targets on one thin rail. */
+      .pipeline-flow {
+        display: grid;
+        grid-template-columns: minmax(0, 12rem) minmax(0, 1fr);
+        gap: 0 56px;
+        align-items: start;
+      }
+
+      .pipeline-root {
+        position: relative;
+        background: var(--ivory);
+        border-radius: 6px;
+        padding: 16px 20px;
+      }
+
+      /* The rail belongs to the target list; this stub carries the root into it. */
+      .pipeline-root::after {
+        content: "";
+        position: absolute;
+        top: 44px;
+        left: 100%;
+        width: 56px;
+        height: 1px;
+        background: var(--line);
+      }
+
+      .pipeline-label {
+        font-family: var(--latin-ui);
+        font-size: 12px;
+        font-weight: 500;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+        color: var(--stone);
+        margin: 0 0 6px;
+      }
+
+      .pipeline-node {
+        font-family: var(--serif);
+        font-weight: 500;
+        font-size: 17px;
+        line-height: 1.25;
+        color: var(--near-black);
+        margin: 0;
+      }
+
+      .pipeline code {
+        font-family: var(--mono);
+        font-size: inherit;
+        color: inherit;
+      }
+
+      /* Qualified so the rule outranks `.pipeline code`, which inherits the body
+         size back onto every code element. */
+      .pipeline .pipeline-source,
+      .pipeline .pipeline-helper,
+      .pipeline .pipeline-artifact,
+      .pipeline .pipeline-flavor,
+      .pipeline .pipeline-guide {
+        font-size: 12.5px;
+        line-height: 1.45;
+        overflow-wrap: anywhere;
+      }
+
+      .pipeline-source,
+      .pipeline-helper {
+        font-family: var(--mono);
+        color: var(--stone);
+        margin: 4px 0 0;
+      }
+
+      .pipeline-lanes {
+        list-style: none;
+        margin: 0;
+        padding: 0 0 0 24px;
+        border-left: 1px solid var(--line);
+      }
+
+      .pipeline-lane {
+        position: relative;
+        display: grid;
+        grid-template-columns: minmax(0, 13.5rem) minmax(0, 1fr) auto;
+        column-gap: 20px;
+        row-gap: 2px;
+        align-items: start;
+        padding: 13px 0;
+        border-top: 1px solid var(--border-soft);
+      }
+
+      .pipeline-lane:first-child {
+        border-top: 0;
+      }
+
+      /* One stub per lane, level with its name: the branch, not an ornament. */
+      .pipeline-lane::before {
+        content: "";
+        position: absolute;
+        top: 24px;
+        left: -24px;
+        width: 24px;
+        height: 1px;
+        background: var(--line);
+      }
+
+      .pipeline-lane > .pipeline-node {
+        grid-area: 1 / 1;
+      }
+
+      .pipeline-lane > .pipeline-helper {
+        grid-area: 2 / 1;
+      }
+
+      .pipeline-builds {
+        grid-area: 1 / 2 / span 2 / auto;
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: 4px;
+      }
+
+      .pipeline-build {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 2px 10px;
+        margin: 0;
+      }
+
+      .pipeline-artifact {
+        font-family: var(--mono);
+        color: var(--brand);
+        /* Long artifact names wrap instead of widening the page. */
+        overflow-wrap: anywhere;
+      }
+
+      /* Keeps the two WASI flavors distinguishable at every width. */
+      .pipeline-flavor {
+        font-family: var(--latin-ui);
+        color: var(--stone);
+      }
+
+      .pipeline-guide {
+        grid-area: 1 / 3 / span 2 / auto;
+        align-self: center;
+        font-family: var(--latin-ui);
+        letter-spacing: 0.2px;
+        margin: 0;
+      }
+
+      .pipeline-step {
+        display: grid;
+        grid-template-columns: minmax(0, 13.5rem) minmax(0, 1fr) auto;
+        column-gap: 20px;
+        row-gap: 2px;
+        align-items: start;
+        margin-top: 24px;
+        padding-top: 18px;
+        border-top: 1px solid var(--border-soft);
+      }
+
+      .pipeline-step > .pipeline-label {
+        grid-area: 1 / 1;
+        margin: 0;
+      }
+
+      .pipeline-step > .pipeline-node {
+        grid-area: 2 / 1;
+      }
+
+      .pipeline-step > .pipeline-build {
+        grid-area: 1 / 2 / span 2 / auto;
+      }
+
+      .pipeline-step > .pipeline-guide {
+        grid-area: 1 / 3 / span 2 / auto;
+      }
+
+      .pipeline figcaption {
+        font-family: var(--serif);
+        font-size: 16px;
+        line-height: 1.5;
+        color: var(--olive);
+        margin-top: 20px;
+        max-width: 68ch;
+        /* Reading copy: keep the last line from stranding one word. */
+        text-wrap: pretty;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="frame">
+      <p class="eyebrow">Build pipeline · zig-napi</p>
+      <h1>One root, distinct build targets</h1>
+
+      <figure class="pipeline" id="build-pipeline">
+        <div class="pipeline-flow">
+          <div class="pipeline-root">
+            <p class="pipeline-label">Shared root</p>
+            <p class="pipeline-node">Zig export root</p>
+            <p class="pipeline-source"><code>src/hello.zig</code></p>
+          </div>
+          <ul class="pipeline-lanes" aria-label="Separately configured build targets">
+            <li class="pipeline-lane" data-target="openharmony">
+              <p class="pipeline-node">OpenHarmony</p>
+              <p class="pipeline-helper"><code>napi_build.nativeAddonBuild</code></p>
+              <ul class="pipeline-builds">
+                <li class="pipeline-build">
+                  <code class="pipeline-artifact">libhello.so</code>
+                </li>
+              </ul>
+              <p class="pipeline-guide">
+                <a href="../../api/build-openharmony/">OpenHarmony build guide</a>
+              </p>
+            </li>
+            <li class="pipeline-lane" data-target="node">
+              <p class="pipeline-node">Node.js</p>
+              <p class="pipeline-helper"><code>napi_build.nodeAddonBuild</code></p>
+              <ul class="pipeline-builds">
+                <li class="pipeline-build">
+                  <code class="pipeline-artifact">hello.&lt;platform-arch-abi&gt;.node</code>
+                </li>
+              </ul>
+              <p class="pipeline-guide">
+                <a href="../../api/build-node/">Node addon build guide</a>
+              </p>
+            </li>
+            <li class="pipeline-lane" data-target="wasi">
+              <p class="pipeline-node">WASI</p>
+              <p class="pipeline-helper"><code>wasm32-wasi target</code></p>
+              <ul class="pipeline-builds">
+                <li class="pipeline-build">
+                  <code class="pipeline-artifact">hello.wasm32-wasip1.wasm</code>
+                  <span class="pipeline-flavor">Unshared · no workers</span>
+                </li>
+                <li class="pipeline-build">
+                  <code class="pipeline-artifact">hello.wasm32-wasi.wasm</code>
+                  <span class="pipeline-flavor">Shared · worker pool</span>
+                </li>
+              </ul>
+              <p class="pipeline-guide">
+                <a href="../../api/wasm-runtime/">WASI runtime guide</a>
+              </p>
+            </li>
+          </ul>
+        </div>
+        <div class="pipeline-step">
+          <p class="pipeline-label">Separate step</p>
+          <p class="pipeline-node">TypeScript declarations</p>
+          <p class="pipeline-build">
+            <code class="pipeline-helper">napi_build.generateTypeDefinition</code>
+            <code class="pipeline-artifact">index.d.ts</code>
+          </p>
+          <p class="pipeline-guide">
+            <a href="../../api/declaration-generation/">Declaration generation guide</a>
+          </p>
+        </div>
+        <figcaption>
+          One Zig root with separately configured build targets. Each guide covers its target's build
+          call, options, and artifacts; declarations are generated from the same root file.
+        </figcaption>
+      </figure>
+    </div>
+  </body>
+</html>

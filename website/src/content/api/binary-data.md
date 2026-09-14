@@ -30,8 +30,66 @@ arguments are converted: the native function never runs with an unusable view.
 
 Reads through `napi.DataView` (`getUint8`, `readInt`, ...) and the element
 accessors revalidate the same way. Buffers and views are never copied
-implicitly: use `Buffer.copy`, `ArrayBuffer.copy`, `TypedArray(T).copy` or
-`DataView.copy` when the bytes have to outlive the JavaScript object.
+implicitly, and the `copy` constructors are not a native-ownership tool:
+`Buffer.copy`, `ArrayBuffer.copy`, `TypedArray(T).copy` and `DataView.copy`
+build another *JavaScript-owned* object. They are the right answer when the
+JavaScript side has to keep the bytes after the original object goes away or is
+detached, and the wrong one for native code that has to own them, because a
+copy JavaScript owns can be detached, resized or collected just like the
+original.
+
+Native ownership means copying into Zig memory, from a view that was validated
+in the same turn it is read. For a capture, the async runtime does that copy.
+The block below is added to a root that is already registered; it declares no
+`NODE_API_MODULE` of its own.
+
+```zig
+const napi = @import("napi");
+
+fn checksum(bytes: []const u8) u32 {
+    var sum: u32 = 0;
+    for (bytes) |byte| sum +%= byte;
+    return sum;
+}
+
+/// `tryAsConstSlice()` revalidates the view, and `from` deep-copies the
+/// captured slice before this call returns, so the JavaScript buffer may be
+/// detached or resized immediately afterwards.
+pub fn checksumAsync(input: napi.Uint8Array) !napi.Async(u32, .thread) {
+    return napi.Async(u32, .thread).from(try input.tryAsConstSlice(), checksum);
+}
+```
+
+```js
+const sum = await addon.checksumAsync(new Uint8Array([1, 2, 3])); // 6
+```
+
+An `allocator.dupe` the body performs itself is native-owned: it belongs to
+whoever allocated it, is invisible to JavaScript, and has to be released by
+native code - the same function before it returns, or a native owner it was
+handed to. It is the right tool for a copy that stays inside the addon, and the
+wrong one to hand back at an export boundary.
+
+For a freshly allocated result that leaves the addon, name the owner:
+
+- text returns `napi.Owned([]u8)`. The export layer converts it (a `[]u8` or
+  `[]const u8` converts to a JavaScript *string*) and then releases the
+  allocation, on the success and the failure path alike.
+- bytes return a `Buffer` built with `Buffer.copy` (a copy of caller-owned data)
+  or `Buffer.from` (ownership transferred to JavaScript where the runtime allows
+  external buffers; see the fallback note under [`Buffer`](#buffer)), so the
+  JavaScript side receives an object it can hold and collect.
+
+Returning a plain `[]u8` from an exported function transfers nothing: it
+converts to a string and the allocation is never freed. There is no JavaScript
+handle to release it through, so the export leaks.
+
+The rule behind all of these: a view is valid only until the next JavaScript
+reentry, so the pointer must not be stored in a struct that outlives the call,
+in a global, or in a background capture. Copy it while the call is still
+running; `napi.Owned(T)` and the async runtime's own input cloning
+([Async Runtime](./async-runtime)) are the supported ways to carry bytes across
+that boundary.
 
 ## `Buffer`
 
@@ -57,7 +115,19 @@ Read the memory with:
 | `asConstSlice()` | Immutable `[]const u8`. |
 | `length()`       | Byte length.            |
 
-When external buffers are not allowed by the runtime, creation falls back to copied buffers where the implementation can safely do so.
+On the zero-copy path the data is released when the Buffer is collected, by the
+same allocator that created it (`napi.globalAllocator()`, so hand `from` memory
+from that allocator).
+
+When external buffers are not allowed by the runtime, `from` and
+`fromWithFinalizer` fall back to a copied buffer, and that fallback *consumes*
+the argument the same way the zero-copy path would: the pending external-buffer
+record is destroyed, which frees the caller's `data` and invokes `on_finalize`
+synchronously, inside the call. The returned `Buffer` owns a copy, so it stays
+valid, but the caller must not free or reuse its buffer afterwards, and a
+finalizer written to run at collection time has already run. The error paths
+below the fallback consume the data the same way; only a failure to allocate the
+record itself returns before any ownership changes hands.
 
 ## `ArrayBuffer`
 
