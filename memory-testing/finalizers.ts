@@ -3,7 +3,9 @@ import { assertEqual } from "./assert";
 type NativeAddon = ESObject;
 
 export function exerciseFinalizerWrappers(native: NativeAddon) {
-  native.begin_finalizer_state_check(128, 128);
+  // Four external buffers/views and three class instances per iteration.
+  // Factory wrapping no longer constructs and destroys an extra instance.
+  native.begin_finalizer_state_check(128, 96);
 
   for (let i = 0; i < 32; i++) {
     let bufferValue: ESObject | null = native.create_external_buffer(32);

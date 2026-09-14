@@ -80,4 +80,5 @@
 
 - 回归按能力归类，保留在 [Node 正式测试](../node-test/napi/__tests__) 的 contracts、conversion、classes、async、resource-lifecycle 等套件、[WASM 测试](../node-test/wasm)、[CLI 测试](../packages/zig-napi/test) 和 [Zig 单测](../src/unit_tests.zig)，不另建按审计轮次命名的测试副本。
 - 修改契约时同步调用方、示例、声明和测试；公开泛型要实际实例化，不能只凭模块导入或空构建判定可用。崩溃探针放独立进程，内存检查用计数基线，自然退出不能用强制退出掩盖残留句柄。
+- ArkVM 内存测试需同时推进 GC 与 native finalizer 队列；interop 定时器的 `0ms` 轮询可能阻塞后者，使用非零间隔并有界等待存活字节归零。追踪失败或中止后保留 allocator 元数据，未释放的 owner 清空前拒绝重新追踪；不能通过提前销毁检测器消除泄漏报告。finalizer 预期数按实际构造计算，工厂包装不额外构造实例。
 - 编译通过不等于目标宿主运行通过；OHOS 编译不替代 ArkVM 真机，native Node 版本验证不替代 WASM，浏览器运行不替代 workerd 部署。CI 配置、跳过用例、有限压力测试都不能充当尚未执行的平台验收或“零隐藏风险”证明。

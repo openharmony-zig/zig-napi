@@ -9,6 +9,7 @@ const finalizer_state = @import("finalizer_state.zig");
 
 pub const leak_tracker_start = tracker.leak_tracker_start;
 pub const leak_tracker_finish = tracker.leak_tracker_finish;
+pub const leak_tracker_live_bytes = tracker.leak_tracker_live_bytes;
 pub const leak_tracker_abort = tracker.leak_tracker_abort;
 pub const tracked_alloc_roundtrip = tracker.tracked_alloc_roundtrip;
 pub const begin_finalizer_state_check = finalizer_state.begin_finalizer_state_check;
