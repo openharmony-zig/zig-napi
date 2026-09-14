@@ -9,12 +9,22 @@ type AbortControllerLike = {
 };
 
 function abortController(aborted: boolean): AbortControllerLike {
+  const listeners: Array<() => void> = [];
   const signal: ESObject = {
     aborted,
     reason: "memory abort",
     onabort: null,
-    addEventListener(_: string, __: ESObject) {},
-    removeEventListener(_: string, __: ESObject) {},
+    addEventListener(type: string, listener: () => void) {
+      if (type === "abort" && listeners.indexOf(listener) < 0) {
+        listeners.push(listener);
+      }
+    },
+    removeEventListener(type: string, listener: () => void) {
+      const index = listeners.indexOf(listener);
+      if (type === "abort" && index >= 0) {
+        listeners.splice(index, 1);
+      }
+    },
     throwIfAborted() {
       if (this.aborted) {
         throw new Error("memory abort");
@@ -24,7 +34,11 @@ function abortController(aborted: boolean): AbortControllerLike {
   return {
     signal,
     abort() {
+      if (signal.aborted) return;
       signal.aborted = true;
+      for (const listener of listeners.slice()) {
+        listener();
+      }
       if (signal.onabort) {
         signal.onabort();
       }
@@ -115,6 +129,17 @@ export async function exerciseAsyncWrappers(native: NativeAddon) {
     "custom single deinit owned label",
   );
   assertEqual(customSingleSummary.label_len, 13, "custom single deinit label length");
+  // Promise settlement can run JS before the dispatcher/finalizer releases
+  // its last native owner. Yield to cleanup, but retain exact counts and a
+  // deadline: a missing deinit must fail instead of waiting indefinitely.
+  const cleanupDeadline = Date.now() + 5000;
+  while (
+    (native.memory_async_custom_input_deinit_count() < 2 ||
+      native.memory_async_custom_result_deinit_count() < 2) &&
+    Date.now() < cleanupDeadline
+  ) {
+    await delay(0);
+  }
   assertEqual(
     native.memory_async_custom_input_deinit_count(),
     2,

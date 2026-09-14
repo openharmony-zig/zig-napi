@@ -27,6 +27,11 @@ const isWasi =
   process.env.NAPI_RS_FORCE_WASI === "true" || process.env.NAPI_RS_FORCE_WASI === "error";
 const nativeOnlyTest = isWasi ? test.skip : test;
 const abortTest = typeof AbortController === "undefined" ? test.skip : test;
+const strictCallbackFlags = process.allowedNodeEnvironmentFlags.has(
+  "--force-node-api-uncaught-exceptions-policy",
+)
+  ? ["--force-node-api-uncaught-exceptions-policy"]
+  : [];
 
 function runIsolated(body, extraArgs = [], timeoutMs = 5000) {
   return childProcess().spawnSync(
@@ -233,7 +238,7 @@ abortTest("a hostile removeEventListener settles the promise instead of hanging 
        );
        console.log(JSON.stringify(outcome));
      })();`,
-    ["--force-node-api-uncaught-exceptions-policy=true"],
+    strictCallbackFlags,
   );
   t.is(probe.status, 0, probe.stderr);
   const outcome = JSON.parse(probe.stdout.trim().split("\n").pop());
@@ -722,7 +727,7 @@ nativeOnlyTest("a runtime released from its own pool worker does not join itself
       await new Promise((resolve) => setTimeout(resolve, 2000));
       console.log("survived");
     })().catch((error) => { console.log("error:" + error.message); })`,
-    ["--force-node-api-uncaught-exceptions-policy=true"],
+    strictCallbackFlags,
   );
   t.is(probe.status, 0, probe.stderr);
   t.true(probe.stdout.includes("survived"), `unexpected output: ${probe.stdout} ${probe.stderr}`);

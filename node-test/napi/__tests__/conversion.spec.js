@@ -17,11 +17,19 @@ const isWasi =
 // Tests that need a child process, native threads or a forced GC are not part
 // of the WASI runtime and are skipped there instead of pretending to cover it.
 const nativeOnlyTest = isWasi ? test.skip : test;
+// Node 12 has no WeakRef. These GC-observation probes require it; the ordinary
+// conversion/rollback assertions still run on that runtime.
+const weakReferenceTest = !isWasi && typeof WeakRef === "function" ? test : test.skip;
 
 function runIsolated(script, extraArgs = []) {
   return childProcess().spawnSync(
     process.execPath,
-    [...extraArgs, "-e", `const b=require(${JSON.stringify(loaderPath)})("conversion");${script}`],
+    [
+      ...extraArgs,
+      "-e",
+      `process.on("unhandledRejection", error => { console.error(error); process.exitCode = 1; });
+       const b=require(${JSON.stringify(loaderPath)})("conversion");${script}`,
+    ],
     { encoding: "utf8", timeout: 20000 },
   );
 }
@@ -537,7 +545,7 @@ nativeOnlyTest("a rejected call releases the TSFN it promoted", (t) => {
   t.deepEqual(JSON.parse(result.stdout.trim()), { thrown: "TypeError", calls: 0 });
 });
 
-nativeOnlyTest("a rejected call releases the references it created", (t) => {
+weakReferenceTest("a rejected call releases the references it created", (t) => {
   const result = runIsolated(
     `
     const collect = async () => {
@@ -609,7 +617,7 @@ nativeOnlyTest("a rejected call releases the references it created", (t) => {
   });
 });
 
-nativeOnlyTest("a successful conversion transfers the reference to the body", (t) => {
+weakReferenceTest("a successful conversion transfers the reference to the body", (t) => {
   const result = runIsolated(
     `
     const collect = async () => {
@@ -748,7 +756,7 @@ nativeOnlyTest("a throwing callback does not break later deliveries", (t) => {
   }
 });
 
-nativeOnlyTest("a manual conversion inside a native body releases what it created", (t) => {
+weakReferenceTest("a manual conversion inside a native body releases what it created", (t) => {
   const result = runIsolated(
     `
     const collect = async () => {
@@ -801,7 +809,7 @@ nativeOnlyTest("a manual conversion inside a native body releases what it create
   t.deepEqual(JSON.parse(result.stdout.trim()), { alive: 0, calls: 0 });
 });
 
-nativeOnlyTest("an inner committed reference survives a failing outer conversion", (t) => {
+weakReferenceTest("an inner committed reference survives a failing outer conversion", (t) => {
   const result = runIsolated(
     `
     const collect = async () => {
@@ -870,7 +878,7 @@ nativeOnlyTest("an inner committed reference survives a failing outer conversion
   });
 });
 
-nativeOnlyTest("a manual conversion hands its reference to the caller", (t) => {
+weakReferenceTest("a manual conversion hands its reference to the caller", (t) => {
   const result = runIsolated(
     `
     const collect = async () => {

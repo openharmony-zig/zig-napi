@@ -35,13 +35,21 @@ pub fn backingIsDetached(env: napi.napi_env, raw: napi.napi_value) !bool {
                     if (s != napi.napi_ok) return NapiError.failStatus(s);
                     const args = [_]napi.napi_value{raw};
                     s = napi.napi_new_instance(env, constructor, 1, &args, &view);
-                    if (s == napi.napi_pending_exception) {
-                        var probe_error: napi.napi_value = null;
-                        const clear_status = napi.napi_get_and_clear_last_exception(env, &probe_error);
-                        if (clear_status != napi.napi_ok) return NapiError.failStatus(clear_status);
-                        return true;
+                    if (s != napi.napi_ok) {
+                        // Node 12 returns generic_failure for an empty V8
+                        // NewInstance result even when it recorded an exception.
+                        // Check the pending state, not just the returned status.
+                        var pending = false;
+                        const pending_status = napi.napi_is_exception_pending(env, &pending);
+                        if (pending_status != napi.napi_ok) return NapiError.failStatus(pending_status);
+                        if (pending) {
+                            var probe_error: napi.napi_value = null;
+                            const clear_status = napi.napi_get_and_clear_last_exception(env, &probe_error);
+                            if (clear_status != napi.napi_ok) return NapiError.failStatus(clear_status);
+                            return true;
+                        }
+                        return NapiError.failStatus(s);
                     }
-                    if (s != napi.napi_ok) return NapiError.failStatus(s);
                     var typed = false;
                     s = napi.napi_is_typedarray(env, view, &typed);
                     if (s != napi.napi_ok) return NapiError.failStatus(s);

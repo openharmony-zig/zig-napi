@@ -40,11 +40,11 @@ nativeTest("Worker termination keeps in-flight producers alive until they finish
       for(const withSignal of [false,true]){
         if(withSignal && typeof AbortController==='undefined')continue;
         for(let round=0;round<3;round++){
-          const source=\`const {parentPort}=require('worker_threads');
-            const a=require(${JSON.stringify(loadPath)})('async_tasks');
+          const source=\`const {parentPort,workerData}=require('worker_threads');
+            const a=require(workerData.loader)('async_tasks');
             \${withSignal ? 'a.asyncAbortable(200000000,new AbortController().signal)' : 'a.asyncLongThreadValue(5)'}.catch(()=>{});
             parentPort.postMessage('started');\`;
-          const worker=new Worker(source,{eval:true});
+          const worker=new Worker(source,{eval:true,workerData:{loader:${JSON.stringify(loadPath)}}});
           await new Promise((r,j)=>{worker.once('message',r);worker.once('error',j)});
           await worker.terminate();
         }
@@ -67,12 +67,12 @@ nativeTest("terminating an environment with queued events releases records and f
       await asyncTasks.asyncSliceEvents(1,()=>{});await collect();
       const before=asyncTasks.activeBytes();
       for(let round=0;round<10;round++){
-        const source=\`const {parentPort}=require('worker_threads');
-          const a=require(${JSON.stringify(loadPath)})('async_tasks');
+        const source=\`const {parentPort,workerData}=require('worker_threads');
+          const a=require(workerData.loader)('async_tasks');
           a.asyncSliceEvents(100000,()=>{}).catch(()=>{});
           parentPort.postMessage('started');
           const until=Date.now()+500;while(Date.now()<until){};\`;
-        const worker=new Worker(source,{eval:true});
+        const worker=new Worker(source,{eval:true,workerData:{loader:${JSON.stringify(loadPath)}}});
         await new Promise((r,j)=>{worker.once('message',r);worker.once('error',j)});
         await new Promise(r=>setTimeout(r,25));
         await worker.terminate();

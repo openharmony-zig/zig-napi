@@ -326,7 +326,7 @@ function detachedView() {
   return { buffer, view };
 }
 
-test("a worker exit releases every class reference", async (t) => {
+test("a worker exit releases every class reference", (t) => {
   const binding = bindingPath();
   const workerSource = `
     const { parentPort, workerData } = require("worker_threads");
@@ -337,26 +337,61 @@ test("a worker exit releases every class reference", async (t) => {
       keep.push(classes.LabeledClass.make("hello", i));
       keep.push(new classes.TrackedClass("payload"));
     }
+    if (workerData.stayAlive) parentPort.on("message", () => {});
     parentPort.postMessage(keep.length);
   `;
 
-  const base = classes.activeBytes();
-  for (let round = 0; round < 2; round++) {
-    const worker = new Worker(workerSource, { eval: true, workerData: { binding } });
-    await new Promise((resolve, reject) => {
-      worker.once("message", resolve);
-      worker.once("error", reject);
-    });
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    t.is(classes.activeBytes() - base, 0, `clean worker exit round ${round}`);
-
-    // Terminating a worker must release the class contexts as well.
-    const terminating = new Worker(workerSource, { eval: true, workerData: { binding } });
-    await new Promise((resolve) => terminating.once("message", resolve));
-    await terminating.terminate();
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    t.is(classes.activeBytes() - base, 0, `terminated worker round ${round}`);
-  }
+  // A separate process prevents GC/worker cleanup from earlier tests moving
+  // this baseline. Wait for real exit events rather than assuming 50 ms is
+  // enough, and retain exact byte/allocation checks for both exit paths.
+  const result = spawnSync(
+    process.execPath,
+    [
+      "-e",
+      `
+      const assert = require("assert");
+      const { Worker } = require("worker_threads");
+      const binding = ${JSON.stringify(binding)};
+      const classes = require(binding);
+      const source = ${JSON.stringify(workerSource)};
+      (async () => {
+        const base = classes.activeBytes();
+        const allocations = classes.activeAllocations();
+        for (let round = 0; round < 5; round++) {
+          for (const stayAlive of [false, true]) {
+            const worker = new Worker(source, { eval: true, workerData: { binding, stayAlive } });
+            const exited = new Promise((resolve, reject) => {
+              worker.once("error", reject);
+              worker.once("exit", resolve);
+            });
+            const ready = new Promise((resolve, reject) => {
+              worker.once("message", resolve);
+              worker.once("error", reject);
+              worker.once("exit", () => reject(new Error("worker exited before ready")));
+            });
+            const [count, code] = await Promise.all([
+              ready.then(async count => {
+                if (stayAlive) await worker.terminate();
+                return count;
+              }),
+              exited,
+            ]);
+            assert.strictEqual(count, 60);
+            assert.strictEqual(code, stayAlive ? 1 : 0);
+            assert.strictEqual(classes.activeBytes(), base, "bytes, round " + round);
+            assert.strictEqual(classes.activeAllocations(), allocations, "allocations, round " + round);
+          }
+        }
+        console.log("worker-cleanup-complete");
+      })().catch(error => { console.error(error); process.exitCode = 1; });
+      `,
+    ],
+    { encoding: "utf8", timeout: 20000 },
+  );
+  t.is(result.error, undefined);
+  t.is(result.signal, null, result.stderr);
+  t.is(result.status, 0, result.stderr);
+  t.true(result.stdout.includes("worker-cleanup-complete"));
 });
 
 test("typed array reads revalidate the backing store", (t) => {
@@ -462,6 +497,44 @@ test("typed array element types and view lengths are validated", (t) => {
   t.throws(() => classes.typedArrayOverflow(new ArrayBuffer(16)));
   t.throws(() => classes.dataViewOverflow(new ArrayBuffer(16)), { instanceOf: RangeError });
   t.throws(() => classes.dataViewOverflow("nope"), { instanceOf: TypeError });
+});
+
+test("detached probes do not poison empty buffers or subsequent calls", (t) => {
+  for (let round = 0; round < 3; round++) {
+    const detached = detachedView();
+    t.throws(
+      () =>
+        classes.firstByteAfterCallback(detached.view, () => {
+          detachArrayBuffer(detached.buffer);
+          return 0;
+        }),
+      { message: /InvalidatedBackingStore/ },
+    );
+    // On Node 12/14/16 the compatibility probe must clear only its own
+    // exception, distinguish a valid empty buffer and leave the env usable.
+    t.is(
+      classes.firstByteAfterCallback(new Uint8Array(0), () => 0),
+      0,
+    );
+    t.is(
+      classes.arrayBufferFirstByteAfterCallback(new ArrayBuffer(0), () => 0),
+      0,
+    );
+    t.is(
+      classes.bufferFirstByteAfterCallback(Buffer.alloc(0), () => 0),
+      0,
+    );
+    t.is(classes.firstByte(new Uint8Array([42])), 42);
+    const original = new Error("user callback");
+    t.is(
+      t.throws(() =>
+        classes.firstByteAfterCallback(new Uint8Array(0), () => {
+          throw original;
+        }),
+      ),
+      original,
+    );
+  }
 });
 
 // ---------------------------------------------------------------------------
