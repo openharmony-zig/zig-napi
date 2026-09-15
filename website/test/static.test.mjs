@@ -1091,9 +1091,7 @@ describe("home page", () => {
 
   it("renders the build pipeline as an overview figure with real guide links", () => {
     const page = loadPage(route);
-    const figure = elements(page.root).find(
-      (element) => attr(element, "id") === PIPELINE.figureId,
-    );
+    const figure = elements(page.root).find((element) => attr(element, "id") === PIPELINE.figureId);
     assert.ok(
       figure,
       `home page has no #${PIPELINE.figureId} figure to read the build pipeline from`,
@@ -1550,123 +1548,125 @@ describe("published documentation contract", () => {
 });
 
 describe("site-wide contract", () => {
-describe("Markdown inline parsing (content oracle)", () => {
-  // The oracle turns one Markdown fragment into the text a renderer shows. Code
-  // spans are literal text, while the emphasis and link syntax around them is
-  // still syntax; the old backtick-splitting parser got both wrong at once, so
-  // `**`.single` runtime.**` kept its `**` and `` [`Buffer`](#buffer) `` kept
-  // its brackets. These cases pin the behaviour, not any particular document.
-  const cases = [
-    {
-      name: "strips emphasis that wraps a code span",
-      markdown: "**`.single` runtime.** The body runs on the calling thread.",
-      text: ".single runtime. The body runs on the calling thread.",
-    },
-    {
-      name: "strips bold-italic that wraps a code span",
-      markdown: "***`both`*** markers",
-      text: "both markers",
-    },
-    {
-      name: "keeps the label of a link whose label is a code span",
-      markdown: "the fallback note under [`Buffer`](#buffer)), so the",
-      text: "the fallback note under Buffer), so the",
-    },
-    {
-      name: "keeps a plain code span verbatim",
-      markdown: "Run `napi_build.nodeAddonBuild` once.",
-      text: "Run napi_build.nodeAddonBuild once.",
-    },
-    {
-      name: "keeps markdown-looking characters inside code",
-      markdown: "`a*b*` and `<T>` and `__init__` and `[x](y)`",
-      text: "a*b* and <T> and __init__ and [x](y)",
-    },
-    {
-      name: "strips emphasis around code next to real emphasis",
-      markdown: "**imports** its memory (`env.memory`) and **allocates** it",
-      text: "imports its memory (env.memory) and allocates it",
-    },
-    {
-      name: "reads a padded span and a span holding a backtick",
-      markdown: "Use `` ` `` and `` code `` for quotes.",
-      text: "Use ` and code for quotes.",
-    },
-    {
-      name: "leaves an unmatched backtick as ordinary text",
-      markdown: "a ` b",
-      text: "a ` b",
-    },
-    {
-      name: "drops raw inline HTML and keeps link labels",
-      markdown: "<span>plain</span> [label](target) text",
-      text: "plain label text",
-    },
-    {
-      name: "keeps entity references literal inside a code span and decodes them outside",
-      markdown: "`a&amp;b` and a&amp;b",
-      text: "a&amp;b and a&b",
-    },
-    {
-      name: "keeps a backslash literal inside a code span",
-      markdown: "`a\\` b",
-      text: "a\\ b",
-    },
-    {
-      name: "folds a line ending and drops the padding space inside a code span",
-      markdown: "` padded ` and `two\nlines`",
-      text: "padded and two lines",
-    },
-  ];
+  describe("Markdown inline parsing (content oracle)", () => {
+    // The oracle turns one Markdown fragment into the text a renderer shows. Code
+    // spans are literal text, while the emphasis and link syntax around them is
+    // still syntax; the old backtick-splitting parser got both wrong at once, so
+    // `**`.single` runtime.**` kept its `**` and `` [`Buffer`](#buffer) `` kept
+    // its brackets. These cases pin the behaviour, not any particular document.
+    const cases = [
+      {
+        name: "strips emphasis that wraps a code span",
+        markdown: "**`.single` runtime.** The body runs on the calling thread.",
+        text: ".single runtime. The body runs on the calling thread.",
+      },
+      {
+        name: "strips bold-italic that wraps a code span",
+        markdown: "***`both`*** markers",
+        text: "both markers",
+      },
+      {
+        name: "keeps the label of a link whose label is a code span",
+        markdown: "the fallback note under [`Buffer`](#buffer)), so the",
+        text: "the fallback note under Buffer), so the",
+      },
+      {
+        name: "keeps a plain code span verbatim",
+        markdown: "Run `napi_build.nodeAddonBuild` once.",
+        text: "Run napi_build.nodeAddonBuild once.",
+      },
+      {
+        name: "keeps markdown-looking characters inside code",
+        markdown: "`a*b*` and `<T>` and `__init__` and `[x](y)`",
+        text: "a*b* and <T> and __init__ and [x](y)",
+      },
+      {
+        name: "strips emphasis around code next to real emphasis",
+        markdown: "**imports** its memory (`env.memory`) and **allocates** it",
+        text: "imports its memory (env.memory) and allocates it",
+      },
+      {
+        name: "reads a padded span and a span holding a backtick",
+        markdown: "Use `` ` `` and `` code `` for quotes.",
+        text: "Use ` and code for quotes.",
+      },
+      {
+        name: "leaves an unmatched backtick as ordinary text",
+        markdown: "a ` b",
+        text: "a ` b",
+      },
+      {
+        name: "drops raw inline HTML and keeps link labels",
+        markdown: "<span>plain</span> [label](target) text",
+        text: "plain label text",
+      },
+      {
+        name: "keeps entity references literal inside a code span and decodes them outside",
+        markdown: "`a&amp;b` and a&amp;b",
+        text: "a&amp;b and a&b",
+      },
+      {
+        name: "keeps a backslash literal inside a code span",
+        markdown: "`a\\` b",
+        text: "a\\ b",
+      },
+      {
+        name: "folds a line ending and drops the padding space inside a code span",
+        markdown: "` padded ` and `two\nlines`",
+        text: "padded and two lines",
+      },
+    ];
 
-  for (const entry of cases) {
-    it(entry.name, () => {
-      assert.equal(
-        markdownInlineToText(entry.markdown),
-        entry.text,
-        `oracle text for ${JSON.stringify(entry.markdown)}`,
+    for (const entry of cases) {
+      it(entry.name, () => {
+        assert.equal(
+          markdownInlineToText(entry.markdown),
+          entry.text,
+          `oracle text for ${JSON.stringify(entry.markdown)}`,
+        );
+      });
+    }
+
+    it("still reports prose the page does not contain", () => {
+      it("does not let an escaped backtick open a code span", () => {
+        // Outside a code span a backslash still escapes, so an escaped backtick is
+        // not a delimiter and the emphasis after it stays ordinary syntax. (Turning
+        // the escape back into the character it escapes is separate, pre-existing
+        // behaviour of this oracle; no published source relies on it.)
+        const text = markdownInlineToText("The \\`*not emphasis*\\` tag");
+        assert.ok(
+          !text.includes("*not emphasis*"),
+          `an escaped backtick swallowed the syntax around it: ${JSON.stringify(text)}`,
+        );
+        assert.ok(text.includes("not emphasis"), JSON.stringify(text));
+      });
+      // A parser that swallowed everything would pass every prose check; this
+      // proves the comparison still fails on text that is really absent, both on
+      // a synthetic string and on a block taken from a shipped document.
+      const synthetic = matchProseBlocks("<p>the page text</p>", [
+        { type: "paragraph", text: "the page text" },
+        { type: "paragraph", text: "prose that this page does not contain" },
+      ]);
+      assert.deepEqual(synthetic.missing, ["prose that this page does not contain"]);
+
+      const doc = docsById.get("binary-data");
+      const page = loadPage(routesForTopic(doc.id).route);
+      const main = elements(page.root).filter(isMainLandmark)[0];
+      const rendered = pageText(main, { skip: new Set() });
+      const block = doc.blocks.find(
+        (entry) => entry.type === "paragraph" && entry.text.length >= 40,
+      );
+      assert.ok(block, "binary-data has no paragraph block to probe");
+      assert.deepEqual(matchProseBlocks(rendered, [block]).missing, []);
+      const tampered = { ...block, text: block.text.replace(/\bthe\b/, "zzzz-not-in-the-page") };
+      assert.notEqual(tampered.text, block.text, "the probe did not change the block text");
+      assert.deepEqual(
+        matchProseBlocks(rendered, [tampered]).missing,
+        [tampered.text],
+        "a tampered block must still be reported missing",
       );
     });
-  }
-
-  it("still reports prose the page does not contain", () => {
-  it("does not let an escaped backtick open a code span", () => {
-    // Outside a code span a backslash still escapes, so an escaped backtick is
-    // not a delimiter and the emphasis after it stays ordinary syntax. (Turning
-    // the escape back into the character it escapes is separate, pre-existing
-    // behaviour of this oracle; no published source relies on it.)
-    const text = markdownInlineToText("The \\`*not emphasis*\\` tag");
-    assert.ok(
-      !text.includes("*not emphasis*"),
-      `an escaped backtick swallowed the syntax around it: ${JSON.stringify(text)}`,
-    );
-    assert.ok(text.includes("not emphasis"), JSON.stringify(text));
   });
-    // A parser that swallowed everything would pass every prose check; this
-    // proves the comparison still fails on text that is really absent, both on
-    // a synthetic string and on a block taken from a shipped document.
-    const synthetic = matchProseBlocks("<p>the page text</p>", [
-      { type: "paragraph", text: "the page text" },
-      { type: "paragraph", text: "prose that this page does not contain" },
-    ]);
-    assert.deepEqual(synthetic.missing, ["prose that this page does not contain"]);
-
-    const doc = docsById.get("binary-data");
-    const page = loadPage(routesForTopic(doc.id).route);
-    const main = elements(page.root).filter(isMainLandmark)[0];
-    const rendered = pageText(main, { skip: new Set() });
-    const block = doc.blocks.find((entry) => entry.type === "paragraph" && entry.text.length >= 40);
-    assert.ok(block, "binary-data has no paragraph block to probe");
-    assert.deepEqual(matchProseBlocks(rendered, [block]).missing, []);
-    const tampered = { ...block, text: block.text.replace(/\bthe\b/, "zzzz-not-in-the-page") };
-    assert.notEqual(tampered.text, block.text, "the probe did not change the block text");
-    assert.deepEqual(
-      matchProseBlocks(rendered, [tampered]).missing,
-      [tampered.text],
-      "a tampered block must still be reported missing",
-    );
-  });
-});
 
   it("publishes all 17 canonical pages plus a 404 document", () => {
     const routes = ["", ...TOPICS.map((topic) => routesForTopic(topic.id).route)];

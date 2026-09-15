@@ -26,7 +26,10 @@ export const WEBSITE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.
 // re-baselining itself. New headings are checked against the canonical
 // Markdown separately (see `legacyHeadingSlugs`).
 export const PUBLISHED_ANCHORS = JSON.parse(
-  readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "published-anchors.json"), "utf8"),
+  readFileSync(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), "published-anchors.json"),
+    "utf8",
+  ),
 );
 
 /** Number of heading ids the fixture pins (120, the published set). */
@@ -807,7 +810,10 @@ export const KEY_DOC_FACTS = [
     id: "build-node",
     facts: [
       { pattern: /napi_build\.nodeAddonBuild/, expected: "the Node addon build helper" },
-      { pattern: /\.(darwin-arm64|linux-x64-gnu|win32-x64-msvc)\.node/, expected: "a platform .node output name" },
+      {
+        pattern: /\.(darwin-arm64|linux-x64-gnu|win32-x64-msvc)\.node/,
+        expected: "a platform .node output name",
+      },
       { pattern: /nodePlatformArchAbi|platform-arch-abi/, expected: "the output-name helper" },
     ],
   },
