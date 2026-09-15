@@ -251,3 +251,198 @@ A worker belongs to the JavaScript thread and environment that created it, and t
 A worker can only be queued once: a second `Queue`/`AsyncQueue` is refused instead of settling one promise twice. The runner's result is released after the conversion on every path (`Queue`, `AsyncQueue`, rejection and cancellation), so native memory returned as `napi.Owned` is never leaked.
 
 Async wrappers, workers, and `ThreadSafeFunction` require Node-API v4 or newer.
+
+## Runtime Targets And Scheduling
+
+`Async(R, runtime)` names a runtime, not a thread. What that runtime resolves to
+depends on the target the addon was built for:
+
+| Runtime   | Native build                                                                                        | WASI, threaded                                                                                      | WASI, single-threaded                                                                                     |
+| --------- | --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `.single` | body runs on the calling thread through the single-threaded IO runtime; the exported call returns after it finished | same                                                                                                | same                                                                                                        |
+| `.thread` | body runs on the addon's IO runtime threads; the completion returns through a thread-safe function    | body runs on the emnapi JavaScript worker pool, in parallel, over one shared linear memory           | the same descriptor is executed by the `@emnapi/core` plugin on the JavaScript thread: no worker, no parallelism |
+| `.event`  | evented IO when the target provides it, otherwise the threaded runtime                                | same resolution                                                                                      | same resolution                                                                                             |
+
+The single-threaded WASI flavor is the one that changes observable behavior, and
+it changes it in one direction: the producer is the host's own thread.
+
+- **Events are delivered inline.** A threaded operation deep-copies each event
+  into the bounded queue described under [Event delivery](#event-delivery). When
+  the producer runs on the host's thread there is no queue at all: the listener
+  is called inside `emit`, before it returns, and `max_inflight_events` never
+  applies. Either way the producer may reuse its buffer once `emit` returned.
+  The `.single` runtime behaves that way on every target.
+- **Nothing the producer does can be interrupted by a timer.** A JavaScript
+  timer needs the event loop, and the loop is inside the wasm call.
+- **Ownership does not change.** The captured input is cloned for both thread
+  runtimes, and results follow the borrowed/`Owned` rules above; see
+  [WASM Runtime](./wasm-runtime) for the allocation limits of the module itself.
+
+## Cancellation Checkpoints
+
+Cancellation is cooperative on every runtime: nothing preempts a running body,
+and `scheduleWithSignal` (or the `AbortSignal` parameter of an exported
+function) only flips the operation's cancel token. The token is read at
+checkpoints:
+
+| Checkpoint                    | Behavior when the token is set                                              |
+| ----------------------------- | --------------------------------------------------------------------------- |
+| `emit(event)`                 | returns `error.Cancelled` before anything is queued or delivered             |
+| `checkCancelled()`            | returns `error.Cancelled`                                                    |
+| submit, with an aborted signal | the promise rejects with the `AbortError` and the body never runs            |
+
+Where the cancellation comes from matters only for a host-thread producer. When
+the body runs on a different thread (native and threaded WASI), the event loop
+stays free and a timer, a request handler or a signal can abort at any time;
+the producer notices it a few events later, at its next checkpoint. When the
+body runs on the host's own thread (the `.single` runtime, and the
+single-threaded WASI flavor), no timer can fire while it runs, so cancellation
+has to be requested by something that runs during the body - the event listener
+is the one that always does, and an `AbortController` aborted inside it is
+visible at the very next checkpoint. A task that already finished keeps its
+result; a late cancellation does not rewrite a settled promise.
+
+## Teardown And Disposal
+
+Destroying an environment is not "reject whatever is pending". A WebAssembly
+instance runs a barrier first, so that work still in flight settles while
+JavaScript is still allowed to run:
+
+| Situation                                                    | Outcome                                                                                        |
+| ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| a running task the barrier can cancel                         | rejects with the `AbortError`                                                                   |
+| a task that finished before its completion callback was published | still resolves with the result it produced, queued behind the progress events it already emitted |
+| a task submitted after the barrier                            | rejects with code `Cancelled`; no listener runs and no event is produced                         |
+| queued progress events                                        | delivered in the producer's order, before the settlement that follows them                       |
+
+The loader drives that handshake and then waits - in real event-loop turns - for
+the queue to drain before it destroys the context, which is why disposal is
+awaited rather than fired and forgotten. A queue that is still non-empty when
+the bounded wait runs out makes the disposal reject with
+`ERR_NAPI_WASI_CLEANUP_PENDING` instead of destroying the context over it. The
+loader-level commands and their error codes are in
+[WASM Runtime](./wasm-runtime).
+
+Two rules follow for addon code:
+
+- A settled promise does not mean the native side is finished with it. On a
+  threaded runtime the worker can return before the host publishes the
+  completion, and the ownership of captured inputs, events and results follows
+  the completion, not the promise.
+- Release resources on the paths that own them. `emit` copies an event that
+  crosses a thread, so the producer keeps and may reuse its own buffer; the
+  payload handed to a thread-safe function's `Ok`/`Err` is owned by that call on
+  every path; an `Owned` result is released after its conversion. What the body
+  itself acquires - a thread-safe function it received, an explicit
+  `Reference` - is released by the body, and a disposal that never completed
+  leaves that work to the retry.
+
+## Worked Example: Progress, Abort, And Disposal
+
+The file below is a complete addon root: it emits one event per chunk, checks
+cancellation at each step, and returns a total. It is the shape the repository's
+own async acceptance uses (`node-test/napi/src/async_tasks.zig`), and it can be
+dropped into a scaffold's `src/lib.zig`.
+
+```zig
+const std = @import("std");
+const napi = @import("napi");
+
+const Chunk = struct {
+    text: []const u8,
+    index: u32,
+};
+
+fn processChunks(ctx: napi.AsyncContext(Chunk), total: u32) !u32 {
+    var buffer: [32]u8 = undefined;
+    var index: u32 = 0;
+    while (index < total) : (index += 1) {
+        // `emit` checks the cancel token before it queues anything.
+        const label = std.fmt.bufPrint(&buffer, "chunk-{d}", .{index}) catch continue;
+        try ctx.emit(.{ .text = label, .index = index });
+        // A queued event was deep-copied, and an inline listener has already
+        // returned, so this buffer can be reused right here on every runtime.
+        @memset(&buffer, 'x');
+    }
+    return total;
+}
+
+/// `signal` is an ordinary parameter: the generated wrapper converts it and
+/// binds it to the operation's cancel token, so the body does not read it.
+pub fn processChunksWithProgress(total: u32, signal: napi.AbortSignal) napi.AsyncWithEvents(u32, Chunk, .thread) {
+    _ = signal;
+    return napi.AsyncWithEvents(u32, Chunk, .thread).from(total, processChunks);
+}
+
+comptime {
+    napi.NODE_API_MODULE("my_addon", @This());
+}
+```
+
+Declaration generation appends the listener after every declared parameter, so
+the JavaScript signature is:
+
+```ts
+export declare function processChunksWithProgress(
+  total: number,
+  signal: AbortSignal,
+  onEvent?: (event: { text: string; index: number }) => void,
+): Promise<number>
+```
+
+The listener is optional and last; `undefined`, `null` and an omitted argument
+all mean "no listener", and a non-callable value is rejected. Using it, with the
+disposal a WASI binding needs:
+
+```js
+// Native build: require("./my_addon.darwin-arm64.node") (or the scaffold's
+// index.js, which picks the platform binary itself). WASI build: require the
+// generated loader ("./my_addon.wasip1.cjs", or ".wasi.cjs" for the threaded
+// flavor), which publishes the disposal hook used below.
+const addon = require("./my_addon.wasip1.cjs");
+
+async function main() {
+  try {
+    const controller = new AbortController();
+    const seen = [];
+
+    const outcome = await addon
+      .processChunksWithProgress(1024, controller.signal, (event) => {
+        seen.push(event.index);
+        if (event.index === 7) {
+          // The listener always runs on the host's JavaScript thread. On the
+          // threadless WebAssembly flavor the producer is that same thread, so
+          // this abort is visible at its next checkpoint.
+          controller.abort();
+        }
+      })
+      .then(
+        (total) => ({ total }),
+        (error) => ({ error }),
+      );
+
+    if (outcome.error) {
+      // Aborted mid-run: the runner stopped early, and the events it did emit
+      // were delivered in order before this rejection.
+      console.error(outcome.error.code, seen.length); // AbortError, fewer than 1024
+    } else {
+      console.log(outcome.total, seen.length); // 1024, 1024
+    }
+  } finally {
+    // The WASI loaders publish this hook; a native `.node` binding has none.
+    // Await it: disposal drains the settlements the barrier queued.
+    const dispose = addon[Symbol.for("napi.rs.wasi.dispose")];
+    if (dispose) await dispose();
+  }
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
+```
+
+Two details the example depends on, both documented above: the rejection is the
+`AbortError` the operation's own cancellation produces (not a fresh error), and
+every event the runner emitted before it noticed the abort has already been
+delivered when the promise settles.

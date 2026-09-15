@@ -1,0 +1,1512 @@
+/* ==========================================================================
+   zig-napi documentation site
+   Visual system ported from the kami landing page template
+   (assets/templates/landing-page-en.html) and kami references/design.md
+   section 11 «Documentation site». Tokens are copied, not re-invented.
+   ========================================================================== */
+
+:root {
+  /* Surface */
+  --parchment: #f5f4ed;
+  --ivory: #faf9f5;
+  --inline-code-bg: #f0eee6;
+  --warm-sand: #e8e6dc;
+
+  /* Ink blue: the only chromatic accent, kept under ~5% of the surface */
+  --brand: #1b365d;
+  --brand-light: #2d5a8a;
+  --brand-tint: #eef2f7;
+
+  /* Text */
+  --near-black: #141413;
+  --dark-warm: #3d3d3a;
+  --olive: #504e49;
+  --stone: #6b6a64;
+
+  /* Borders */
+  --border: #e8e6dc;
+  --border-soft: #e5e3d8;
+  --line: #d8d5c8;
+
+  /* Stacks: one serif per page, sans is only for interface labels */
+  --serif: Charter, Georgia, Palatino, "Times New Roman", serif;
+  --mono: "JetBrains Mono", "Fira Code", "SF Mono", Consolas, Monaco, monospace;
+  --latin-ui: system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  /* Code surface: kami's sanctioned dark frame, same as the gallery frame */
+  --shot-bg: #141318;
+
+  --page-width: 1120px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--parchment);
+  color: var(--near-black);
+  font-family: var(--serif);
+  font-size: 15px;
+  line-height: 1.55;
+  letter-spacing: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a {
+  color: var(--brand);
+  text-decoration: none;
+  transition: color 0.15s;
+}
+
+img,
+svg {
+  max-width: 100%;
+}
+
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 60;
+  background: var(--ivory);
+  color: var(--brand);
+  border: 1px solid var(--brand);
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-family: var(--latin-ui);
+  font-size: 13px;
+}
+
+.skip-link:focus {
+  left: 12px;
+  top: 12px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ========== Site header ========== */
+
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: var(--parchment);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.site-header .bar {
+  max-width: var(--page-width);
+  margin: 0 auto;
+  padding: 0 64px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--near-black);
+  font-weight: 500;
+  font-size: 17px;
+  letter-spacing: 0;
+}
+
+.brand img {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: block;
+}
+
+.site-nav {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  font-family: var(--latin-ui);
+  font-size: 13px;
+  letter-spacing: 0.3px;
+}
+
+.site-nav a {
+  color: var(--stone);
+}
+
+.site-nav a.is-section {
+  color: var(--brand);
+}
+
+/* ========== Landing page shell ========== */
+
+.page {
+  max-width: var(--page-width);
+  margin: 0 auto;
+  padding: 88px 64px 120px;
+}
+
+.hero {
+  padding-bottom: 48px;
+  border-bottom: 1px solid var(--border-soft);
+  margin-bottom: 72px;
+}
+
+.eyebrow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--latin-ui);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--stone);
+  margin: 0 0 22px;
+  /* Category line: wraps evenly instead of orphaning its last word. */
+  text-wrap: pretty;
+}
+
+.hero h1 {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: 96px;
+  line-height: 1.05;
+  letter-spacing: 0;
+  margin: 0 0 18px;
+  color: var(--near-black);
+  text-wrap: balance;
+}
+
+.hero .tagline {
+  font-family: var(--serif);
+  font-weight: 400;
+  font-size: 21px;
+  line-height: 1.4;
+  color: var(--olive);
+  letter-spacing: 0.2px;
+  margin: 0 0 28px;
+  max-width: 820px;
+  /* Display copy rebalances instead of dropping one word onto the last line. */
+  text-wrap: pretty;
+}
+
+.hero-tokens {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  margin: 0 0 32px;
+  padding: 0;
+  list-style: none;
+  font-family: var(--latin-ui);
+  font-size: 13px;
+  color: var(--stone);
+}
+
+.hero-tokens li {
+  display: inline-flex;
+  gap: 6px;
+  align-items: baseline;
+}
+
+.hero-tokens li:not(:last-child)::after {
+  content: "·";
+  margin-left: 12px;
+  color: color-mix(in srgb, var(--stone) 58%, transparent);
+}
+
+.hero-tokens b {
+  color: var(--dark-warm);
+  font-weight: 500;
+}
+
+.hero-cta {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  margin-top: 4px;
+}
+
+/* ========== Buttons ========== */
+
+.btn-primary,
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: 15px;
+  letter-spacing: 0.2px;
+  padding: 13px 28px;
+  border-radius: 999px;
+  border: 1.5px solid var(--brand);
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    color 0.15s,
+    transform 0.15s;
+  cursor: pointer;
+  min-width: 158px;
+}
+
+.btn-primary {
+  background: var(--brand);
+  color: var(--ivory);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--brand);
+}
+
+/* ========== Section primitives ========== */
+
+.section {
+  margin-bottom: 72px;
+}
+
+.section-head {
+  margin-bottom: 24px;
+}
+
+.section-num {
+  font-family: var(--latin-ui);
+  font-weight: 400;
+  font-size: 13px;
+  color: var(--brand);
+  letter-spacing: 0.4px;
+  margin: 0 0 6px;
+}
+
+.section-title {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: 32px;
+  line-height: 1.2;
+  color: var(--near-black);
+  margin: 0;
+  letter-spacing: 0;
+  text-wrap: balance;
+}
+
+.section-lede {
+  font-family: var(--serif);
+  font-weight: 400;
+  font-size: 17px;
+  line-height: 1.55;
+  color: var(--olive);
+  margin: 14px 0 0;
+  max-width: 720px;
+  /* One plain sentence of display copy: no single-word last line. */
+  text-wrap: pretty;
+}
+
+/* ========== Build pipeline (home page figure) ========== */
+
+.pipeline {
+  margin: 0;
+}
+
+/* Root on the left, the separately configured targets on one thin rail. */
+.pipeline-flow {
+  display: grid;
+  grid-template-columns: minmax(0, 12rem) minmax(0, 1fr);
+  gap: 0 56px;
+  align-items: start;
+}
+
+.pipeline-root {
+  position: relative;
+  background: var(--ivory);
+  border-radius: 6px;
+  padding: 16px 20px;
+}
+
+/* The rail belongs to the target list; this stub carries the root into it. */
+.pipeline-root::after {
+  content: "";
+  position: absolute;
+  top: 44px;
+  left: 100%;
+  width: 56px;
+  height: 1px;
+  background: var(--line);
+}
+
+.pipeline-label {
+  font-family: var(--latin-ui);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--stone);
+  margin: 0 0 6px;
+}
+
+.pipeline-node {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: 17px;
+  line-height: 1.25;
+  color: var(--near-black);
+  margin: 0;
+}
+
+.pipeline code {
+  font-family: var(--mono);
+  font-size: inherit;
+  color: inherit;
+}
+
+/* Qualified so the rule outranks `.pipeline code`, which inherits the body
+   size back onto every code element. */
+.pipeline .pipeline-source,
+.pipeline .pipeline-helper,
+.pipeline .pipeline-artifact,
+.pipeline .pipeline-flavor,
+.pipeline .pipeline-guide {
+  font-size: 12.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.pipeline-source,
+.pipeline-helper {
+  font-family: var(--mono);
+  color: var(--stone);
+  margin: 4px 0 0;
+}
+
+.pipeline-lanes {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 24px;
+  border-left: 1px solid var(--line);
+}
+
+.pipeline-lane {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 13.5rem) minmax(0, 1fr) auto;
+  column-gap: 20px;
+  row-gap: 2px;
+  align-items: start;
+  padding: 13px 0;
+  border-top: 1px solid var(--border-soft);
+}
+
+.pipeline-lane:first-child {
+  border-top: 0;
+}
+
+/* One stub per lane, level with its name: the branch, not an ornament. */
+.pipeline-lane::before {
+  content: "";
+  position: absolute;
+  top: 24px;
+  left: -24px;
+  width: 24px;
+  height: 1px;
+  background: var(--line);
+}
+
+.pipeline-lane > .pipeline-node {
+  grid-area: 1 / 1;
+}
+
+.pipeline-lane > .pipeline-helper {
+  grid-area: 2 / 1;
+}
+
+.pipeline-builds {
+  grid-area: 1 / 2 / span 2 / auto;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.pipeline-build {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  margin: 0;
+}
+
+.pipeline-artifact {
+  font-family: var(--mono);
+  color: var(--brand);
+  /* Long artifact names wrap instead of widening the page. */
+  overflow-wrap: anywhere;
+}
+
+/* Keeps the two WASI flavors distinguishable at every width. */
+.pipeline-flavor {
+  font-family: var(--latin-ui);
+  color: var(--stone);
+}
+
+.pipeline-guide {
+  grid-area: 1 / 3 / span 2 / auto;
+  align-self: center;
+  font-family: var(--latin-ui);
+  letter-spacing: 0.2px;
+  margin: 0;
+}
+
+.pipeline-step {
+  display: grid;
+  grid-template-columns: minmax(0, 13.5rem) minmax(0, 1fr) auto;
+  column-gap: 20px;
+  row-gap: 2px;
+  align-items: start;
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.pipeline-step > .pipeline-label {
+  grid-area: 1 / 1;
+  margin: 0;
+}
+
+.pipeline-step > .pipeline-node {
+  grid-area: 2 / 1;
+}
+
+.pipeline-step > .pipeline-build {
+  grid-area: 1 / 2 / span 2 / auto;
+}
+
+.pipeline-step > .pipeline-guide {
+  grid-area: 1 / 3 / span 2 / auto;
+}
+
+.pipeline figcaption {
+  font-family: var(--serif);
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--olive);
+  margin-top: 20px;
+  max-width: 68ch;
+  /* Reading copy: keep the last line from stranding one word. */
+  text-wrap: pretty;
+}
+/* ========== Feature list (capability map) ========== */
+
+.features {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.features li {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 32px;
+  padding: 20px 0;
+  border-top: 1px solid var(--border-soft);
+}
+
+.features li:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.features .name {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: 17px;
+  color: var(--near-black);
+  margin: 0;
+  letter-spacing: 0.1px;
+}
+
+.features .what {
+  font-family: var(--serif);
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--olive);
+  margin: 0;
+}
+
+/* ========== Command lines (install steps) ========== */
+
+.command-lines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.command-lines code {
+  display: block;
+  font-family: var(--mono);
+  font-size: 13.5px;
+  color: var(--dark-warm);
+  background: var(--ivory);
+  border-radius: 6px;
+  padding: 12px 16px;
+  overflow-x: auto;
+}
+
+/* ========== Build surface table ========== */
+
+.surface-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0;
+  font-size: 15px;
+}
+
+.surface-table th,
+.surface-table td {
+  text-align: left;
+  vertical-align: top;
+  padding: 15px 18px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.surface-table thead th {
+  font-family: var(--latin-ui);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--stone);
+  border-bottom: 1px solid var(--border);
+}
+
+.surface-table tbody th {
+  font-weight: 500;
+  color: var(--near-black);
+  white-space: nowrap;
+}
+
+.surface-table td {
+  color: var(--olive);
+}
+
+.surface-table tbody tr:last-child th,
+.surface-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+/* ========== Snippet tabs (progressive enhancement) ========== */
+
+.snippets-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.snippet-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.snippet-tab {
+  font-family: var(--latin-ui);
+  font-size: 13px;
+  letter-spacing: 0.2px;
+  color: var(--dark-warm);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 7px 16px;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    color 0.15s;
+}
+
+.snippet-tab[aria-selected="true"],
+.snippet-tab.is-active {
+  background: var(--brand-tint);
+  border-color: var(--brand-tint);
+  color: var(--brand);
+}
+
+.snippet-panel {
+  margin-top: 28px;
+  scroll-margin-top: 80px;
+}
+
+.snippet-panel[hidden] {
+  display: none;
+}
+
+.snippet-panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px 16px;
+  margin-bottom: 12px;
+}
+
+.snippet-title {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: 17px;
+  color: var(--near-black);
+  margin: 0;
+}
+
+.snippet-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.snippet-label {
+  font-family: var(--latin-ui);
+  font-size: 12px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--stone);
+}
+
+.copy-button {
+  font-family: var(--latin-ui);
+  font-size: 12px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--brand);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 14px;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+}
+
+/* Hidden until the enhancement script has wired the clipboard. */
+.copy-button[hidden] {
+  display: none;
+}
+
+.snippet-status {
+  font-family: var(--latin-ui);
+  font-size: 12px;
+  color: var(--olive);
+  margin: 8px 0 0;
+  min-height: 16px;
+}
+
+/* ========== Footer ========== */
+
+.foot {
+  margin: 56px auto 0;
+  max-width: var(--page-width);
+  padding: 40px 64px 64px;
+  border-top: 1px solid var(--border-soft);
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 48px;
+  font-size: 13px;
+  color: var(--stone);
+}
+
+.foot .mark {
+  display: grid;
+  grid-template-columns: 56px auto;
+  grid-template-rows: auto auto;
+  column-gap: 14px;
+  align-items: start;
+}
+
+.foot .mark img {
+  grid-row: 1 / span 2;
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.foot .mark .wm-name {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: 28px;
+  color: var(--near-black);
+  line-height: 1.1;
+  letter-spacing: 0;
+}
+
+.foot .mark .wm-line {
+  font-size: 13px;
+  color: var(--olive);
+  margin-top: 2px;
+  /* Short descriptor: balance the two lines instead of orphaning one word. */
+  text-wrap: balance;
+}
+
+.foot .colophon {
+  text-align: right;
+  max-width: 480px;
+}
+
+.foot .colophon .links {
+  font-family: var(--latin-ui);
+  color: var(--dark-warm);
+  margin-bottom: 16px;
+  line-height: 1.55;
+}
+
+.foot .colophon .links a {
+  color: var(--dark-warm);
+}
+
+.foot .colophon .ethos {
+  color: var(--olive);
+  font-style: italic;
+  line-height: 1.55;
+  max-width: 380px;
+  margin: 0 0 0 auto;
+  text-wrap: pretty;
+}
+
+/* ========== Documentation shell ========== */
+
+/* Two columns: 178px navigation rail plus the reading measure. */
+.docs-shell {
+  max-width: var(--page-width);
+  margin: 0 auto;
+  padding: 48px 64px 96px;
+  display: grid;
+  grid-template-columns: 178px minmax(0, 1fr);
+  gap: 48px;
+  align-items: start;
+}
+
+.docs-sidebar {
+  min-width: 0;
+  position: sticky;
+  top: 84px;
+  max-height: calc(100svh - 108px);
+  overflow: auto;
+}
+
+.docs-nav-group + .docs-nav-group {
+  margin-top: 22px;
+}
+
+.docs-nav-title {
+  display: block;
+  font-family: var(--latin-ui);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--stone);
+  margin: 0 0 8px;
+}
+
+.docs-nav-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.docs-nav-link {
+  display: block;
+  border-left: 2px solid transparent;
+  padding: 4px 0 4px 10px;
+  font-size: 14px;
+  color: var(--olive);
+  white-space: nowrap;
+}
+
+.docs-nav-link[aria-current="page"] {
+  border-left-color: var(--brand);
+  color: var(--brand);
+  font-weight: 500;
+}
+
+/* Auxiliary "On this page" list, in flow under the navigation rail. */
+.docs-toc {
+  margin-top: 32px;
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+
+.docs-toc-title {
+  font-family: var(--latin-ui);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--stone);
+  margin: 0 0 8px;
+}
+
+.docs-toc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.docs-toc-link {
+  display: block;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--olive);
+  padding: 3px 0;
+}
+
+.docs-toc-link.depth-3 {
+  padding-left: 12px;
+}
+
+/* Reading column: capped at the ~720px measure even though the frame is wider */
+.docs-body {
+  min-width: 0;
+  max-width: 720px;
+}
+
+.doc-updated {
+  font-family: var(--latin-ui);
+  font-size: 12px;
+  letter-spacing: 0.3px;
+  color: var(--stone);
+  margin: 0 0 20px;
+}
+
+/* ========== Prose ========== */
+
+.prose {
+  min-width: 0;
+  font-size: 16px;
+  line-height: 1.55;
+  color: var(--dark-warm);
+  overflow-wrap: break-word;
+}
+
+.prose > *:first-child {
+  margin-top: 0;
+}
+
+.prose h1 {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: 36px;
+  line-height: 1.15;
+  letter-spacing: 0;
+  color: var(--near-black);
+  margin: 0 0 24px;
+}
+
+.prose h2 {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: 24px;
+  line-height: 1.25;
+  color: var(--near-black);
+  margin: 44px 0 14px;
+  scroll-margin-top: 88px;
+}
+
+.prose h3 {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: 18px;
+  line-height: 1.3;
+  color: var(--near-black);
+  margin: 32px 0 12px;
+  scroll-margin-top: 88px;
+}
+
+.prose h1,
+.prose h4,
+.prose h5,
+.prose h6 {
+  scroll-margin-top: 88px;
+}
+
+.prose h4 {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: 16px;
+  color: var(--near-black);
+  margin: 28px 0 10px;
+}
+
+.prose p {
+  margin: 0 0 18px;
+}
+
+.prose strong {
+  font-weight: 500;
+  color: var(--near-black);
+}
+
+.prose em {
+  font-style: italic;
+}
+
+.prose ul,
+.prose ol {
+  padding-left: 22px;
+  margin: 0 0 18px;
+}
+
+.prose li {
+  margin-bottom: 6px;
+}
+
+.prose li::marker {
+  color: var(--brand);
+}
+
+.prose ol li::marker {
+  font-weight: 500;
+}
+
+.prose blockquote {
+  margin: 0 0 18px;
+  padding: 2px 0 2px 18px;
+  border-left: 2px solid var(--border);
+  color: var(--olive);
+}
+
+.prose blockquote p:last-child {
+  margin-bottom: 0;
+}
+
+.prose hr {
+  border: 0;
+  border-top: 1px solid var(--border-soft);
+  margin: 32px 0;
+}
+
+.prose code {
+  font-family: var(--mono);
+  font-size: 0.9em;
+  background: var(--inline-code-bg);
+  color: var(--dark-warm);
+  border-radius: 2px;
+  padding: 0.1em 0.32em;
+}
+
+.prose pre {
+  margin: 0 0 20px;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.prose pre code {
+  background: none;
+  padding: 0;
+  font-size: inherit;
+  color: inherit;
+}
+
+/* Build-time highlighted code blocks (shiki / kami dark frame) */
+
+.astro-code {
+  background: var(--shot-bg) !important;
+  border-radius: 6px;
+  padding: 18px 22px;
+  font-family: var(--mono);
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: #e8e6dc;
+  overflow-x: auto;
+}
+
+.astro-code code {
+  display: block;
+  min-width: max-content;
+  font-family: inherit;
+  font-size: inherit;
+}
+
+/* Tables scroll inside their own region instead of widening the page */
+
+.table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 0 0 20px;
+}
+
+.prose table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14.5px;
+  margin: 0;
+}
+
+.prose thead th {
+  font-family: var(--latin-ui);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: var(--stone);
+  text-align: left;
+  padding: 8px 16px 8px 0;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.prose tbody td {
+  padding: 9px 16px 9px 0;
+  border-bottom: 1px solid var(--border-soft);
+  vertical-align: top;
+}
+
+.prose tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.prose tbody td:last-child,
+.prose thead th:last-child {
+  padding-right: 0;
+}
+
+/* ========== Prev / next pager ========== */
+
+.doc-pager {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  border-top: 1px solid var(--border);
+  margin-top: 56px;
+  padding-top: 20px;
+}
+
+.doc-pager-link {
+  display: block;
+  border: 0;
+  background: none;
+  padding: 0;
+}
+
+.doc-pager-link.next {
+  grid-column: 2;
+  text-align: right;
+}
+
+.doc-pager-link:active {
+  opacity: 0.6;
+}
+
+.doc-pager-eyebrow {
+  display: block;
+  font-family: var(--latin-ui);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--stone);
+  margin-bottom: 4px;
+}
+
+.doc-pager-title {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: 16px;
+  color: var(--brand);
+  line-height: 1.3;
+}
+
+/* ========== 404 ========== */
+
+.notfound {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 96px 40px 120px;
+}
+
+.notfound h1 {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: 36px;
+  line-height: 1.15;
+  margin: 0 0 16px;
+  color: var(--near-black);
+}
+
+.notfound p {
+  font-size: 17px;
+  line-height: 1.55;
+  color: var(--olive);
+  margin: 0 0 28px;
+}
+
+/* ========== Hover (pointer devices only) ========== */
+
+@media (hover: hover) {
+  a:hover {
+    color: var(--brand-light);
+  }
+
+  .btn-primary:hover {
+    background: var(--brand-light);
+    border-color: var(--brand-light);
+    color: var(--ivory);
+    transform: translateY(-1px);
+  }
+
+  .btn-ghost:hover {
+    background: var(--brand-tint);
+    color: var(--brand);
+    transform: translateY(-1px);
+  }
+
+  .site-nav a:hover {
+    color: var(--dark-warm);
+  }
+
+  .docs-nav-link:hover {
+    color: var(--near-black);
+  }
+
+  .docs-toc-link:hover {
+    color: var(--brand);
+  }
+
+  .snippet-tab:hover {
+    border-color: var(--line);
+    color: var(--near-black);
+  }
+
+  .snippet-tab[aria-selected="true"]:hover,
+  .snippet-tab.is-active:hover {
+    color: var(--brand);
+  }
+
+  .copy-button:hover {
+    background: var(--brand-tint);
+    border-color: var(--brand-tint);
+  }
+
+  .foot .colophon .links a:hover {
+    color: var(--brand);
+  }
+}
+
+/* ========== Responsive: tablet ========== */
+
+/* The three-column lane (target, artifacts, guide) needs room for a full
+   artifact name; below this width the lane stacks instead of squeezing the
+   file names, while the root keeps its own column. */
+@media (max-width: 1020px) {
+  .pipeline-lane,
+  .pipeline-step {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 4px;
+  }
+
+  /* One column: the explicit desktop placement has to go. */
+  .pipeline-lane > .pipeline-node,
+  .pipeline-lane > .pipeline-helper,
+  .pipeline-lane > .pipeline-builds,
+  .pipeline-lane > .pipeline-guide,
+  .pipeline-step > .pipeline-label,
+  .pipeline-step > .pipeline-node,
+  .pipeline-step > .pipeline-build,
+  .pipeline-step > .pipeline-guide {
+    grid-area: auto;
+  }
+
+  .pipeline-guide {
+    align-self: start;
+  }
+}
+
+@media (max-width: 880px) {
+  .site-header .bar {
+    padding: 0 32px;
+  }
+
+  .page {
+    padding: 64px 32px 80px;
+  }
+
+  .hero {
+    margin-bottom: 56px;
+    padding-bottom: 32px;
+  }
+
+  .hero h1 {
+    font-size: 64px;
+  }
+
+  .hero .tagline {
+    font-size: 18px;
+  }
+
+  .section {
+    margin-bottom: 56px;
+  }
+
+  .section-title {
+    font-size: 26px;
+  }
+
+  .features li {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    padding: 18px 0;
+  }
+
+  /* The pipeline stacks: the root first, then each target under the same rail. */
+  .pipeline-flow,
+  .pipeline-step {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 20px;
+  }
+
+  .pipeline-root::after {
+    display: none;
+  }
+
+  .pipeline-lanes {
+    padding-left: 18px;
+  }
+
+  .pipeline-lane::before {
+    left: -18px;
+    width: 18px;
+  }
+
+  .foot {
+    padding: 32px 32px 56px;
+    margin-top: 48px;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 32px;
+  }
+
+  .foot .colophon {
+    text-align: left;
+    max-width: 100%;
+  }
+
+  .foot .colophon .ethos {
+    margin-left: 0;
+  }
+
+  .docs-shell {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 32px 32px 72px;
+    gap: 28px;
+  }
+
+  .docs-sidebar {
+    position: static;
+    max-height: none;
+    overflow: visible;
+    margin: 0 -32px;
+    padding: 0 32px;
+  }
+
+  .docs-nav {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding-bottom: 8px;
+  }
+
+  .docs-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .docs-nav-group {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .docs-nav-group + .docs-nav-group {
+    margin-top: 0;
+  }
+
+  .docs-nav-title {
+    margin: 0;
+    white-space: nowrap;
+  }
+
+  .docs-nav-list {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .docs-nav-link {
+    border-left: 0;
+    border-bottom: 2px solid transparent;
+    padding: 4px 0;
+  }
+
+  .docs-nav-link[aria-current="page"] {
+    border-left-color: transparent;
+    border-bottom-color: var(--brand);
+  }
+
+  .docs-body {
+    max-width: none;
+  }
+
+  /* The auxiliary list is an aid, not content: it goes away on small screens. */
+  .docs-toc {
+    display: none;
+  }
+}
+
+/* ========== Responsive: phone ========== */
+
+@media (max-width: 480px) {
+  .site-header .bar {
+    padding: 0 20px;
+    gap: 12px;
+  }
+
+  .site-nav {
+    gap: 14px;
+    font-size: 12px;
+  }
+
+  .page {
+    padding: 48px 20px 64px;
+  }
+
+  .hero h1 {
+    font-size: 56px;
+  }
+
+  .hero .tagline {
+    font-size: 17px;
+  }
+
+  .hero-cta {
+    gap: 12px;
+  }
+
+  .btn-primary,
+  .btn-ghost {
+    min-width: 0;
+    padding: 13px 16px;
+  }
+
+  .foot {
+    padding: 28px 20px 48px;
+  }
+
+  .docs-shell {
+    padding: 24px 20px 56px;
+    gap: 24px;
+  }
+
+  .docs-sidebar {
+    margin: 0 -20px;
+    padding: 0 20px;
+  }
+
+  .docs-nav {
+    gap: 14px;
+  }
+
+  .docs-nav-group {
+    gap: 12px;
+  }
+
+  .docs-nav-list {
+    gap: 14px;
+  }
+
+  .prose {
+    font-size: 16px;
+  }
+
+  .prose h1 {
+    font-size: 28px;
+  }
+
+  .prose h2 {
+    font-size: 21px;
+  }
+
+  .astro-code {
+    font-size: 13px;
+    padding: 14px 16px;
+  }
+
+  .command-lines code {
+    font-size: 13px;
+  }
+
+  .doc-pager {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 20px;
+  }
+
+  .doc-pager-link.next {
+    grid-column: 1;
+    text-align: left;
+  }
+}
+
+@media (max-width: 360px) {
+  .hero-cta {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+
+  .btn-primary:hover,
+  .btn-ghost:hover {
+    transform: none;
+  }
+}

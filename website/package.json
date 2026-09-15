@@ -3,26 +3,29 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
-    "dev": "vite --host 127.0.0.1",
-    "build": "tsc --noEmit && vite build",
-    "preview": "vite preview --host 127.0.0.1"
+    "dev": "astro dev --host 127.0.0.1",
+    "check": "astro check",
+    "build": "astro check && astro build",
+    "preview": "astro preview --host 127.0.0.1",
+    "format": "prettier --write \"src/**/*.astro\"",
+    "test": "node --test test/static.test.mjs",
+    "test:browser": "node test/browser.mjs"
   },
   "dependencies": {
-    "@fontsource/maple-mono": "^5.2.6",
-    "@void/md": "^0.9.3",
-    "@void/react": "^0.9.3",
-    "react": "^19.2.1",
-    "react-dom": "^19.2.1",
-    "void": "^0.9.3"
+    "@astrojs/markdown-satteri": "0.4.1",
+    "astro": "7.3.2"
   },
   "devDependencies": {
-    "@tailwindcss/vite": "^4.3.1",
+    "@astrojs/check": "0.9.10",
     "@types/node": "^26.0.1",
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
-    "tailwindcss": "^4.3.1",
-    "typescript": "^6.0.3",
-    "vite": "^8.0.0"
+    "parse5": "8.0.1",
+    "playwright-core": "1.63.0",
+    "prettier": "^3.9.6",
+    "prettier-plugin-astro": "^1.0.0",
+    "typescript": "^6.0.3"
   }
 }

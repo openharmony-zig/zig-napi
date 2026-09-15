@@ -190,10 +190,11 @@ jobs:
             ZIG_NAPI_WASM_ARTIFACT_ROOT="$PWD/$dir" node --test --test-timeout=300000 node-test/wasm/abi.test.cjs
           done
 
-      # Runs every test in the CLI package's test directory: the real npm-pack
-      # smoke test today, plus generated-loader unit tests as they land there.
+      # Both package acceptance files run `npm pack`, whose prepack hook refreshes
+      # the same generated Zig source tree. Test files are separate Node workers,
+      # so keep them serial to prevent concurrent rm/copy operations in that tree.
       - name: CLI package tests (generated loaders and real npm pack)
-        run: node --test packages/zig-napi/test/*.test.cjs
+        run: node --test --test-concurrency=1 packages/zig-napi/test/*.test.cjs
 
       - name: Async event queue benchmark (both flavors)
         run: node node-test/wasm/queue-benchmark.cjs --flavor=both

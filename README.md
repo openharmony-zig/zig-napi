@@ -210,14 +210,24 @@ See [node-test/README.md](node-test/README.md) for the addon list, the WASI flav
 
 ## Website
 
-The documentation website lives in `website` and builds as a standalone Vite site.
+The documentation website lives in `website` and is a static
+[Astro](https://astro.build) site: the API documents are rendered to HTML at
+build time, and no framework runtime is shipped to the browser.
 
 ```bash
-cd website
 pnpm install
-pnpm dev
-pnpm build
+
+pnpm run website:dev      # dev server on http://127.0.0.1:4321
+pnpm run website:build    # astro check + static build into website/dist
+pnpm run website:preview  # serve the built output
+pnpm run website:test     # static acceptance tests over website/dist
 ```
+
+`pnpm run website:build` builds for a domain root. Deploying under a repository
+sub-path uses the same build with `SITE_BASE_PATH=/<repo>/` (see
+`.github/workflows/website.yml`), which the pages, assets, and cross-document
+links all follow. See [website/README.md](website/README.md) for content
+editing, the browser test, and the visual system.
 
 ## Credits
 

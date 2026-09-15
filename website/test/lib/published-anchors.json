@@ -1,0 +1,158 @@
+{
+  "$comment": "Fixed contract, do not regenerate. These are the heading ids the pages published before the Astro/Kami migration, and outside links point at them. Deriving the list from the current Markdown would let a renamed heading re-baseline itself; new headings are checked separately against the canonical sources.",
+  "source": "browser capture of the published pages (baseline-render.json, archived with the migration baseline: commit ad8ff52, test baseline commit 7e0f999)",
+  "captured": "2026-09-13",
+  "total": 120,
+  "topics": {
+    "overview": [
+      "api-overview",
+      "public-modules",
+      "runtime-and-type-generation",
+      "runtime-surface",
+      "build-surface",
+      "read-order"
+    ],
+    "conversion-model": [
+      "conversion-model",
+      "function-parameters",
+      "supported-input-shapes",
+      "conversion-hooks",
+      "supported-return-shapes",
+      "allocation-and-cleanup",
+      "conversion-transactions",
+      "typescript-output"
+    ],
+    "module-registration": [
+      "module-registration",
+      "node_api_module",
+      "node_api_module_with_init",
+      "export-rules",
+      "init-hook",
+      "type-generation-mode"
+    ],
+    "build-openharmony": [
+      "openharmony-build",
+      "nativeaddonbuild",
+      "targets",
+      "options",
+      "sdk-resolution",
+      "node-api-options",
+      "arkvm-host-test-mode",
+      "helper-functions"
+    ],
+    "build-node": [
+      "node-addon-build",
+      "nodeaddonbuild",
+      "output-name",
+      "target-selection",
+      "wasi-addons",
+      "runtime-prerequisites",
+      "memory",
+      "single-allocation-limit",
+      "what-runs-where",
+      "windows-linking",
+      "options",
+      "install-layout",
+      "link-behavior"
+    ],
+    "declaration-generation": [
+      "declaration-generation",
+      "generatetypedefinition",
+      "keep-options-in-sync",
+      "supported-shapes",
+      "class-declarations",
+      "source-names",
+      "header-injection"
+    ],
+    "dts-overrides": [
+      "d.ts-overrides",
+      "dts",
+      "dts-1",
+      "comptime-values",
+      "type-string-rules"
+    ],
+    "versioning": [
+      "versioning",
+      "napiversion",
+      "configure-version",
+      "version-gated-wrappers",
+      "helper-functions"
+    ],
+    "values-primitives": [
+      "primitive-values",
+      "napivalue",
+      "number%2C-bool%2C-string%2C-bigint",
+      "number",
+      "string",
+      "bigint",
+      "null-and-undefined",
+      "direct-constructors"
+    ],
+    "values-objects": [
+      "objects-and-arrays",
+      "env",
+      "object",
+      "array",
+      "promise"
+    ],
+    "binary-data": [
+      "binary-data",
+      "borrowed-views-and-revalidation",
+      "buffer",
+      "arraybuffer",
+      "typedarray",
+      "dataview"
+    ],
+    "callback-functions": [
+      "functions",
+      "function",
+      "function-exports",
+      "functionref",
+      "callbackinfo",
+      "threadsafefunction",
+      "queueing-and-payload-ownership",
+      "tsfn-parameters-and-conversion-rollback",
+      "tsfn-modes"
+    ],
+    "async-runtime": [
+      "async-runtime",
+      "asyncruntime",
+      "async",
+      "asyncwithevents",
+      "event-delivery",
+      "scheduling",
+      "asynccontext",
+      "canceltoken",
+      "abortsignal",
+      "abortregistration",
+      "worker",
+      "data-ownership",
+      "lifecycle"
+    ],
+    "classes-ownership": [
+      "ownership",
+      "native-return-values",
+      "javascript-resources-created-by-conversion",
+      "class",
+      "calls%2C-receivers-and-factories",
+      "ownership-1",
+      "construction-from-javascript",
+      "classwithoutinit",
+      "reference-and-ref",
+      "functionref-and-objectref",
+      "external",
+      "nativewrap",
+      "allocator-hooks"
+    ],
+    "errors-results": [
+      "errors",
+      "error",
+      "jserror%2C-jstypeerror%2C-jsrangeerror",
+      "error-mapping",
+      "result(t)",
+      "zig-error-unions",
+      "status",
+      "status-values"
+    ]
+  }
+}

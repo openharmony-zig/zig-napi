@@ -32,7 +32,7 @@ import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { createServer } from "../../website/node_modules/vite/dist/node/index.js";
+import { createServer } from "vite";
 
 const require = createRequire(import.meta.url);
 const playwrightModule = process.env.PLAYWRIGHT_MODULE || require.resolve("playwright-core");

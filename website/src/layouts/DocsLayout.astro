@@ -1,0 +1,64 @@
+---
+import type { MarkdownHeading } from "astro";
+
+import DocPager from "../components/DocPager.astro";
+import DocsSidebar from "../components/DocsSidebar.astro";
+import SiteFooter from "../components/SiteFooter.astro";
+import SiteHeader from "../components/SiteHeader.astro";
+import { SITE } from "../consts";
+import { getApiDocNeighbours, type ApiDocMeta } from "../data/api-docs";
+import { lastUpdatedByDoc } from "../lib/last-updated";
+import BaseLayout from "./BaseLayout.astro";
+
+interface Props {
+  /** Navigation metadata (sidebar and pager label) for this document. */
+  doc: ApiDocMeta;
+  /** Document title, taken from the Markdown frontmatter. */
+  title: string;
+  /**
+   * Headings as parsed by Astro's Markdown pipeline. These carry the same ids
+   * that are written into the rendered HTML, so the table of contents can
+   * never drift from the document it describes.
+   */
+  headings: MarkdownHeading[];
+  /** Canonical URL override, used by the `/api/overview/` alias. */
+  canonical?: string;
+}
+
+const { doc, title, headings, canonical } = Astro.props;
+
+const tocHeadings = headings.filter((heading) => heading.depth > 1 && heading.depth <= 3);
+const { previous, next } = getApiDocNeighbours(doc.id);
+const updated = formatDate(lastUpdatedByDoc().get(doc.id));
+
+function formatDate(value: string | undefined): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) return "";
+  // UTC keeps the rendered date identical wherever the site is built.
+  return new Intl.DateTimeFormat("en", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  }).format(date);
+}
+---
+
+<BaseLayout title={`${title} · ${SITE.name}`} description={doc.summary} canonical={canonical}>
+  <SiteHeader section="api" />
+  <main id="main" tabindex="-1">
+    <span id="top"></span>
+    <div class="docs-shell">
+      <DocsSidebar activeId={doc.id} headings={tocHeadings} />
+      <div class="docs-body">
+        {updated && <p class="doc-updated">Last updated {updated}</p>}
+        <article class="prose">
+          <slot />
+        </article>
+        <DocPager previous={previous} next={next} />
+      </div>
+    </div>
+  </main>
+  <SiteFooter />
+</BaseLayout>
