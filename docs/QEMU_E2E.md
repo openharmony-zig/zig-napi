@@ -42,13 +42,15 @@ The output directory must be inside the checkout for Docker signing. `--server` 
 
 ## What must pass
 
-1. Build, self-sign and HAP-sign `basic`, `allocator-builtin`, `allocator-custom`, `init` and `memory` for OHOS ARM64. Verify the self-signature and HAP code signing. Install each HAP and run it three times.
+1. Build `basic`, `allocator-builtin`, `allocator-custom`, `init` and `memory` for OHOS ARM64 into isolated output directories. Code-sign the HAP and its native libraries with the official OpenHarmony HAP signer (`-signCode 1`), and verify code-sign, digest and permission signatures. Install each HAP and run it three times. OHOS build/signing runs outside the Node CLI.
 2. Require a fresh UUID challenge, exact ordered groups, exact group count and `status: ok` from each guest run. Basic has 12 groups; allocator/init each have one; memory has five. Memory includes exact counts of 128 external and 96 class finalizers.
 3. Compile the real generated OHOS declarations and consumer contracts with TypeScript 6, strict checking and `skipLibCheck: false`.
 4. Build both normal WASI flavors and a separate small-memory threaded OOM artifact. Cross-build all six Linux x64 GNU native addons at Node-API 10.
 5. Stage those actual artifacts, compiler, sources and tests in the Linux QEMU guest. Require raw WASM ABI, build-option validation, allocator/concurrency/OOM, worker-crash and string-codec acceptance with zero skips, followed by the full native Node regression three times with zero skips. A timeout or skipped acceptance case fails the matrix.
 
 TCG guests use a bounded timeout multiplier of 5. Assertions and expected counts are unchanged. Timeout-sensitive lifecycle tests wait for actual completion rather than assuming a wall-clock sleep completes native work.
+
+The native AVA runner permits at most 600 seconds of inactivity and 900 seconds overall per round. This covers the synchronous conversion rollback stress case's 32,000 throwing calls under TCG; every iteration and exact allocation assertion remains required.
 
 ## Evidence
 

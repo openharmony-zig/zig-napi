@@ -45,7 +45,7 @@
 - 取消是协作式，不保证停止任意用户代码。环境已关闭后仅安全回收 native；WASI 主动 dispose 则在 JS 仍可用时通过 teardown barrier 结算，再排空宿主回调。completion 保持在事件 FIFO 后，不能越过事件吞掉监听器异常。
 - WASI 清理等待有界；排空超限时保留 context 并允许重试 dispose，不能强行销毁仍被宿主持有的对象。普通加载器 dispose 后为终态；需要独立实例和重新实例化时使用 deferred 入口。
 
-实现入口：[异步状态机](../src/napi/async.zig)、[TSFN](../src/napi/wrapper/thread_safe_function.zig)、[Promise](../src/napi/value/promise.zig)、[AbortSignal](../src/napi/abort_signal.zig)、[加载器](../packages/zig-napi/bin/wasi-templates.cjs)。
+实现入口：[异步状态机](../src/napi/async.zig)、[TSFN](../src/napi/wrapper/thread_safe_function.zig)、[Promise](../src/napi/value/promise.zig)、[AbortSignal](../src/napi/abort_signal.zig)、[加载器](../packages/zig-napi/lib/wasi-templates.cjs)。
 
 ## 内存与性能边界
 
@@ -74,7 +74,7 @@
 - initial/max/stack 配置需满足模块实际最小内存、导入内存类型及分配器增长空间约束。取消固定的大链接下限，不代表普通加载器默认初始页数或进程 RSS 已下降。
 - CLI 发布包必须包含独立安装所需的 Zig 源码与构建定义，默认脚手架不能依赖仓库目录布局。加载器从统一模板生成；分发路径覆盖真实 pack → 安装 → 创建 → 构建 → 加载，以及带空格路径，避免 shell 字符串拼接。
 
-实现入口：[WASI 构建](../src/build/napi-build.zig)、[CLI](../packages/zig-napi/bin/zig-napi.js)、[生成模板](../packages/zig-napi/bin/wasi-templates.cjs)、[Node/WASM 构建 API](../website/src/content/api/build-node.md)。
+实现入口：[WASI 构建](../src/build/napi-build.zig)、[CLI](../packages/zig-napi/bin/zig-napi.js)、[生成模板](../packages/zig-napi/lib/wasi-templates.cjs)、[Node/WASM 构建 API](../website/src/content/api/build-node.md)。
 
 ## 维护入口与证据边界
 

@@ -157,12 +157,6 @@ function detectPlatformArchABIs() {
     if (process.arch === "s390x") return ["linux-s390x-gnu"];
   }
 
-  if (process.platform === "openharmony") {
-    if (process.arch === "arm64") return ["openharmony-arm64"];
-    if (process.arch === "x64") return ["openharmony-x64"];
-    if (process.arch === "arm") return ["openharmony-arm"];
-  }
-
   if (process.platform === "win32") {
     if (process.arch === "x64") return ["win32-x64-msvc"];
     if (process.arch === "ia32") return ["win32-ia32-msvc"];

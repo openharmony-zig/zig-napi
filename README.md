@@ -176,6 +176,8 @@ The CLI requires Node.js 20.17 or newer.
 
 Create a new Node addon project:
 
+The `zig-napi` CLI handles Node.js native addons and WASI products. OHOS products use the library's OHOS build API and the OHOS SDK build/signing tools; they are validated separately through the QEMU HAP pipeline.
+
 ```bash
 pnpm install
 pnpm --filter @ohos-rs/zig-cli cli new ../../my-addon

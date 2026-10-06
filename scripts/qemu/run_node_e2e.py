@@ -16,6 +16,10 @@ import uuid
 ZIG_URL = 'https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz'
 ZIG_SHA256 = '70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00'
 
+# Bound TCG inactivity while preserving 32,000 throwing conversion calls.
+# Each whole native round still has its independent 900-second deadline.
+NATIVE_INACTIVITY_TIMEOUT_SECONDS = 600
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -109,7 +113,7 @@ def main():
     print(f'WASI QEMU acceptance: {wasm_passed[1]} tests passed with zero skips', flush=True)
     results = []
     for index in range(args.repeat):
-        script = 'cd ' + remote + '/node-test && export PATH="$PWD/../node/bin:$PWD/../zig:$PATH" ZIG_NAPI_TEST_TIMEOUT_MULTIPLIER=5 && node node_modules/ava/cli.js --serial --timeout=120s'
+        script = 'cd ' + remote + '/node-test && export PATH="$PWD/../node/bin:$PWD/../zig:$PATH" ZIG_NAPI_TEST_TIMEOUT_MULTIPLIER=5 && node node_modules/ava/cli.js --serial --timeout=' + str(NATIVE_INACTIVITY_TIMEOUT_SECONDS) + 's'
         log_path = output / f'native-{index + 1}.log'
         with log_path.open('w') as log:
             result = subprocess.run([*ssh, script], stdout=log, stderr=subprocess.STDOUT, timeout=900)
@@ -121,7 +125,7 @@ def main():
         if result.returncode != 0 or record['passed'] < 277 or record['skipped'] != 0:
             raise RuntimeError('Node QEMU E2E failed; see ' + str(output / f'native-{index + 1}.log'))
         print(f"Node QEMU run {index + 1}: {record['passed']} tests passed", flush=True)
-    evidence = {'qmp': greeting, 'qemuStatus': status['return'], 'guest': guest, 'environment': environment, 'nodeArchiveSha256': node_hash, 'zigArchiveSha256': zig_hash, 'zigArchiveUrl': ZIG_URL, 'nativeArtifactsSha256': hashes, 'testArchiveSha256': hashlib.sha256(archive.read_bytes()).hexdigest(), 'runs': results, 'wasmAcceptanceExitCode': acceptance.returncode, 'wasmPassed': int(wasm_passed[1]), 'wasmSkipped': int(wasm_skipped[1]), 'wasmOomSha256': hashlib.sha256(args.wasm_oom.read_bytes()).hexdigest()}
+    evidence = {'qmp': greeting, 'qemuStatus': status['return'], 'guest': guest, 'environment': environment, 'nodeArchiveSha256': node_hash, 'zigArchiveSha256': zig_hash, 'zigArchiveUrl': ZIG_URL, 'nativeArtifactsSha256': hashes, 'testArchiveSha256': hashlib.sha256(archive.read_bytes()).hexdigest(), 'nativeInactivityTimeoutSeconds': NATIVE_INACTIVITY_TIMEOUT_SECONDS, 'runs': results, 'wasmAcceptanceExitCode': acceptance.returncode, 'wasmPassed': int(wasm_passed[1]), 'wasmSkipped': int(wasm_skipped[1]), 'wasmOomSha256': hashlib.sha256(args.wasm_oom.read_bytes()).hexdigest()}
     (output / 'evidence.json').write_text(json.dumps(evidence, indent=2))
     print(output / 'evidence.json')
 

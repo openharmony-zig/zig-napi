@@ -43,6 +43,10 @@ test(
       );
       const installed = path.join(tooling, "node_modules", "@ohos-rs", "zig-cli");
       const cli = path.join(installed, "bin", "zig-napi.js");
+      assert.deepEqual(fs.readdirSync(path.join(installed, "bin")), ["zig-napi.js"]);
+      assert.ok(fs.existsSync(path.join(installed, "lib", "cli.cjs")));
+      assert.ok(fs.existsSync(path.join(installed, "licenses", "NAPI-RS-LICENSE")));
+      assert.doesNotMatch(run(process.execPath, [cli, "build", "--help"], tooling), /ohos-sign/);
       const project = path.join(scratch, "addon with spaces");
       run(
         process.execPath,
@@ -203,19 +207,7 @@ test(
         tooling,
       );
       const elf = path.join(project, "renamed_addon.linux-x64-gnu.node");
-      const signer = require(path.join(installed, "bin", "ohos-selfsign.cjs"));
-      const unsigned = fs.readFileSync(elf);
-      signer.signFileAtomic(elf, true);
-      const signed = fs.readFileSync(elf);
-      assert(signer.checkSelfsign(signed).ok, "ELF self-signature verifies");
-      signer.signFileAtomic(elf, true);
-      assert(fs.readFileSync(elf).equals(signed), "forced signing is reproducible");
-      const corrupt = Buffer.from(signed);
-      corrupt[4096] ^= 1;
-      assert(!signer.checkSelfsign(corrupt).ok, "tampering is detected");
-      assert.throws(() => signer.signFileAtomic(elf), /already has/);
-      assert(fs.readFileSync(elf).equals(signed), "failure leaves the artifact intact");
-      assert(unsigned.length < signed.length);
+      assert.equal(fs.readFileSync(elf).subarray(0, 4).toString("hex"), "7f454c46");
       const sourcePathZig = path.join(project, "src", "lib.zig");
       const sourceBefore = fs.readFileSync(sourcePathZig, "utf8");
       const watcher = spawn(

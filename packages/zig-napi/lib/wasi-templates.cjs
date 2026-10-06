@@ -11,9 +11,10 @@
  *   `cli/src/api/templates/wasi-worker-template.ts` at
  *   39bd1205e480a453a2da2601a760bde5a71ed016 (the `@napi-rs/cli` 3.9.1
  *   sources), and from the `@napi-rs/wasm-runtime` 1.2.4 plugin contract.
- *   Licensed under the MIT License; see this repository's LICENSE for the
- *   full text and https://github.com/napi-rs/napi-rs/blob/main/LICENSE for
- *   the upstream notice.
+ *   Parity updates use the original TypeScript sources at
+ *   a713fcb377ee28be5abd7b6a560e3eb4f31444ca (CLI 3.10.7 / runtime 1.2.5).
+ *   Licensed under the MIT License; see ../licenses/NAPI-RS-LICENSE for
+ *   the upstream license and copyright notices.
  *
  * The adapted sources stay local because those modules are not exported from
  * the `@napi-rs/cli` public entry point. They are pinned to the same runtime
@@ -24,6 +25,64 @@
  * registry, `zig-out/node` artifact fallback, scoped package names, no private
  * Node.js symbol patching).
  */
+
+// Source: napi-rs cli/src/api/templates/wasi-worker-template.ts at
+// a713fcb377ee28be5abd7b6a560e3eb4f31444ca; see ../licenses/NAPI-RS-LICENSE.
+const WORKER_CRASH_HELPER = `function __raiseWasiThreadCrashFlags(error) {
+  try {
+    __writeCrashReport(workerData.crashReport, error)
+  } catch {}
+  try {
+    Atomics.store(workerData.crashFlag, 0, 1)
+  } catch {}
+  const addonCrashFlag = workerData.addonCrashFlag
+  if (!(addonCrashFlag instanceof Int32Array)) {
+    return false
+  }
+  try {
+    Atomics.store(addonCrashFlag, 0, 1)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function __writeCrashReport(report, error) {
+  if (!(report instanceof SharedArrayBuffer) || report.byteLength <= 12) {
+    return
+  }
+  const header = new Int32Array(report, 0, 3)
+  if (Atomics.compareExchange(header, 0, 0, 1) !== 0) {
+    return
+  }
+  let length = 0
+  try {
+    const body = new Uint8Array(report, 12)
+    const isObject =
+      error !== null && (typeof error === 'object' || typeof error === 'function')
+    const name = isObject && typeof error.name === 'string' ? error.name : 'Error'
+    const message = isObject && typeof error.message === 'string'
+      ? error.message
+      : String(error)
+    const stack = isObject && typeof error.stack === 'string' ? error.stack : undefined
+    const encoder = new TextEncoder()
+    let bytes = encoder.encode(JSON.stringify({ name, message, stack }))
+    if (bytes.length > body.length) {
+      bytes = encoder.encode(
+        JSON.stringify({ name, message: message.slice(0, body.length >> 3) }),
+      )
+    }
+    if (bytes.length <= body.length) {
+      body.set(bytes)
+      length = bytes.length
+    }
+    Atomics.store(header, 2, threadId)
+  } finally {
+    Atomics.store(header, 1, length)
+    Atomics.store(header, 0, 2)
+  }
+}
+`;
 
 /** wasm page size in bytes, the unit `WebAssembly.Memory` is configured in. */
 const WASM_PAGE_SIZE = 65536;
@@ -1645,7 +1704,7 @@ const handler = new MessageHandler({
   },
 });
 
-${require("./worker-crash.cjs")}
+${WORKER_CRASH_HELPER}
 const __beforeReportError = handler.beforeReportError;
 handler.beforeReportError = function (...args) {
   if (!__raiseWasiThreadCrashFlags(args[0])) {

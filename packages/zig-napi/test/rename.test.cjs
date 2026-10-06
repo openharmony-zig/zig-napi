@@ -3,7 +3,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { test } = require("node:test");
-const renameProject = require("../bin/rename-project.cjs");
+const renameProject = require("../lib/rename-project.cjs");
 
 test("rename moves native loaders and declarations with nested package entry points", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "zig-napi-rename-"));

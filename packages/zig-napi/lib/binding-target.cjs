@@ -1,5 +1,7 @@
 "use strict";
-// Adapted from napi-rs (MIT), see NAPI-RS-LICENSE.
+// Adapted directly from napi-rs source at a713fcb377ee28be5abd7b6a560e3eb4f31444ca.
+// MIT; see ../licenses/NAPI-RS-LICENSE.
+// Source: cli/src/api/templates/binding-target.ts
 /**
  * The `__napiBindingTarget` contract, shared by every generated loader.
  *
@@ -9,19 +11,14 @@
  * graph is what lets both templates emit the same runtime helper without
  * duplicating its source.
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.BINDING_TARGET_STAMP_HELPER =
-  exports.NAPI_BINDING_TARGET_STAMP_FN =
-  exports.ERR_NAPI_BINDING_TARGET_CONFLICT =
-  exports.NAPI_BINDING_TARGET_EXPORT =
-    void 0;
-exports.assertBindingTargetIdentFree = assertBindingTargetIdentFree;
+
 /**
  * Named export every generated loader uses to report which binding artifact
  * actually loaded: `'native'` for a `.node` addon, otherwise the
  * `platformArchABI` of the WASI flavor (`'wasm32-wasi'`, `'wasm32-wasip1'`).
  */
-exports.NAPI_BINDING_TARGET_EXPORT = "__napiBindingTarget";
+const NAPI_BINDING_TARGET_EXPORT = "__napiBindingTarget";
+
 /**
  * `code` on the error the emitted loader throws when the binding it loaded
  * already owns {@link NAPI_BINDING_TARGET_EXPORT}. Named after the other
@@ -29,9 +26,11 @@ exports.NAPI_BINDING_TARGET_EXPORT = "__napiBindingTarget";
  * `ERR_NAPI_WASI_CLEANUP_PENDING`, `ERR_NAPI_ASYNC_RUNTIME_BINDING_MISMATCH`)
  * so a consumer can branch on it instead of on the message.
  */
-exports.ERR_NAPI_BINDING_TARGET_CONFLICT = "ERR_NAPI_BINDING_TARGET_CONFLICT";
+const ERR_NAPI_BINDING_TARGET_CONFLICT = "ERR_NAPI_BINDING_TARGET_CONFLICT";
+
 /** Name of the runtime helper {@link BINDING_TARGET_STAMP_HELPER} declares. */
-exports.NAPI_BINDING_TARGET_STAMP_FN = "__napiStampBindingTarget";
+const NAPI_BINDING_TARGET_STAMP_FN = "__napiStampBindingTarget";
+
 /**
  * Reject an export of {@link NAPI_BINDING_TARGET_EXPORT} at build time.
  *
@@ -52,12 +51,13 @@ exports.NAPI_BINDING_TARGET_STAMP_FN = "__napiStampBindingTarget";
  * writes no loader reserves nothing.
  */
 function assertBindingTargetIdentFree(idents) {
-  if (idents.indexOf(exports.NAPI_BINDING_TARGET_EXPORT) !== -1) {
+  if (idents.indexOf(NAPI_BINDING_TARGET_EXPORT) !== -1) {
     throw new Error(
-      `\`${exports.NAPI_BINDING_TARGET_EXPORT}\` is reserved by the generated binding loader. Rename the napi export, e.g. #[napi(js_name = "...")].`,
+      `\`${NAPI_BINDING_TARGET_EXPORT}\` is reserved by the generated binding loader. Rename the napi export, e.g. #[napi(js_name = "...")].`,
     );
   }
 }
+
 /**
  * Runtime helper emitted into every loader that stamps
  * {@link NAPI_BINDING_TARGET_EXPORT} onto an exports object it does not own.
@@ -129,20 +129,20 @@ function assertBindingTargetIdentFree(idents) {
  * Node 12 compatible (no optional chaining, no nullish coalescing) and valid in
  * both sloppy CJS and strict ESM, because all four loaders emit it verbatim.
  */
-exports.BINDING_TARGET_STAMP_HELPER = `function ${exports.NAPI_BINDING_TARGET_STAMP_FN}(exportsObject, target) {
+const BINDING_TARGET_STAMP_HELPER = `function ${NAPI_BINDING_TARGET_STAMP_FN}(exportsObject, target) {
   if (
-    Object.prototype.hasOwnProperty.call(exportsObject, '${exports.NAPI_BINDING_TARGET_EXPORT}')
+    Object.prototype.hasOwnProperty.call(exportsObject, '${NAPI_BINDING_TARGET_EXPORT}')
   ) {
-    if (exportsObject.${exports.NAPI_BINDING_TARGET_EXPORT} === target) {
+    if (exportsObject.${NAPI_BINDING_TARGET_EXPORT} === target) {
       // Already ours: the root entry aliases the object it loaded, so a WASI
       // fallback candidate — or a \`NAPI_RS_NATIVE_LIBRARY_PATH\` override that
       // is a generated loader — arrives already stamped with this same value.
       return target
     }
     const error = new Error(
-      '\`${exports.NAPI_BINDING_TARGET_EXPORT}\` is reserved by the generated binding loader, but the loaded binding already exports it. Rename the export, e.g. #[napi(js_name = "...")].',
+      '\`${NAPI_BINDING_TARGET_EXPORT}\` is reserved by the generated binding loader, but the loaded binding already exports it. Rename the export, e.g. #[napi(js_name = "...")].',
     )
-    error.code = '${exports.ERR_NAPI_BINDING_TARGET_CONFLICT}'
+    error.code = '${ERR_NAPI_BINDING_TARGET_CONFLICT}'
     throw error
   }
   if (!Object.isExtensible(exportsObject)) {
@@ -150,7 +150,7 @@ exports.BINDING_TARGET_STAMP_HELPER = `function ${exports.NAPI_BINDING_TARGET_ST
     // (\`Object::seal\` / \`Object::freeze\`). Reporting the artifact is metadata,
     // never a reason to fail an otherwise successful load, so the stamp is
     // skipped. What a consumer still sees then follows the entry point: the
-    // browser and deferred loaders declare \`${exports.NAPI_BINDING_TARGET_EXPORT}\` at module
+    // browser and deferred loaders declare \`${NAPI_BINDING_TARGET_EXPORT}\` at module
     // level and go on reporting it, while the CommonJS entries hand back this
     // very object as \`module.exports\`, so there the value is absent.
     return target
@@ -160,7 +160,7 @@ exports.BINDING_TARGET_STAMP_HELPER = `function ${exports.NAPI_BINDING_TARGET_ST
     // chain, so an inherited accessor could swallow the value or throw and
     // fail an otherwise successful load. The descriptor is what a successful
     // assignment would have produced.
-    Object.defineProperty(exportsObject, '${exports.NAPI_BINDING_TARGET_EXPORT}', {
+    Object.defineProperty(exportsObject, '${NAPI_BINDING_TARGET_EXPORT}', {
       configurable: true,
       enumerable: true,
       value: target,
@@ -174,6 +174,14 @@ exports.BINDING_TARGET_STAMP_HELPER = `function ${exports.NAPI_BINDING_TARGET_ST
   }
   // The CommonJS loaders assign this return value so \`cjs-module-lexer\` — and
   // therefore Node's CJS -> ESM named export detection — can see
-  // \`${exports.NAPI_BINDING_TARGET_EXPORT}\` statically.
+  // \`${NAPI_BINDING_TARGET_EXPORT}\` statically.
   return target
 }`;
+
+module.exports = {
+  NAPI_BINDING_TARGET_EXPORT,
+  ERR_NAPI_BINDING_TARGET_CONFLICT,
+  NAPI_BINDING_TARGET_STAMP_FN,
+  BINDING_TARGET_STAMP_HELPER,
+  assertBindingTargetIdentFree,
+};

@@ -20,6 +20,8 @@
   },
   "files": [
     "bin",
+    "lib",
+    "licenses",
     "templates",
     "zig",
     "scripts/prepare-zig.cjs",

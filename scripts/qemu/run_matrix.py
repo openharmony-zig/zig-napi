@@ -51,9 +51,11 @@ def main():
     evidence = {}
     for suite in suites:
         example = repo / 'examples' / suite
-        run('build-ohos-' + suite, [args.ohos_zig, 'build', '-Dtarget=aarch64-linux-ohos', '-Doptimize=ReleaseSafe', '--summary', 'all'], example, env)
-        library = example / 'zig-out' / 'arm64-v8a' / 'libhello.so'
-        run('selfsign-ohos-' + suite, ['node', '-e', 'const s=require(process.argv[1]);s.signFileAtomic(process.argv[2],true);if(!s.checkSelfsign(require("node:fs").readFileSync(process.argv[2])).ok)process.exit(1)', repo / 'packages/zig-napi/bin/ohos-selfsign.cjs', library])
+        install = output / ('ohos-' + suite)
+        run('build-ohos-' + suite, [args.ohos_zig, 'build', '-Dtarget=aarch64-linux-ohos', '-Doptimize=ReleaseSafe', '--prefix', install, '--summary', 'all'], example, env)
+        library = install / 'arm64-v8a' / 'libhello.so'
+        # OHOS native libraries are code-signed by the official HAP signer
+        # below (-signCode 1); the Node CLI has no OHOS signing dependency.
         hap_root = output / ('hap-' + suite)
         run('build-hap-' + suite, [sys.executable, scripts / 'build_hap.py', '--sdk', args.sdk, '--library', library, '--declaration', example / 'index.d.ts', '--suite', suite, '--output', hap_root])
         signed = output / (suite + '-signed.hap')

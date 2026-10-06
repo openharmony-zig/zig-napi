@@ -145,7 +145,7 @@ module.exports = function renameProject(cwd, flags) {
         if (binary === oldBinary || !entry.name.startsWith(oldBinary + ".")) continue;
         const suffix = entry.name.slice(oldBinary.length);
         if (
-          !/^\.(?:(?:[cm]?js)|d\.[cm]?ts|(?:wasi|wasip1)(?:[-.].*)?\.(?:cjs|js|cts|ts)|(?:linux|darwin|win32|freebsd|android|openharmony|wasm32)-.*\.(?:node|wasm))$/.test(
+          !/^\.(?:(?:[cm]?js)|d\.[cm]?ts|(?:wasi|wasip1)(?:[-.].*)?\.(?:cjs|js|cts|ts)|(?:linux|darwin|win32|freebsd|android|wasm32)-.*\.(?:node|wasm))$/.test(
             suffix,
           )
         )

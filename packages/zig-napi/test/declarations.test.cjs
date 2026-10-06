@@ -8,7 +8,7 @@ const {
   createWasiBindingTypeDef,
   resolveWasmConfig,
   wasiMemoryBuildArgs,
-} = require("../bin/wasi-templates.cjs");
+} = require("../lib/wasi-templates.cjs");
 
 test("WASI CJS declarations resolve real exports without importing themselves", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "zig-napi-types-"));

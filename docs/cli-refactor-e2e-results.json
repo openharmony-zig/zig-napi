@@ -1,0 +1,266 @@
+{
+  "date": "2026-10-06",
+  "branch": "feat/napi-rs-parity-e2e",
+  "parentCommit": "fa8a46de1aef37422519a805c4a4876e2bd93268",
+  "upstreamCommit": "a713fcb377ee28be5abd7b6a560e3eb4f31444ca",
+  "status": "passed",
+  "cliTargets": ["Node.js native addons", "WASI"],
+  "ohosValidation": "QEMU UIAbility HAP; official SDK HAP signing with signCode=1",
+  "matrixPhaseCount": 26,
+  "correctedInitialAttempts": [
+    {
+      "name": "e2e-node",
+      "exitCode": 1,
+      "logSha256": "7a290d6b591f07a4c8c5dde23ce3dd362827207bbb5d5682843fe561f9c117d7",
+      "nativeLogSha256": "a8be9053cfe2d321880fdf4b9359ddfe2f36e131e9b64619bf1cb270eb837f02",
+      "corrections": [
+        "Wait for actual full event queue before cancellation",
+        "Apply QEMU multiplier to contracts subprocesses"
+      ]
+    },
+    {
+      "name": "e2e-node",
+      "exitCode": 1,
+      "logSha256": "ca23d0a8ccd48572b80db97ca27871f2f3b28e7a1d0744df7236b769bed51137",
+      "nativeLogSha256": "c293a6b7f72aa69eba3b28922379cb1c37d476c9947d49925341133ae0c69dab",
+      "corrections": [
+        "Bound TCG inactivity at 600 seconds, with 900-second total deadline; all 32,000 stress calls retained"
+      ]
+    }
+  ],
+  "matrixSha256": "f2f82e5b9d9b462ace7750f4f1b7a173106259b8781caccbbdf1161c08320fe7",
+  "sourceSnapshotSha256": "a2aa2d195da1c96e38c2fbbcc86b58a94d2a9a76227e599b0d4d4157bb0b8930",
+  "sourceSnapshotHashFormat": "SHA256 of UTF-8 JSON sourceSha256 with sorted keys and compact separators",
+  "sourceSnapshotFileCount": 22,
+  "matrixEvidencePath": ".tmp_qemu_e2e/cli-refactor/matrix/matrix.json",
+  "node": {
+    "environment": "Linux zig-napi-node 6.8.0-134-generic #134-Ubuntu SMP PREEMPT_DYNAMIC Fri Jun 26 18:43:11 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux\n0.16.0\n{\"version\":\"v24.14.0\",\"arch\":\"x64\",\"platform\":\"linux\",\"napi\":\"10\"}\n",
+    "nodeArchiveSha256": "41cd79bb7877c81605a9e68ec4c91547774f46a40c67a17e34d7179ef11729df",
+    "zigArchiveSha256": "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00",
+    "nativeArtifactsSha256": {
+      "async_tasks.linux-x64-gnu.node": "3e81af70550be01c1b95655e357952e16354b136f1b9627247d463e00f361a01",
+      "classes.linux-x64-gnu.node": "052624d1ae1d36751ba132396cc811e8b90fa273a8e490cf96c829e438a48b9a",
+      "compat_mode.linux-x64-gnu.node": "0d46ad60cf4590caee4f07ad7fec23fd96c3e8adfa12dfe0ebf01f76ff9613e7",
+      "contracts.linux-x64-gnu.node": "865dae76fa9d34570589b8f4f85f57d972921def82d2cbd7019d0513fa47f13f",
+      "conversion.linux-x64-gnu.node": "9ffe138e80d0fa67fb89c4be3bd08c671fd8bc606f0dfc07ae91d32b6b3fe8db",
+      "example.linux-x64-gnu.node": "9482a4570ac79410853074d538e4f56d64f6631f1a1b6e0051f20a0b818dc684"
+    },
+    "testArchiveSha256": "37b86d0613a6ca449056d41a34f753ff57ebc7975ceda8ad0c46ed8b5797e7a9",
+    "runs": [
+      {
+        "runId": "5446958e944942b3b15adf9d2b569b80",
+        "exitCode": 0,
+        "passed": 277,
+        "skipped": 0,
+        "inactivityTimeoutSeconds": 120
+      },
+      {
+        "runId": "5446958e944942b3b15adf9d2b569b80",
+        "exitCode": 0,
+        "passed": 277,
+        "skipped": 0,
+        "inactivityTimeoutSeconds": 120
+      },
+      {
+        "runId": "5446958e944942b3b15adf9d2b569b80",
+        "exitCode": 0,
+        "passed": 277,
+        "skipped": 0,
+        "inactivityTimeoutSeconds": 600
+      }
+    ],
+    "wasmPassed": 10,
+    "wasmSkipped": 0,
+    "wasmOomSha256": "603266e386ce85317fd050cf829647ca672045f131cca25842504f67587dcded"
+  },
+  "nodeQemuVersion": {
+    "micro": 3,
+    "minor": 0,
+    "major": 11
+  },
+  "nodeBaseImageSha256": "ffe6203da54deeb6db5d2a98a83f9ec8e55f149d3f7ba622e1abe5fa966ee3d6",
+  "ohos": {
+    "basic": {
+      "abi": "arm64-v8a",
+      "qemuVersion": {
+        "micro": 3,
+        "minor": 0,
+        "major": 11
+      },
+      "guest": "Linux localhost 6.6.101 #1 SMP PREEMPT Mon Oct  5 10:50:04 UTC 2026 aarch64 Toybox",
+      "hapSha256": "2d82b505a8e08ec79d6c2fc666e612efa30fda96659e9b5a87aba7930b970489",
+      "runId": "3a774da8cad34e0b9dc22420b473efc8",
+      "groups": [
+        "primitives",
+        "objects-arrays",
+        "binary",
+        "functions-classes",
+        "external",
+        "async",
+        "unions-enums",
+        "errors-tsfn",
+        "parity",
+        "parity-protocols",
+        "parity-lifetimes",
+        "parity-streams"
+      ],
+      "runs": [
+        {
+          "status": "ok",
+          "groupCount": 12
+        },
+        {
+          "status": "ok",
+          "groupCount": 12
+        },
+        {
+          "status": "ok",
+          "groupCount": 12
+        }
+      ],
+      "officialHapCodeSignVerified": true
+    },
+    "allocator-builtin": {
+      "abi": "arm64-v8a",
+      "qemuVersion": {
+        "micro": 3,
+        "minor": 0,
+        "major": 11
+      },
+      "guest": "Linux localhost 6.6.101 #1 SMP PREEMPT Mon Oct  5 10:50:04 UTC 2026 aarch64 Toybox",
+      "hapSha256": "3b1df91da42c9be08c84f60040f4a79741ecb48e57f1045c1f264ca8b922b208",
+      "runId": "bc0318d1d4a44234aac20db0fcfeb6ad",
+      "groups": ["allocator-builtin"],
+      "runs": [
+        {
+          "status": "ok",
+          "groupCount": 1
+        },
+        {
+          "status": "ok",
+          "groupCount": 1
+        },
+        {
+          "status": "ok",
+          "groupCount": 1
+        }
+      ],
+      "officialHapCodeSignVerified": true
+    },
+    "allocator-custom": {
+      "abi": "arm64-v8a",
+      "qemuVersion": {
+        "micro": 3,
+        "minor": 0,
+        "major": 11
+      },
+      "guest": "Linux localhost 6.6.101 #1 SMP PREEMPT Mon Oct  5 10:50:04 UTC 2026 aarch64 Toybox",
+      "hapSha256": "0795c87fed1c574876780a10e816e1b63fbe354330f987034b61c488e9a93048",
+      "runId": "3f5380891e864ce7b40ef2b93e724f8d",
+      "groups": ["allocator-custom"],
+      "runs": [
+        {
+          "status": "ok",
+          "groupCount": 1
+        },
+        {
+          "status": "ok",
+          "groupCount": 1
+        },
+        {
+          "status": "ok",
+          "groupCount": 1
+        }
+      ],
+      "officialHapCodeSignVerified": true
+    },
+    "init": {
+      "abi": "arm64-v8a",
+      "qemuVersion": {
+        "micro": 3,
+        "minor": 0,
+        "major": 11
+      },
+      "guest": "Linux localhost 6.6.101 #1 SMP PREEMPT Mon Oct  5 10:50:04 UTC 2026 aarch64 Toybox",
+      "hapSha256": "79617836b52aa6c54553e16029a53e7cf6908e33780fea5451a0205b70447b2f",
+      "runId": "ba723ffbfdc44fdd80eae9c68594cf2d",
+      "groups": ["init"],
+      "runs": [
+        {
+          "status": "ok",
+          "groupCount": 1
+        },
+        {
+          "status": "ok",
+          "groupCount": 1
+        },
+        {
+          "status": "ok",
+          "groupCount": 1
+        }
+      ],
+      "officialHapCodeSignVerified": true
+    },
+    "memory": {
+      "abi": "arm64-v8a",
+      "qemuVersion": {
+        "micro": 3,
+        "minor": 0,
+        "major": 11
+      },
+      "guest": "Linux localhost 6.6.101 #1 SMP PREEMPT Mon Oct  5 10:50:04 UTC 2026 aarch64 Toybox",
+      "hapSha256": "f858db60f1fa8ea5e21f35d4cd7b33b501768d9ca145b18dd5568eddae68f634",
+      "runId": "d7ed172596f4442f986e0580b9fe7200",
+      "groups": [
+        "memory-tracker",
+        "memory-sync-binary",
+        "memory-finalizers",
+        "memory-async",
+        "memory-tsfn"
+      ],
+      "runs": [
+        {
+          "status": "ok",
+          "groupCount": 5
+        },
+        {
+          "status": "ok",
+          "groupCount": 5
+        },
+        {
+          "status": "ok",
+          "groupCount": 5
+        }
+      ],
+      "officialHapCodeSignVerified": true
+    }
+  },
+  "memoryFinalizerAssertions": {
+    "external": 128,
+    "classes": 96
+  },
+  "supplemental": {
+    "tests": {
+      "cli-tests.log": {
+        "passed": 36,
+        "skipped": 0,
+        "logSha256": "2f0fb6bb1ea30d8422afa4ff950bacafc8c7bd1aa8afca22291fb8f1d702059a"
+      },
+      "pack-tests.log": {
+        "passed": 1,
+        "skipped": 0,
+        "logSha256": "41f6f59c151dc965fbe1244a79758dd1a42f76e916fc8adf047401f392463338"
+      },
+      "wasi-pack-tests.log": {
+        "passed": 2,
+        "skipped": 0,
+        "logSha256": "ccf9b1251fb0ce4fbcefc9f92450cfc261412ad2baf6ea1e46caac82f5e9d0b0"
+      }
+    },
+    "typescriptDeclarations": "passed",
+    "lint": "passed",
+    "bindingTargetHelperByteIdentical": true,
+    "workerCrashHelperByteIdentical": true
+  },
+  "remoteCiExecuted": false
+}

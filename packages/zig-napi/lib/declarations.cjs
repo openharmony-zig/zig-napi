@@ -1,35 +1,31 @@
 "use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.rebaseDeclarationSpecifiers = rebaseDeclarationSpecifiers;
-exports.commonJsDeclarationBarrier = commonJsDeclarationBarrier;
-// Adapted from napi-rs (MIT), commit a713fcb377ee28be5abd7b6a560e3eb4f31444ca.
-const node_path_1 = require("node:path");
+// Adapted directly from napi-rs source at a713fcb377ee28be5abd7b6a560e3eb4f31444ca.
+// MIT; see ../licenses/NAPI-RS-LICENSE.
+// Source: cli/src/utils/typegen.ts (declaration specifiers and CJS barriers).
+const { dirname, parse, relative, resolve } = require("node:path");
 const IN_MEMORY_DECLARATION_FILE = "/__zig_napi__.d.ts";
 function loadTypeScript() {
   return require("typescript");
 }
+
 function parseDeclarationFile(source) {
-  const t = loadTypeScript();
-  return t.createSourceFile(
+  const typeScript = loadTypeScript();
+  return typeScript.createSourceFile(
     IN_MEMORY_DECLARATION_FILE,
     source,
-    t.ScriptTarget.Latest,
+    typeScript.ScriptTarget.Latest,
     true,
-    t.ScriptKind.TS,
+    typeScript.ScriptKind.TS,
   );
 }
+
 function rebaseDeclarationSpecifiers(source, sourcePath, destinationPath) {
   const references = collectRelativeDeclarationSpecifierReferences(source);
   const replacements = [];
+
   for (const reference of references) {
-    const absoluteTarget = (0, node_path_1.resolve)(
-      (0, node_path_1.dirname)(sourcePath),
-      reference.specifier,
-    );
-    let rebased = (0, node_path_1.relative)(
-      (0, node_path_1.dirname)(destinationPath),
-      absoluteTarget,
-    ).replaceAll("\\", "/");
+    const absoluteTarget = resolve(dirname(sourcePath), reference.specifier);
+    let rebased = relative(dirname(destinationPath), absoluteTarget).replaceAll("\\", "/");
     if (!rebased.startsWith(".")) {
       rebased = `./${rebased}`;
     }
@@ -39,6 +35,7 @@ function rebaseDeclarationSpecifiers(source, sourcePath, destinationPath) {
       replacement: rebased,
     });
   }
+
   let rebasedSource = source;
   for (const replacement of replacements
     .filter(
@@ -55,19 +52,22 @@ function rebaseDeclarationSpecifiers(source, sourcePath, destinationPath) {
   }
   return rebasedSource;
 }
+
 function commonJsDeclarationBarrier(source) {
   const typeScript = loadTypeScript();
   const sourceFile = parseDeclarationFile(source);
+
   const specifierBarrier = (literal) => {
     if (!literal.text.startsWith(".")) {
       return undefined;
     }
-    const extension = (0, node_path_1.parse)(literal.text).ext.toLowerCase();
+    const extension = parse(literal.text).ext.toLowerCase();
     if (extension !== "" && ![".js", ".jsx", ".ts", ".tsx"].includes(extension)) {
       return undefined;
     }
     return `a relative '${literal.text}' specifier`;
   };
+
   const hasResolutionMode = (attributes) =>
     attributes?.elements.some(
       (element) =>
@@ -75,15 +75,18 @@ function commonJsDeclarationBarrier(source) {
         typeScript.isStringLiteral(element.value) &&
         (element.value.text === "import" || element.value.text === "require"),
     ) === true;
+
   const hasDefaultModifier = (node) =>
     typeScript.canHaveModifiers(node) === true &&
     typeScript
       .getModifiers(node)
       ?.some((modifier) => modifier.kind === typeScript.SyntaxKind.DefaultKeyword) === true;
+
   const isTypeOnlyStatement = (node) =>
     typeScript.isImportDeclaration(node)
       ? node.importClause?.isTypeOnly === true
       : node.isTypeOnly === true;
+
   let barrier;
   const visit = (node, insideModuleDeclaration) => {
     if (barrier !== undefined) {
@@ -191,6 +194,7 @@ function commonJsDeclarationBarrier(source) {
   }
   return barrier;
 }
+
 function collectRelativeDeclarationSpecifierReferences(source) {
   const typeScript = loadTypeScript();
   const sourceFile = typeScript.createSourceFile(
@@ -244,6 +248,7 @@ function collectRelativeDeclarationSpecifierReferences(source) {
     typeScript.forEachChild(node, visit);
   };
   visit(sourceFile);
+
   const preprocessed = typeScript.preProcessFile(source, true, true);
   for (const reference of [
     ...preprocessed.referencedFiles,
@@ -257,6 +262,7 @@ function collectRelativeDeclarationSpecifierReferences(source) {
       });
     }
   }
+
   return references
     .filter(
       (reference, index, all) =>
@@ -266,3 +272,5 @@ function collectRelativeDeclarationSpecifierReferences(source) {
     )
     .sort((left, right) => left.start - right.start);
 }
+
+module.exports = { rebaseDeclarationSpecifiers, commonJsDeclarationBarrier };
