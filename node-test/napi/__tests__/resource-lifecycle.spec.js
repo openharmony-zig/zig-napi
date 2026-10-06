@@ -23,7 +23,7 @@ function isolated(body, flags = []) {
     ${body}
   `,
     ],
-    { encoding: "utf8", timeout: 12000 },
+    { encoding: "utf8", timeout: require("../../test-timeout")(12000) },
   );
 }
 

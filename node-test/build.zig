@@ -1,5 +1,6 @@
 const std = @import("std");
 const napi_build = @import("zig-napi").napi_build;
+var test_napi_version: u32 = 8;
 
 fn addNodeAddon(
     b: *std.Build,
@@ -27,7 +28,7 @@ fn addNodeAddonWith(
         .node_api = .{
             // Keep the node-version matrix loadable on Node 12 while still
             // covering the N-API v4/v5/v6/v7/v8 gated surfaces.
-            .version = .v8,
+            .version = @enumFromInt(test_napi_version),
             .experimental = false,
         },
         .root_module_options = .{
@@ -37,6 +38,11 @@ fn addNodeAddonWith(
             .link_libc = true,
         },
     });
+    if (std.mem.eql(u8, name, "example")) {
+        const parity = b.createModule(.{ .root_source_file = b.path("../examples/basic/src/parity.zig") });
+        parity.addImport("napi", addon.root_module.import_table.get("napi").?);
+        addon.root_module.addImport("parity", parity);
+    }
     if (std.mem.eql(u8, name, "contracts")) {
         addon.root_module.addImport("counting", b.createModule(.{
             .root_source_file = b.path("../examples/allocator-custom/src/counting_allocator.zig"),
@@ -67,6 +73,7 @@ fn addNodeAddonWith(
 }
 
 pub fn build(b: *std.Build) !void {
+    test_napi_version = b.option(u32, "napi-version", "Node-API version for the E2E artifacts") orelse 8;
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 

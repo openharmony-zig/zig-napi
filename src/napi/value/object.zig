@@ -16,6 +16,7 @@ const GlobalAllocator = @import("../util/allocator.zig");
 const Reference = @import("../wrapper/reference.zig").Reference;
 const native_wrap = @import("../wrapper/native_wrap.zig");
 const options = @import("../options.zig");
+const Metadata = @import("../metadata.zig");
 
 pub const Object = struct {
     env: napi.napi_env,
@@ -50,8 +51,13 @@ pub const Object = struct {
                 errdefer Napi.cleanupStructPrefix(T, &result, initialized, allocator);
 
                 inline for (infos.@"struct".fields, 0..) |field, i| {
+                    if (comptime Metadata.get(T, field.name).skip) {
+                        if (comptime field.defaultValue()) |default| @field(result, field.name) = default else @compileError("Skipped input fields require a default value: " ++ field.name);
+                        initialized = i + 1;
+                        continue;
+                    }
                     var element: napi.napi_value = undefined;
-                    const status = napi.napi_get_named_property(env, raw, @ptrCast(field.name.ptr), &element);
+                    const status = napi.napi_get_named_property(env, raw, Metadata.name(T, field.name).ptr, &element);
                     if (status != napi.napi_ok) {
                         return NapiError.failStatus(status);
                     }
@@ -92,11 +98,13 @@ pub const Object = struct {
         const obj_fields = obj_infos.@"struct".fields;
 
         inline for (obj_fields) |field| {
-            const n_value = try Napi.to_napi_value_auto(env.raw, @field(obj, field.name), field.name);
-            try self.Set(
-                field.name,
-                n_value,
-            );
+            const config = comptime Metadata.get(obj_type, field.name);
+            if (comptime config.skip) continue;
+            const n_value = if (comptime config.nullable and @typeInfo(field.type) == .optional)
+                if (@field(obj, field.name) == null) (try Null.create(env)).raw else try Napi.to_napi_value_auto(env.raw, @field(obj, field.name), field.name)
+            else
+                try Napi.to_napi_value_auto(env.raw, @field(obj, field.name), field.name);
+            try self.DefineProperty(Metadata.name(obj_type, field.name), n_value, config.attributes orelse if (config.readonly) napi.napi_enumerable | napi.napi_configurable else napi.napi_default_jsproperty);
         }
 
         return self;
@@ -118,6 +126,27 @@ pub const Object = struct {
         if (status != napi.napi_ok) {
             return NapiError.Error.fromStatus(NapiError.Status.New(status));
         }
+    }
+
+    /// Create an own data property without invoking inherited setters (including
+    /// Object.prototype.__proto__). Assignment semantics remain available in Set.
+    pub fn Define(self: Object, key: []const u8, value: anytype) !void {
+        try self.DefineProperty(key, value, napi.napi_default_jsproperty);
+    }
+
+    pub fn DefineProperty(self: Object, key: anytype, value: anytype, attributes: napi.napi_property_attributes) !void {
+        const descriptor = napi.napi_property_descriptor{
+            .utf8name = null,
+            .name = try Napi.to_napi_value_auto(self.env, key, null),
+            .method = null,
+            .getter = null,
+            .setter = null,
+            .value = try Napi.to_napi_value_auto(self.env, value, null),
+            .attributes = attributes,
+            .data = null,
+        };
+        const status = napi.napi_define_properties(self.env, self.raw, 1, &descriptor);
+        if (status != napi.napi_ok) return NapiError.failStatus(status);
     }
 
     pub fn SetProperty(self: Object, key: anytype, value: anytype) !void {
@@ -166,6 +195,20 @@ pub const Object = struct {
         if (status != napi.napi_ok) {
             return NapiError.failStatus(status);
         }
+        return result;
+    }
+
+    pub fn HasOwn(self: Object, key: []const u8) !bool {
+        var result = false;
+        const status = napi.napi_has_own_property(self.env, self.raw, try self.keyToNapiValue(key), &result);
+        if (status != napi.napi_ok) return NapiError.failStatus(status);
+        return result;
+    }
+
+    pub fn Delete(self: Object, key: []const u8) !bool {
+        var result = false;
+        const status = napi.napi_delete_property(self.env, self.raw, try self.keyToNapiValue(key), &result);
+        if (status != napi.napi_ok) return NapiError.failStatus(status);
         return result;
     }
 

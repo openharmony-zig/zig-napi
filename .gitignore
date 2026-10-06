@@ -15,3 +15,7 @@ node-test/*.wasm
 .tmp_arkvm_runner
 .tmp_arkvm_memory_runner
 packages/zig-napi/zig/
+
+.tmp_qemu_e2e/
+
+/scripts/qemu/__pycache__/

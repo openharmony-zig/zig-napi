@@ -1,6 +1,7 @@
 const std = @import("std");
 const root = @import("addon_root");
 const napi = @import("napi");
+const Metadata = napi.exportMetadata;
 const StringBuilder = std.array_list.Managed(u8);
 
 fn shortTypeName(comptime T: type) []const u8 {
@@ -1029,8 +1030,50 @@ fn isIdentifierChar(ch: u8) bool {
         ch == '_';
 }
 
+fn classExportName(comptime Wrapped: type) []const u8 {
+    const Root = if (@TypeOf(root) == type) root else @TypeOf(root);
+    inline for (@typeInfo(Root).@"struct".decls) |decl| {
+        if (comptime @TypeOf(@field(root, decl.name)) == type) {
+            const value = comptime @field(root, decl.name);
+            if (comptime !isClassType(value)) continue;
+            if (comptime value.WrappedType == Wrapped and !Metadata.get(Root, decl.name).skip) {
+                return comptime if (Metadata.get(Root, decl.name).namespace) |ns| ns ++ "." ++ Metadata.name(Root, decl.name) else Metadata.name(Root, decl.name);
+            }
+        }
+    }
+    return shortTypeName(Wrapped);
+}
 fn emitType(state: *State, comptime T: type) ![]const u8 {
-    if (T == napi.PromiseValue) return "Promise<unknown>";
+    if (comptime @typeInfo(T) == .@"struct" and @hasDecl(T, "napi_class_type")) return comptime classExportName(T.napi_class_type);
+    if (comptime isClassType(T)) return comptime classExportName(T.WrappedType);
+    if (T == napi.PromiseValue or T == napi.Promise) return "Promise<unknown>";
+    if (T == napi.NapiValue) return "unknown";
+    if (T == napi.Object) return "Record<string, unknown>";
+    if (T == napi.Array) return "Array<unknown>";
+    if (comptime switch (@typeInfo(T)) {
+        .@"struct", .@"union", .@"enum" => @hasDecl(T, "napi_ts_kind"),
+        else => false,
+    }) {
+        if (comptime std.mem.eql(u8, T.napi_ts_kind, "tagged-union")) {
+            var result = StringBuilder.init(state.allocator);
+            defer result.deinit();
+            inline for (@typeInfo(T.napi_value_type).@"union".fields, 0..) |field, index| {
+                if (index != 0) try append(&result, " | ");
+                try appendFmt(&result, "{{ {s}: '{s}'; {s}: {s} }}", .{ T.napi_tag_name, field.name, T.napi_payload_name, try emitType(state, field.type) });
+            }
+            return result.toOwnedSlice();
+        }
+        const child = try emitType(state, T.napi_value_type);
+        if (comptime std.mem.eql(u8, T.napi_ts_kind, "iteration")) return std.fmt.allocPrint(state.allocator, "IteratorResult<{s}>", .{child});
+        if (comptime std.mem.eql(u8, T.napi_ts_kind, "reference")) return child;
+        const constructor = comptime if (std.mem.eql(u8, T.napi_ts_kind, "promise")) "Promise" else if (std.mem.eql(u8, T.napi_ts_kind, "iterator")) "IterableIterator" else if (std.mem.eql(u8, T.napi_ts_kind, "async-iterator")) "AsyncIterableIterator" else if (std.mem.eql(u8, T.napi_ts_kind, "readable-stream")) "ReadableStream" else if (std.mem.eql(u8, T.napi_ts_kind, "readable-stream-reader")) "ReadableStreamDefaultReader" else if (std.mem.eql(u8, T.napi_ts_kind, "writable-stream")) "WritableStream" else if (std.mem.eql(u8, T.napi_ts_kind, "writable-stream-writer")) "WritableStreamDefaultWriter" else if (std.mem.eql(u8, T.napi_ts_kind, "set")) "Set" else "Record<string, ";
+        if (comptime std.mem.eql(u8, T.napi_ts_kind, "record")) return std.fmt.allocPrint(state.allocator, "Record<string, {s}>", .{child});
+        return std.fmt.allocPrint(state.allocator, "{s}<{s}>", .{ constructor, child });
+    }
+    if (comptime switch (@typeInfo(T)) {
+        .@"struct", .@"union", .@"enum" => @hasDecl(T, "napi_ts_type"),
+        else => false,
+    }) return T.napi_ts_type;
     if (comptime @typeInfo(T) == .@"struct" and @hasDecl(T, "is_napi_owned")) {
         return emitType(state, T.owned_payload_type);
     }
@@ -1060,7 +1103,15 @@ fn emitType(state: *State, comptime T: type) ![]const u8 {
         return try std.fmt.allocPrint(state.allocator, "Promise<{s}>", .{result_type});
     }
 
-    if (T == napi.Buffer) return "Buffer";
+    if (T == napi.Buffer) {
+        if (comptime !napi.napi_sys.node_addon) {
+            if (!state.emitted.contains("Buffer")) {
+                try state.emitted.put("Buffer", {});
+                try append(&state.declarations, "// Opaque host buffer; use the native buffer API to access its bytes.\nexport type Buffer = object\n\n");
+            }
+        }
+        return "Buffer";
+    }
     if (T == napi.ArrayBuffer) return "ArrayBuffer";
     if (T == napi.DataView) return "DataView";
 
@@ -1168,15 +1219,20 @@ fn emitInterfaceDecl(state: *State, comptime T: type) !void {
     const info = @typeInfo(T).@"struct";
     try appendFmt(&state.declarations, "export interface {s} {{\n", .{name});
     inline for (info.fields) |field| {
+        const config = comptime Metadata.get(T, field.name);
+        if (comptime config.skip) continue;
         const field_info = @typeInfo(field.type);
         const ts_type = switch (field_info) {
             .optional => try emitType(state, field_info.optional.child),
             else => try emitType(state, field.type),
         };
-        if (field_info == .optional) {
-            try appendFmt(&state.declarations, "  {s}?: {s}\n", .{ field.name, ts_type });
+        const readonly = if (config.readonly) "readonly " else "";
+        if (field_info == .optional and !config.nullable) {
+            try appendFmt(&state.declarations, "  {s}{s}?: {s}\n", .{ readonly, Metadata.name(T, field.name), ts_type });
+        } else if (config.nullable) {
+            try appendFmt(&state.declarations, "  {s}{s}: {s} | null\n", .{ readonly, Metadata.name(T, field.name), ts_type });
         } else {
-            try appendFmt(&state.declarations, "  {s}: {s}\n", .{ field.name, ts_type });
+            try appendFmt(&state.declarations, "  {s}{s}: {s}\n", .{ readonly, Metadata.name(T, field.name), ts_type });
         }
     }
     try append(&state.declarations, "}\n\n");
@@ -1250,7 +1306,9 @@ fn emitFunctionLikeWithNames(state: *State, comptime T: type, comptime is_tsfn: 
         void => {},
         else => switch (args_info) {
             .@"struct" => {
-                if (args_info.@"struct".is_tuple) {
+                if (args_info.@"struct".fields.len == 0) {
+                    // An empty struct is also the native zero-argument shape.
+                } else if (args_info.@"struct".is_tuple) {
                     const total = args_info.@"struct".fields.len;
                     inline for (args_info.@"struct".fields, 0..) |field, idx| {
                         if (wrote_arg or idx > 0) try append(&buf, ", ");
@@ -1273,11 +1331,7 @@ fn emitFunctionLikeWithNames(state: *State, comptime T: type, comptime is_tsfn: 
     }
 
     try append(&buf, ") => ");
-    if (is_tsfn) {
-        try append(&buf, "void");
-    } else {
-        try append(&buf, try emitType(state, info.return_type));
-    }
+    try append(&buf, try emitType(state, info.return_type));
     return try buf.toOwnedSlice();
 }
 
@@ -1322,42 +1376,48 @@ fn emitMethodParams(state: *State, writer: *StringBuilder, comptime fn_type: typ
     try append(writer, ")");
 }
 
-fn emitClassDecl(state: *State, comptime ExportName: []const u8, comptime T: type) !void {
-    if (state.exported.contains(ExportName)) return;
-    try state.exported.put(ExportName, {});
-    if (state.emitted.contains(ExportName)) return;
-    try state.emitted.put(ExportName, {});
+fn emitClassDecl(state: *State, comptime ExportName: []const u8, comptime T: type, comptime namespace: ?[:0]const u8) !void {
+    const key = if (namespace) |ns| ns ++ "." ++ ExportName else ExportName;
+    if (state.exported.contains(key)) return;
+    try state.exported.put(key, {});
+    if (state.emitted.contains(key)) return;
+    try state.emitted.put(key, {});
 
+    var class_text = StringBuilder.init(state.allocator);
+    defer class_text.deinit();
     const Wrapped = T.WrappedType;
     const wrapped_info = @typeInfo(Wrapped).@"struct";
-    try appendFmt(&state.declarations, "export declare class {s} {{\n", .{ExportName});
+    try appendFmt(&class_text, "export declare class {s} {{\n", .{ExportName});
 
     if (@hasDecl(T, "HasConstructorInit") and !T.HasConstructorInit) {
-        try append(&state.declarations, "  private constructor()\n");
+        try append(&class_text, "  private constructor()\n");
     } else {
         if (@hasDecl(Wrapped, "init")) {
-            try append(&state.declarations, "  constructor(");
+            try append(&class_text, "  constructor(");
             const constructor_param_names = try state.source.getClassConstructorParamNames(ExportName);
-            try emitMethodParams(state, &state.declarations, @TypeOf(Wrapped.init), false, constructor_param_names);
-            try append(&state.declarations, "\n");
+            try emitMethodParams(state, &class_text, @TypeOf(Wrapped.init), false, constructor_param_names);
+            try append(&class_text, "\n");
         } else {
-            try append(&state.declarations, "  constructor(");
+            try append(&class_text, "  constructor(");
             inline for (wrapped_info.fields, 0..) |field, idx| {
-                if (idx > 0) try append(&state.declarations, ", ");
-                try appendFmt(&state.declarations, "{s}: {s}", .{ field.name, try emitType(state, field.type) });
+                if (idx > 0) try append(&class_text, ", ");
+                try appendFmt(&class_text, "{s}: {s}", .{ field.name, try emitType(state, field.type) });
             }
-            try append(&state.declarations, ")\n");
+            try append(&class_text, ")\n");
         }
     }
 
     inline for (wrapped_info.fields) |field| {
-        try appendFmt(&state.declarations, "  {s}: {s}\n", .{ field.name, try emitType(state, field.type) });
+        const config = comptime Metadata.get(Wrapped, field.name);
+        if (comptime config.skip) continue;
+        try appendFmt(&class_text, "  {s}{s}: {s}\n", .{ if (config.readonly) "readonly " else "", Metadata.name(Wrapped, field.name), try emitType(state, field.type) });
     }
 
     inline for (wrapped_info.decls) |decl| {
         // Native construction policy is configuration, not a JavaScript static
         // property. Keep declarations consistent with the class export filter.
-        if (comptime std.mem.eql(u8, decl.name, "arg_ownership")) continue;
+        if (comptime Metadata.reserved(decl.name) or Metadata.get(Wrapped, decl.name).skip) continue;
+        const exported_name = comptime Metadata.name(Wrapped, decl.name);
         const value = @field(Wrapped, decl.name);
         const decl_type = @TypeOf(value);
         if (@typeInfo(decl_type) == .@"fn") {
@@ -1366,30 +1426,45 @@ fn emitClassDecl(state: *State, comptime ExportName: []const u8, comptime T: typ
             const is_instance = fn_info.params.len > 0 and (fn_info.params[0].type.? == *Wrapped or fn_info.params[0].type.? == Wrapped);
             const ret = fn_info.return_type.?;
             const ret_payload = functionReturnPayloadType(ret);
+            const config = comptime Metadata.get(Wrapped, decl.name);
+            if (comptime config.kind == .getter) {
+                try appendFmt(&class_text, "  {s}get {s}(): {s}\n", .{ if (is_instance) "" else "static ", exported_name, try emitType(state, ret_payload) });
+                continue;
+            }
+            if (comptime config.kind == .setter) {
+                const parameter = fn_info.params[if (is_instance) 1 else 0].type.?;
+                try appendFmt(&class_text, "  {s}set {s}(value: {s})\n", .{ if (is_instance) "" else "static ", exported_name, try emitType(state, parameter) });
+                continue;
+            }
             const is_factory = ret_payload == Wrapped or ret_payload == *Wrapped;
             if (!is_instance and is_factory) {
                 const method_param_names = try state.source.getClassMethodParamNames(ExportName, decl.name);
-                try appendFmt(&state.declarations, "  static {s}(", .{decl.name});
-                try emitMethodParams(state, &state.declarations, decl_type, false, method_param_names);
-                try appendFmt(&state.declarations, ": {s}", .{ExportName});
-                try append(&state.declarations, "\n");
+                try appendFmt(&class_text, "  static {s}(", .{exported_name});
+                try emitMethodParams(state, &class_text, decl_type, false, method_param_names);
+                try appendFmt(&class_text, ": {s}", .{ExportName});
+                try append(&class_text, "\n");
             } else if (!is_instance) {
                 const method_param_names = try state.source.getClassMethodParamNames(ExportName, decl.name);
-                try append(&state.declarations, "  static ");
-                try emitMethodSignature(state, &state.declarations, decl_type, decl.name, false, method_param_names);
-                try append(&state.declarations, "\n");
+                try append(&class_text, "  static ");
+                try emitMethodSignature(state, &class_text, decl_type, exported_name, false, method_param_names);
+                try append(&class_text, "\n");
             } else {
                 const method_param_names = try state.source.getClassMethodParamNames(ExportName, decl.name);
-                try append(&state.declarations, "  ");
-                try emitMethodSignature(state, &state.declarations, decl_type, decl.name, true, method_param_names);
-                try append(&state.declarations, "\n");
+                try append(&class_text, "  ");
+                try emitMethodSignature(state, &class_text, decl_type, exported_name, true, method_param_names);
+                try append(&class_text, "\n");
             }
         } else if (@typeInfo(decl_type) != .type) {
-            try appendFmt(&state.declarations, "  static readonly {s}: {s}\n", .{ decl.name, try emitType(state, decl_type) });
+            try appendFmt(&class_text, "  static readonly {s}: {s}\n", .{ exported_name, try emitType(state, decl_type) });
         }
     }
 
-    try append(&state.declarations, "}\n\n");
+    try append(&class_text, "}\n\n");
+    if (namespace) |ns| {
+        const content = try std.mem.replaceOwned(u8, state.allocator, class_text.items, "export declare ", "export ");
+        defer state.allocator.free(content);
+        try appendFmt(&state.exports, "export declare namespace {s} {{\n{s}}}\n", .{ ns, content });
+    } else try append(&state.exports, class_text.items);
 }
 
 fn emitExportFunction(state: *State, comptime name: []const u8, comptime fn_value: anytype) !void {
@@ -1408,8 +1483,15 @@ fn emitExportFunction(state: *State, comptime name: []const u8, comptime fn_valu
         0;
     const effective_names = if (source_param_names) |names| names[source_offset..] else null;
     var first = true;
+    inline for (info.params) |param| {
+        if (comptime @typeInfo(param.type.?) == .@"struct" and @hasDecl(param.type.?, "napi_this")) {
+            try appendFmt(&state.exports, "this: {s}", .{try emitType(state, param.type.?)});
+            first = false;
+        }
+    }
     inline for (info.params, 0..) |param, idx| {
         if (has_env and idx == 0) continue;
+        if (comptime @typeInfo(param.type.?) == .@"struct" and @hasDecl(param.type.?, "napi_this")) continue;
         if (!first) try append(&state.exports, ", ");
         first = false;
         const ts_type = try emitType(state, param.type.?);
@@ -2030,6 +2112,7 @@ fn appendHeader(writer: *StringBuilder, header: []const u8) !void {
 }
 
 fn generate(allocator: std.mem.Allocator, io: std.Io, root_source_path: []const u8, header: []const u8) ![]u8 {
+    @setEvalBranchQuota(1_000_000);
     var source = SourceResolver.init(allocator, io, root_source_path);
     var state = State.init(allocator, &source);
     defer state.deinit();
@@ -2037,34 +2120,56 @@ fn generate(allocator: std.mem.Allocator, io: std.Io, root_source_path: []const 
     const Root = if (@TypeOf(root) == type) root else @TypeOf(root);
     const root_info = @typeInfo(Root).@"struct";
     inline for (root_info.fields) |field| {
-        const value = @field(root, field.name);
+        if (comptime Metadata.get(Root, field.name).skip) continue;
+        const export_name = comptime Metadata.name(Root, field.name);
+        const namespace = comptime Metadata.get(Root, field.name).namespace;
+        const export_start = state.exports.items.len;
+        const value = comptime @field(root, field.name);
         if (comptime @typeInfo(field.type) == .@"fn") {
-            try emitExportFunction(&state, field.name, value);
+            try emitExportFunction(&state, export_name, value);
         } else if (comptime isClassType(field.type)) {
-            try emitClassDecl(&state, field.name, field.type);
+            try emitClassDecl(&state, Metadata.name(Root, field.name), field.type, Metadata.get(Root, field.name).namespace);
         } else {
-            try emitExportConst(&state, field.name, value);
+            try emitExportConst(&state, export_name, value);
+        }
+        if (namespace) |ns| {
+            if (comptime isClassType(field.type)) continue;
+            const content = try std.mem.replaceOwned(u8, state.allocator, state.exports.items[export_start..], "export declare ", "export ");
+            defer state.allocator.free(content);
+            state.exports.shrinkRetainingCapacity(export_start);
+            try appendFmt(&state.exports, "export declare namespace {s} {{\n{s}}}\n", .{ ns, content });
         }
     }
 
     inline for (root_info.decls) |decl| {
-        if (comptime std.mem.eql(u8, decl.name, "napi_allocator")) {
-            continue;
-        }
-        const value = @field(root, decl.name);
+        if (comptime Metadata.reserved(decl.name) or Metadata.get(Root, decl.name).skip) continue;
+        const export_name = comptime Metadata.name(Root, decl.name);
+        const namespace = comptime Metadata.get(Root, decl.name).namespace;
+        const export_start = state.exports.items.len;
+        const value = comptime @field(root, decl.name);
         const decl_type = @TypeOf(value);
         if (comptime @typeInfo(decl_type) == .@"fn") {
-            try emitExportFunction(&state, decl.name, value);
+            try emitExportFunction(&state, export_name, value);
         } else if (comptime decl_type == type and isClassType(value)) {
-            try emitClassDecl(&state, decl.name, value);
+            try emitClassDecl(&state, export_name, value, namespace);
         } else if (comptime decl_type == type and isObjectLikeStruct(value)) {
             try emitInterfaceDecl(&state, value);
+            if (comptime namespace != null or !std.mem.eql(u8, export_name, shortTypeName(value))) {
+                try appendFmt(&state.exports, "export type {s} = {s}\n", .{ export_name, shortTypeName(value) });
+            }
         } else if (comptime decl_type == type and @typeInfo(value) == .@"enum") {
             try emitEnumDecl(&state, value);
         } else if (comptime isClassType(decl_type)) {
-            try emitClassDecl(&state, decl.name, decl_type);
+            try emitClassDecl(&state, export_name, decl_type, namespace);
         } else if (comptime @typeInfo(decl_type) != .type) {
-            try emitExportConst(&state, decl.name, value);
+            try emitExportConst(&state, export_name, value);
+        }
+        if (namespace) |name_| {
+            if (comptime (decl_type == type and isClassType(value)) or isClassType(decl_type)) continue;
+            const content = try std.mem.replaceOwned(u8, state.allocator, state.exports.items[export_start..], "export declare ", "export ");
+            defer state.allocator.free(content);
+            state.exports.shrinkRetainingCapacity(export_start);
+            try appendFmt(&state.exports, "export declare namespace {s} {{\n{s}}}\n", .{ name_, content });
         }
     }
 

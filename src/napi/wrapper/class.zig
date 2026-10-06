@@ -8,6 +8,7 @@ const GlobalAllocator = @import("../util/allocator.zig");
 const PayloadRegistry = @import("../util/payload_registry.zig").PayloadRegistry;
 const Buffer = @import("./buffer.zig").Buffer;
 const ArrayBuffer = @import("./arraybuffer.zig").ArrayBuffer;
+const Metadata = @import("../metadata.zig");
 const options = @import("../options.zig");
 
 /// Ownership policy for the converted `init`/factory arguments of a class.
@@ -511,7 +512,32 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
         /// payload of a completely different addon. It is therefore never cast
         /// or dereferenced before `InstanceRegistry` confirms it, and an
         /// unregistered pointer is reported as a receiver mismatch.
+        const type_tag = if (options.selectedNapiVersion().isAtLeast(.v8)) napi.napi_type_tag{
+            .lower = std.hash.Wyhash.hash(0x5a49474e415049, @typeName(T)),
+            .upper = std.hash.Wyhash.hash(if (HasInit) 1 else 2, @typeName(T)),
+        } else {};
+
+        pub fn matchesInstance(env: napi.napi_env, raw: napi.napi_value) bool {
+            return unwrapInstance(env, raw) != null;
+        }
+
+        pub fn nativeValue(env: napi.napi_env, raw: napi.napi_value) !*T {
+            const instance = unwrapInstance(env, raw) orelse return NapiError.failTypeError("Expected native class instance of {s}", .{class_name});
+            return &instance.value;
+        }
+
+        fn tagInstance(env: napi.napi_env, raw: napi.napi_value) bool {
+            if (comptime options.selectedNapiVersion().isAtLeast(.v8)) {
+                return napi.napi_type_tag_object(env, raw, &type_tag) == napi.napi_ok;
+            }
+            return true;
+        }
+
         fn unwrapInstance(env: napi.napi_env, this_obj: napi.napi_value) ?*InstanceData {
+            if (comptime options.selectedNapiVersion().isAtLeast(.v8)) {
+                var matches = false;
+                if (napi.napi_check_object_type_tag(env, this_obj, &type_tag, &matches) != napi.napi_ok or !matches) return null;
+            }
             var data: ?*anyopaque = null;
             const status = napi.napi_unwrap(env, this_obj, &data);
             if (status != napi.napi_ok) return null;
@@ -788,7 +814,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
             // factory method instead of running `init` or field conversion.
             if (context.pending_factory) |instance| {
                 context.pending_factory = null;
-                if (napi.napi_wrap(env, call.this_obj, instance, finalize_callback, null, null) != napi.napi_ok) {
+                if (!tagInstance(env, call.this_obj) or napi.napi_wrap(env, call.this_obj, instance, finalize_callback, null, null) != napi.napi_ok) {
                     instance.destroy();
                     throwTypeError(env, class_name ++ " instance could not be wrapped");
                     return null;
@@ -808,7 +834,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
 
             const instance = constructFromArguments(env, args_raw[0..]) orelse return null;
 
-            if (napi.napi_wrap(env, call.this_obj, instance, finalize_callback, null, null) != napi.napi_ok) {
+            if (!tagInstance(env, call.this_obj) or napi.napi_wrap(env, call.this_obj, instance, finalize_callback, null, null) != napi.napi_ok) {
                 instance.destroy();
                 throwTypeError(env, class_name ++ " instance could not be wrapped");
                 return null;
@@ -1015,7 +1041,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
         /// declaration generator filters the same names out of the type
         /// metadata.
         fn isWrapperDeclaration(comptime decl_name: []const u8) bool {
-            return std.mem.eql(u8, decl_name, "arg_ownership");
+            return Metadata.reserved(decl_name);
         }
 
         fn define_class(env: napi.napi_env) !napi.napi_value {
@@ -1026,6 +1052,8 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
 
             // Count methods
             inline for (decls) |decl| {
+                const method_config = comptime Metadata.get(T, decl.name);
+                if (comptime method_config.skip) continue;
                 const decl_type = @TypeOf(@field(T, decl.name));
                 if (@typeInfo(decl_type) == .@"fn") {
                     const fn_name = decl.name;
@@ -1046,6 +1074,8 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
 
             // Process instance fields
             inline for (fields, 0..) |field, field_index| {
+                const field_config = comptime Metadata.get(T, field.name);
+                if (comptime field_config.skip) continue;
                 const FieldAccessor = struct {
                     fn getter(getter_env: napi.napi_env, info: napi.napi_callback_info) callconv(.c) napi.napi_value {
                         var args_raw: [0]napi.napi_value = undefined;
@@ -1133,13 +1163,13 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                 };
 
                 properties[prop_idx] = napi.napi_property_descriptor{
-                    .utf8name = @ptrCast(field.name.ptr),
+                    .utf8name = Metadata.name(T, field.name).ptr,
                     .name = null,
                     .method = null,
                     .getter = FieldAccessor.getter,
-                    .setter = FieldAccessor.setter,
+                    .setter = if (field_config.readonly) null else FieldAccessor.setter,
                     .value = null,
-                    .attributes = napi.napi_default,
+                    .attributes = field_config.attributes orelse napi.napi_default,
                     .data = context,
                 };
                 prop_idx += 1;
@@ -1148,6 +1178,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
             // Process const declarations as static value properties
             // Following napi-rs pattern: use value field with static attribute
             inline for (decls) |decl| {
+                if (comptime Metadata.get(T, decl.name).skip) continue;
                 if (comptime isConstDecl(decl.name)) {
                     const const_value = @field(T, decl.name);
 
@@ -1156,7 +1187,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                     const static_value = try Napi.to_napi_value_auto(env, const_value, decl.name);
 
                     properties[prop_idx] = napi.napi_property_descriptor{
-                        .utf8name = @ptrCast(decl.name.ptr),
+                        .utf8name = Metadata.name(T, decl.name).ptr,
                         .name = null,
                         .method = null,
                         .getter = null,
@@ -1171,6 +1202,8 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
 
             // Process methods
             inline for (decls) |decl| {
+                const method_config = comptime Metadata.get(T, decl.name);
+                if (comptime method_config.skip) continue;
                 const decl_type = @TypeOf(@field(T, decl.name));
                 if (@typeInfo(decl_type) == .@"fn") {
                     const fn_name = decl.name;
@@ -1195,7 +1228,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                         if (is_factory_method) {
                             const FactoryWrapper = factory_method_callback(fn_name);
                             properties[prop_idx] = napi.napi_property_descriptor{
-                                .utf8name = @ptrCast(fn_name.ptr),
+                                .utf8name = Metadata.name(T, fn_name).ptr,
                                 .name = null,
                                 .method = FactoryWrapper.call,
                                 .getter = null,
@@ -1281,18 +1314,37 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                             };
 
                             properties[prop_idx] = napi.napi_property_descriptor{
-                                .utf8name = @ptrCast(fn_name.ptr),
+                                .utf8name = Metadata.name(T, fn_name).ptr,
                                 .name = null,
-                                .method = MethodWrapper.call,
-                                .getter = null,
-                                .setter = null,
+                                .method = if (method_config.kind == .method) MethodWrapper.call else null,
+                                .getter = if (method_config.kind == .getter) MethodWrapper.call else null,
+                                .setter = if (method_config.kind == .setter) MethodWrapper.call else null,
                                 .value = null,
-                                .attributes = comptime if (is_instance_method) napi.napi_default else napi.napi_static,
+                                .attributes = (method_config.attributes orelse napi.napi_default) | (if (is_instance_method) @as(napi.napi_property_attributes, 0) else napi.napi_static),
                                 .data = context,
                             };
                         }
                         prop_idx += 1;
                     }
+                }
+            }
+
+            // One descriptor per property: merge computed getter/setter pairs
+            // before handing them to the host, which otherwise overwrites one.
+            var descriptor_index: usize = 0;
+            while (descriptor_index < prop_idx) : (descriptor_index += 1) {
+                var other = descriptor_index + 1;
+                while (other < prop_idx) {
+                    if (std.mem.eql(u8, std.mem.span(properties[descriptor_index].utf8name), std.mem.span(properties[other].utf8name))) {
+                        if (properties[descriptor_index].method != null or properties[other].method != null or properties[descriptor_index].value != null or properties[other].value != null or (properties[descriptor_index].getter != null and properties[other].getter != null) or (properties[descriptor_index].setter != null and properties[other].setter != null)) {
+                            releaseContext(context);
+                            return NapiError.failTypeError("Duplicate class property name", .{});
+                        }
+                        properties[descriptor_index].getter = properties[descriptor_index].getter orelse properties[other].getter;
+                        properties[descriptor_index].setter = properties[descriptor_index].setter orelse properties[other].setter;
+                        prop_idx -= 1;
+                        properties[other] = properties[prop_idx];
+                    } else other += 1;
                 }
             }
 
@@ -1388,4 +1440,34 @@ pub fn ClassWithoutInit(comptime T: type) type {
 pub fn isClass(T: anytype) bool {
     const type_name = @typeName(T);
     return std.mem.indexOf(u8, type_name, "ClassWrapper") != null;
+}
+
+/// A borrowed native class instance. The JS object keeps the native payload
+/// alive for this call; use CreateRef to keep it beyond the handle scope.
+pub fn ClassInstance(comptime T: type, comptime HasInit: bool) type {
+    return struct {
+        env: napi.napi_env,
+        raw: napi.napi_value,
+        value: *T,
+        pub const napi_custom = true;
+        pub const napi_ts_type = helper.shortTypeName(T);
+        pub const napi_class_type = T;
+        const Self = @This();
+        const ClassType = ClassWrapper(T, HasInit);
+        pub fn from_raw(env: napi.napi_env, raw: napi.napi_value) Self {
+            return .{ .env = env, .raw = raw, .value = ClassType.nativeValue(env, raw) catch @panic("invalid class instance") };
+        }
+        pub fn matches_napi_value(env: napi.napi_env, raw: napi.napi_value) !bool {
+            return ClassType.matchesInstance(env, raw);
+        }
+        pub fn from_napi_value_with_allocator(env: napi.napi_env, raw: napi.napi_value, _: std.mem.Allocator) !Self {
+            return .{ .env = env, .raw = raw, .value = try ClassType.nativeValue(env, raw) };
+        }
+        pub fn to_napi_value(self: Self, _: napi.napi_env) !napi.napi_value {
+            return self.raw;
+        }
+        pub fn CreateRef(self: Self) !@import("reference.zig").Reference(Self) {
+            return @import("reference.zig").Reference(Self).New(napi_env.Env.from_raw(self.env), self);
+        }
+    };
 }

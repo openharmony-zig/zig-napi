@@ -1,6 +1,17 @@
 const std = @import("std");
+pub fn isThis(comptime T: type) bool {
+    return @typeInfo(T) == .@"struct" and @hasDecl(T, "napi_this") and T.napi_this;
+}
 const napi = @import("napi-sys").napi_sys;
 const math = std.math;
+
+/// Explicit conversion protocol for library and application-defined wrappers.
+pub fn isCustom(comptime T: type) bool {
+    return switch (@typeInfo(T)) {
+        .@"struct", .@"union", .@"enum" => @hasDecl(T, "napi_custom") and T.napi_custom,
+        else => false,
+    };
+}
 
 pub const StringMode = enum {
     Utf8,

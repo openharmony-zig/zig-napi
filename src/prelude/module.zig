@@ -7,6 +7,7 @@ const Object = @import("../napi/value.zig").Object;
 const NapiError = @import("../napi/wrapper/error.zig");
 const Napi = @import("../napi/util/napi.zig").Napi;
 const Undefined = @import("../napi/value/undefined.zig").Undefined;
+const Metadata = @import("../napi/metadata.zig");
 const options = @import("../napi/options.zig");
 
 pub fn NODE_API_MODULE_WITH_INIT(
@@ -14,6 +15,7 @@ pub fn NODE_API_MODULE_WITH_INIT(
     comptime root: type,
     init: ?fn (env: Env, exports: Object) anyerror!?Object,
 ) void {
+    @setEvalBranchQuota(1_000_000);
     if (@hasDecl(build_options, "napi_tsgen") and build_options.napi_tsgen) {
         return;
     }
@@ -34,7 +36,27 @@ pub fn NODE_API_MODULE_WITH_INIT(
             NapiError.throwCurrent(inner_env);
         }
 
+        fn defineExport(exports: Object, comptime member: []const u8, value: napi.napi_value) !void {
+            const config = comptime Metadata.get(root, member);
+            var destination = exports;
+            if (comptime config.namespace) |namespace| {
+                if (try exports.HasOwn(namespace)) {
+                    destination = try exports.Get(namespace, Object);
+                } else {
+                    destination = try Object.Create(Env.from_raw(exports.env));
+                    try exports.Define(namespace, destination);
+                }
+            }
+            const attributes: napi.napi_property_attributes = config.attributes orelse if (config.readonly)
+                napi.napi_enumerable | napi.napi_configurable
+            else
+                napi.napi_default_jsproperty;
+            try destination.DefineProperty(Metadata.name(root, member), value, attributes);
+        }
+
         fn inner_init(env: napi.napi_env, exports: napi.napi_value) callconv(.c) napi.napi_value {
+            @setEvalBranchQuota(1_000_000);
+            @import("retain_module.zig").retain();
             const inner_env = Env.from_raw(env);
             // Module initialization runs inside the embedding frame; keep that
             // frame intact and do not leak initialization errors into it.
@@ -46,27 +68,33 @@ pub fn NODE_API_MODULE_WITH_INIT(
             const undefined_value = Undefined.New(inner_env);
 
             inline for (root_infos.@"struct".fields) |field| {
-                const value = Napi.to_napi_value(env, @field(root, field.name), field.name) catch |err| {
+                if (comptime Metadata.get(root, field.name).skip) continue;
+                const value = Napi.to_napi_value(env, @field(root, field.name), Metadata.name(root, field.name)) catch |err| {
                     reportInitFailure(inner_env, err);
                     return undefined_value.raw;
                 };
 
-                export_obj.Set(field.name, value) catch |err| {
+                defineExport(export_obj, field.name, value) catch |err| {
                     reportInitFailure(inner_env, err);
                     return undefined_value.raw;
                 };
             }
 
             inline for (root_infos.@"struct".decls) |decl| {
-                if (comptime std.mem.eql(u8, decl.name, "napi_allocator")) {
+                if (comptime Metadata.reserved(decl.name) or Metadata.get(root, decl.name).skip) {
                     continue;
                 }
                 const origin_value = @field(root, decl.name);
-                const value = Napi.to_napi_value(env, origin_value, decl.name) catch |err| {
+                if (comptime @TypeOf(origin_value) == type) {
+                    // Object schemas/type aliases produce declarations only.
+                    // Enum objects and class constructors have runtime exports.
+                    if (comptime @typeInfo(origin_value) != .@"enum" and !@import("../napi/wrapper/class.zig").isClass(origin_value)) continue;
+                }
+                const value = Napi.to_napi_value(env, origin_value, Metadata.name(root, decl.name)) catch |err| {
                     reportInitFailure(inner_env, err);
                     return undefined_value.raw;
                 };
-                export_obj.Set(decl.name, value) catch |err| {
+                defineExport(export_obj, decl.name, value) catch |err| {
                     reportInitFailure(inner_env, err);
                     return undefined_value.raw;
                 };
@@ -125,6 +153,7 @@ pub fn NODE_API_MODULE_WITH_INIT(
     comptime {
         if (build_options.node_addon) {
             if (options.isWasmNodeAddon()) {
+                @import("napi-sys").wasmCrash.exportHooks();
                 @export(&ModuleImpl.node_init, .{ .linkage = .strong, .name = "napi_register_wasm_v1" });
             } else {
                 @export(&ModuleImpl.node_init, .{ .linkage = .strong, .name = "napi_register_module_v1" });

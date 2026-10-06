@@ -79,7 +79,10 @@ pub fn Reference(comptime T: type) type {
         /// once the body runs, the body owns it and must hand it back with
         /// `Unref`/`Delete` (or keep it, for example in a class field).
         pub fn from_napi_value(env: napi.napi_env, raw_value: napi.napi_value) !Self {
-            const value = T.from_raw(env, raw_value);
+            // Node-API 10 permits references to primitive values. Validate the
+            // wrapped type before promotion so ObjectRef still requires an
+            // object and rejected aggregate conversions roll back completely.
+            const value = try @import("../util/napi.zig").Napi.from_napi_value_auto(env, raw_value, T);
             return try Self.New(Env.from_raw(env), value);
         }
 

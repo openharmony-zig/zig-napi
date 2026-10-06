@@ -41,7 +41,7 @@
   "dependencies": {
     "@emnapi/core": "2.0.0-alpha.5",
     "@emnapi/runtime": "2.0.0-alpha.5",
-    "@napi-rs/wasm-runtime": "1.2.4",
+    "@napi-rs/wasm-runtime": "1.2.5",
     "emnapi": "2.0.0-alpha.5"
   },
   "devDependencies": {

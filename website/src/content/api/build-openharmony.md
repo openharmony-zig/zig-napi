@@ -94,9 +94,11 @@ OpenHarmony builds use Node-API v8 by default. If the addon exports wrappers gat
 
 Passing `napi_module` lets the configured version flow into both the addon root module and the `napi` wrapper module.
 
-## ArkVM Host Test Mode
+## QEMU Runtime Regression
 
-Passing `-Darkvm-test=true` builds a host Linux x64 artifact under `zig-out/arkvm-host`. This is intended for ArkVM host tests where device-only OpenHarmony libraries should not be linked.
+OHOS regression uses a signed UIAbility HAP installed in a real OpenHarmony QEMU guest. The shared E2E suites run through the application's native host and verify fresh result IDs, exact test groups, finalizers and allocator cleanup across repeated launches.
+
+The repository's `pnpm test:e2e:qemu -- <runner arguments>` pipeline builds both OHOS and Node.js products, runs the five OHOS HAP suites, and tests native Node.js plus both WASI flavors inside a Linux QEMU guest. See [QEMU runner setup and evidence](https://github.com/openharmony-zig/zig-napi/blob/main/docs/QEMU_E2E.md).
 
 ## Helper Functions
 

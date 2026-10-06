@@ -1,0 +1,236 @@
+{
+  "date": "2026-10-06",
+  "branch": "feat/napi-rs-parity-e2e",
+  "baseCommit": "95625728a5f13a77f4164d43ecb273608be38f11",
+  "upstream": {
+    "repository": "https://github.com/napi-rs/napi-rs",
+    "commit": "a713fcb377ee28be5abd7b6a560e3eb4f31444ca",
+    "napi": "3.14.1",
+    "napi-derive": "3.6.11",
+    "napi-sys": "3.4.0",
+    "cli": "3.10.7",
+    "wasm-runtime": "1.2.5"
+  },
+  "status": "passed",
+  "matrixPhaseCount": 31,
+  "matrixSha256": "a1ab64f3570c2e50fb36764801bc3091a1ea71c4c11115684db93b2af6d2c54f",
+  "sourceSnapshotSha256": "d01147634922dd9079027d830b490d65e02098b73137d8f6e3c356e1f2d90a93",
+  "sourceSnapshotFileCount": 132,
+  "node": {
+    "environment": "Linux zig-napi-node 6.8.0-134-generic #134-Ubuntu SMP PREEMPT_DYNAMIC Fri Jun 26 18:43:11 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux\n0.16.0\n{\"version\":\"v24.14.0\",\"arch\":\"x64\",\"platform\":\"linux\",\"napi\":\"10\"}\n",
+    "nodeArchiveSha256": "41cd79bb7877c81605a9e68ec4c91547774f46a40c67a17e34d7179ef11729df",
+    "zigArchiveSha256": "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00",
+    "zigArchiveUrl": "https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz",
+    "nativeArtifactsSha256": {
+      "async_tasks.linux-x64-gnu.node": "3e81af70550be01c1b95655e357952e16354b136f1b9627247d463e00f361a01",
+      "classes.linux-x64-gnu.node": "052624d1ae1d36751ba132396cc811e8b90fa273a8e490cf96c829e438a48b9a",
+      "compat_mode.linux-x64-gnu.node": "0d46ad60cf4590caee4f07ad7fec23fd96c3e8adfa12dfe0ebf01f76ff9613e7",
+      "contracts.linux-x64-gnu.node": "865dae76fa9d34570589b8f4f85f57d972921def82d2cbd7019d0513fa47f13f",
+      "conversion.linux-x64-gnu.node": "9ffe138e80d0fa67fb89c4be3bd08c671fd8bc606f0dfc07ae91d32b6b3fe8db",
+      "example.linux-x64-gnu.node": "9482a4570ac79410853074d538e4f56d64f6631f1a1b6e0051f20a0b818dc684"
+    },
+    "testArchiveSha256": "656ec68bd1ffc2fa0568c2b9220a35f87f19312bb7de49f36ce855fbabebd87d",
+    "runs": [
+      {
+        "runId": "9701c105b42e4871bda1de3bba6201d7",
+        "exitCode": 0,
+        "passed": 277,
+        "skipped": 0
+      },
+      {
+        "runId": "9701c105b42e4871bda1de3bba6201d7",
+        "exitCode": 0,
+        "passed": 277,
+        "skipped": 0
+      },
+      {
+        "runId": "9701c105b42e4871bda1de3bba6201d7",
+        "exitCode": 0,
+        "passed": 277,
+        "skipped": 0
+      }
+    ],
+    "wasmPassed": 10,
+    "wasmSkipped": 0,
+    "wasmOomSha256": "603266e386ce85317fd050cf829647ca672045f131cca25842504f67587dcded"
+  },
+  "ohos": {
+    "basic": {
+      "abi": "arm64-v8a",
+      "qemuVersion": {
+        "micro": 3,
+        "minor": 0,
+        "major": 11
+      },
+      "guest": "Linux localhost 6.6.101 #1 SMP PREEMPT Mon Oct  5 10:50:04 UTC 2026 aarch64 Toybox",
+      "hapSha256": "06e8fff9c65e0538caa198882385fa3fdc2693748c727a856c0f38b240e7365a",
+      "runId": "148c2090eacd4cb7814feef90273c626",
+      "groups": [
+        "primitives",
+        "objects-arrays",
+        "binary",
+        "functions-classes",
+        "external",
+        "async",
+        "unions-enums",
+        "errors-tsfn",
+        "parity",
+        "parity-protocols",
+        "parity-lifetimes",
+        "parity-streams"
+      ],
+      "runs": [
+        {
+          "status": "ok",
+          "groupCount": 12
+        },
+        {
+          "status": "ok",
+          "groupCount": 12
+        },
+        {
+          "status": "ok",
+          "groupCount": 12
+        }
+      ]
+    },
+    "allocator-builtin": {
+      "abi": "arm64-v8a",
+      "qemuVersion": {
+        "micro": 3,
+        "minor": 0,
+        "major": 11
+      },
+      "guest": "Linux localhost 6.6.101 #1 SMP PREEMPT Mon Oct  5 10:50:04 UTC 2026 aarch64 Toybox",
+      "hapSha256": "bce02b6811a04d3c5bd88c7bf8d6932a093f736e2a870d0533b85beb24f42c7b",
+      "runId": "8260feba3bbd4dbf985ebb1a4345faf5",
+      "groups": [
+        "allocator-builtin"
+      ],
+      "runs": [
+        {
+          "status": "ok",
+          "groupCount": 1
+        },
+        {
+          "status": "ok",
+          "groupCount": 1
+        },
+        {
+          "status": "ok",
+          "groupCount": 1
+        }
+      ]
+    },
+    "allocator-custom": {
+      "abi": "arm64-v8a",
+      "qemuVersion": {
+        "micro": 3,
+        "minor": 0,
+        "major": 11
+      },
+      "guest": "Linux localhost 6.6.101 #1 SMP PREEMPT Mon Oct  5 10:50:04 UTC 2026 aarch64 Toybox",
+      "hapSha256": "708c9c13393c579ab28d83a3742c4fff25567b2dac10243658c9555899dbcd97",
+      "runId": "6afa3e3fd49a4f02986398ae1db751c8",
+      "groups": [
+        "allocator-custom"
+      ],
+      "runs": [
+        {
+          "status": "ok",
+          "groupCount": 1
+        },
+        {
+          "status": "ok",
+          "groupCount": 1
+        },
+        {
+          "status": "ok",
+          "groupCount": 1
+        }
+      ]
+    },
+    "init": {
+      "abi": "arm64-v8a",
+      "qemuVersion": {
+        "micro": 3,
+        "minor": 0,
+        "major": 11
+      },
+      "guest": "Linux localhost 6.6.101 #1 SMP PREEMPT Mon Oct  5 10:50:04 UTC 2026 aarch64 Toybox",
+      "hapSha256": "57d5b61669c25503832f5a2824ffe9930fbe0be950df56b238fba85d68fef0b7",
+      "runId": "ab1a0d7491d54563acdbce3b7056dfb8",
+      "groups": [
+        "init"
+      ],
+      "runs": [
+        {
+          "status": "ok",
+          "groupCount": 1
+        },
+        {
+          "status": "ok",
+          "groupCount": 1
+        },
+        {
+          "status": "ok",
+          "groupCount": 1
+        }
+      ]
+    },
+    "memory": {
+      "abi": "arm64-v8a",
+      "qemuVersion": {
+        "micro": 3,
+        "minor": 0,
+        "major": 11
+      },
+      "guest": "Linux localhost 6.6.101 #1 SMP PREEMPT Mon Oct  5 10:50:04 UTC 2026 aarch64 Toybox",
+      "hapSha256": "6efb90de3ee5fe315cea51a5c7e428da413d76c0d8ce12c824a382f3658bcff4",
+      "runId": "f5aab8c26a044b6dac42bb450025e910",
+      "groups": [
+        "memory-tracker",
+        "memory-sync-binary",
+        "memory-finalizers",
+        "memory-async",
+        "memory-tsfn"
+      ],
+      "runs": [
+        {
+          "status": "ok",
+          "groupCount": 5
+        },
+        {
+          "status": "ok",
+          "groupCount": 5
+        },
+        {
+          "status": "ok",
+          "groupCount": 5
+        }
+      ]
+    }
+  },
+  "memoryFinalizerAssertions": {
+    "external": 128,
+    "classes": 96
+  },
+  "supplemental": {
+    "zigUnitPassed": 31,
+    "hostNodePassed": 277,
+    "cliPassed": 37,
+    "packedFreshInstallPassed": 1,
+    "hostWasiThreads": {
+      "passed": 234,
+      "nativeOnlySkipped": 43
+    },
+    "hostWasiSingle": {
+      "passed": 234,
+      "nativeOnlySkipped": 43
+    },
+    "typescriptDeclarations": "passed",
+    "lint": "passed",
+    "frozenLockfileInstall": "passed"
+  },
+  "remoteCiExecuted": false
+}

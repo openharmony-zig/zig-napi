@@ -207,7 +207,9 @@ pub const ReapService = struct {
 /// preferable to a blocking mutex: it also works on single threaded targets,
 /// where a contended blocking lock is unavailable.
 fn spinLock(mutex: *std.atomic.Mutex) void {
+    @import("napi-sys").wasmCrash.check();
     while (!mutex.tryLock()) {
+        @import("napi-sys").wasmCrash.check();
         std.Thread.yield() catch {};
     }
 }
@@ -275,6 +277,7 @@ const WasmFutex = if (wasm_futex_available) struct {
     const timeout_ns = std.time.ns_per_ms;
 
     fn wait(word: *const std.atomic.Value(u32), expected: u32) void {
+        @import("napi-sys").wasmCrash.check();
         _ = asm volatile (
             \\ local.get %[ptr]
             \\ local.get %[expected]
@@ -434,6 +437,7 @@ fn retireWasmOperation(node: *WasmOperationNode) void {
 /// for was settled: that is why the barrier settles what it can instead of
 /// trusting the count to describe it.
 fn wasmEnvCleanupPrepare() callconv(.c) void {
+    @import("napi-sys").wasmCrash.check();
     if (wasm_env_disposing.swap(true, .acq_rel)) return;
 
     // Claim every node under the lock before touching any of them: a concurrent

@@ -191,13 +191,23 @@ function assertOptionalBoolean(value, field) {
  * value must fail the build instead of producing a loader that cannot
  * instantiate the module.
  */
-function resolveWasmConfig(config) {
+function resolveWasmConfig(config, threads = true) {
   const wasm = config?.wasm ?? {};
   if (wasm === null || typeof wasm !== "object" || Array.isArray(wasm)) {
     throw new WasiConfigError("napi.wasm must be an object");
   }
-  const initialMemory = assertPageCount(
+  const threadedInitialMemory = assertPageCount(
     wasm.initialMemory,
+    "initialMemory",
+    DEFAULT_INITIAL_MEMORY,
+  );
+  const threadlessInitialMemory = assertPageCount(
+    wasm.threadlessInitialMemory,
+    "threadlessInitialMemory",
+    threadedInitialMemory,
+  );
+  const initialMemory = assertPageCount(
+    threads ? threadedInitialMemory : threadlessInitialMemory,
     "initialMemory",
     DEFAULT_INITIAL_MEMORY,
   );
@@ -219,6 +229,11 @@ function resolveWasmConfig(config) {
     // instead of failing a grow. Leave room explicitly.
     throw new WasiConfigError(
       `napi.wasm.initialMemory and napi.wasm.maximumMemory are both ${initialMemory} pages, which leaves no room to grow; the Zig/wasi-libc allocator grows linear memory on every allocation past the initial size, so set maximumMemory above initialMemory`,
+    );
+  }
+  if (threadedInitialMemory >= maximumMemory || threadlessInitialMemory >= maximumMemory) {
+    throw new WasiConfigError(
+      "napi.wasm.threadlessInitialMemory must be below maximumMemory to leave allocator growth headroom",
     );
   }
   const browser = wasm.browser ?? {};
@@ -249,11 +264,11 @@ function resolveWasmConfig(config) {
  * `wasi-max-memory-pages`), which declares them once per build; the CLI never
  * probes the build script for them.
  */
-function wasiMemoryBuildArgs(config) {
+function wasiMemoryBuildArgs(config, threads = true) {
   const wasm = config?.wasm ?? {};
   const args = [];
-  if (wasm.initialMemory !== undefined && wasm.initialMemory !== null) {
-    args.push(`-Dwasi-initial-memory-pages=${resolveWasmConfig(config).initialMemory}`);
+  if (wasm.initialMemory != null || (!threads && wasm.threadlessInitialMemory != null)) {
+    args.push(`-Dwasi-initial-memory-pages=${resolveWasmConfig(config, threads).initialMemory}`);
   }
   if (wasm.maximumMemory !== undefined && wasm.maximumMemory !== null) {
     args.push(`-Dwasi-max-memory-pages=${resolveWasmConfig(config).maximumMemory}`);
@@ -277,6 +292,67 @@ const WASI_ROLLBACK_REGISTRY_SYMBOL = "napi.rs.wasi.rollback.registry.v1";
  * therefore waits for the counter to reach zero on real event-loop turns.
  */
 const EMNAPI_CONTEXT_LIFECYCLE = `
+${require("./binding-target.cjs").BINDING_TARGET_STAMP_HELPER}
+const __wasiThreadCrashFlag = typeof SharedArrayBuffer === "function" ? new Int32Array(new SharedArrayBuffer(4)) : undefined;
+const __wasiThreadCrashReport = typeof SharedArrayBuffer === "function" ? new SharedArrayBuffer(4096) : undefined;
+let __wasiAddonCrashFlag;
+let __wasiThreadCrashCause;
+let __wasiThreadCrashError;
+let __wasiThreadCrashDisposePromise;
+let __wasiReentryClosed = false;
+
+function __hasWasiThreadCrashed() {
+  return __wasiThreadCrashCause !== undefined || (__wasiThreadCrashFlag !== undefined && Atomics.load(__wasiThreadCrashFlag, 0) !== 0);
+}
+function __captureWasiAddonCrashFlag(instance, memory) {
+  const getAddress = instance.exports.napi_wasm_thread_crash_flag_address;
+  if (typeof getAddress !== "function" || typeof SharedArrayBuffer !== "function" || !(memory.buffer instanceof SharedArrayBuffer)) return;
+  const address = getAddress() >>> 0;
+  if (!address || address % 4 || address + 4 > memory.buffer.byteLength) return;
+  __wasiAddonCrashFlag = new Int32Array(memory.buffer, address, 1);
+  for (const worker of __wasiWorkers) worker.postMessage?.({ __zigNapiAddonCrashFlag: __wasiAddonCrashFlag });
+}
+function __getWasiThreadCrashError() {
+  if (!__wasiThreadCrashError) {
+    __wasiThreadCrashError = new Error("WASI binding cannot be disposed after a worker thread crashed");
+    __wasiThreadCrashError.code = "ERR_NAPI_WASI_THREAD_CRASH";
+  }
+  let cause = __wasiThreadCrashCause;
+  try {
+    const header = new Int32Array(__wasiThreadCrashReport, 0, 3);
+    if (!cause && Atomics.load(header, 0) === 2) {
+      const length = Atomics.load(header, 1);
+      if (length > 0 && length <= __wasiThreadCrashReport.byteLength - 12) {
+        const report = JSON.parse(new TextDecoder().decode(new Uint8Array(__wasiThreadCrashReport, 12, length)));
+        cause = new Error(report.message); cause.name = report.name; cause.stack = report.stack;
+        __wasiThreadCrashError.workerThreadId = Atomics.load(header, 2);
+      }
+    }
+  } catch {}
+  if (cause) __wasiThreadCrashError.cause = cause;
+  return __wasiThreadCrashError;
+}
+function __closeWasiReentry() {
+  __wasiReentryClosed = true;
+  try { __emnapiContext?.refCounter?.refHandle?.unref(); } catch {}
+}
+function __checkWasiThreadCrash() {
+  if (__hasWasiThreadCrashed()) { __closeWasiReentry(); throw __getWasiThreadCrashError(); }
+}
+function __wasiSetImmediate(callback) {
+  return __scheduleMacrotask(() => { if (!__wasiReentryClosed) callback(); });
+}
+function __disposeWasiBindingAfterThreadCrash() {
+  if (__wasiThreadCrashDisposePromise) return __wasiThreadCrashDisposePromise;
+  __closeWasiReentry();
+  let workers;
+  try { workers = __terminateWasiWorkers(); } catch (error) { workers = Promise.reject(error); }
+  __wasiThreadCrashDisposePromise = Promise.resolve(workers).then(
+    () => { throw __getWasiThreadCrashError(); },
+    error => { throw __attachCleanupErrors(__getWasiThreadCrashError(), [error]); },
+  );
+  return __wasiThreadCrashDisposePromise;
+}
 const __wasiDisposeSymbol = Symbol.for("${WASI_DISPOSE_SYMBOL}");
 const __wasiWorkers = new Set();
 let __napiInstance;
@@ -349,6 +425,7 @@ function __attachCleanupErrors(error, cleanupErrors) {
 }
 
 function __prepareWasmEnvCleanup() {
+  __checkWasiThreadCrash();
   if (__emnapiWasmEnvCleanupPrepared) {
     return;
   }
@@ -402,6 +479,7 @@ const __WASM_ENV_CLEANUP_DRAIN_TURNS = 128;
 const __WASM_ENV_CLEANUP_BLIND_DRAIN_TURNS = 4;
 
 function __drainWasmEnvCleanup() {
+  __checkWasiThreadCrash();
   if (__emnapiWasmEnvCleanupDrained || !__emnapiWasmEnvCleanupRan) {
     return;
   }
@@ -428,6 +506,7 @@ function __drainWasmEnvCleanup() {
       await new Promise((resolve) => {
         __scheduleMacrotask(resolve);
       });
+      __checkWasiThreadCrash();
       if (!observable) {
         continue;
       }
@@ -479,6 +558,7 @@ function __drainWasmEnvCleanup() {
 }
 
 function __destroyEmnapiContext() {
+  __checkWasiThreadCrash();
   if (__emnapiContextDestroyed || __emnapiContext === undefined) {
     __emnapiContextDestroyed = true;
     return;
@@ -579,6 +659,7 @@ function __startWasiDisposal() {
 }
 
 function __disposeWasiBinding() {
+  if (__hasWasiThreadCrashed()) return __disposeWasiBindingAfterThreadCrash();
   if (__wasiDisposePromise) {
     return __wasiDisposePromise;
   }
@@ -596,8 +677,11 @@ function __disposeWasiBinding() {
   try {
     result = __startWasiDisposal();
   } catch (error) {
-    __wasiDisposePromise = undefined;
-    rejectDispose(error);
+    if (__hasWasiThreadCrashed()) {
+      __wasiThreadCrashDisposePromise = disposePromise;
+      __closeWasiReentry();
+      Promise.resolve(__terminateWasiWorkers()).then(() => rejectDispose(__getWasiThreadCrashError()), cleanupError => rejectDispose(__attachCleanupErrors(__getWasiThreadCrashError(), [cleanupError])));
+    } else { __wasiDisposePromise = undefined; rejectDispose(error); }
     return disposePromise;
   }
   Promise.resolve(result).then(
@@ -606,8 +690,11 @@ function __disposeWasiBinding() {
       resolveDispose(value);
     },
     (error) => {
-      __wasiDisposePromise = undefined;
-      rejectDispose(error);
+      if (__hasWasiThreadCrashed()) {
+        __wasiThreadCrashDisposePromise = disposePromise;
+        __closeWasiReentry();
+        Promise.resolve(__terminateWasiWorkers()).then(() => rejectDispose(__getWasiThreadCrashError()), cleanupError => rejectDispose(__attachCleanupErrors(__getWasiThreadCrashError(), [cleanupError])));
+      } else { __wasiDisposePromise = undefined; rejectDispose(error); }
     },
   );
   return disposePromise;
@@ -624,6 +711,7 @@ function __publishWasiDispose(exports) {
     value: __disposeWasiBinding,
     writable: false,
   });
+  __napiStampBindingTarget(exports, __zigNapiBindingTarget);
 }
 
 function __finishWasiInitializationRollback(cleanupErrors) {
@@ -816,7 +904,7 @@ function __createWasiWorker(filename) {
       return new Worker(filename, {
         env: process.env,
         execArgv: __workerExecArgv,
-        workerData: { hostRoot: __hostRoot, rootDir: __rootDir },
+        workerData: { hostRoot: __hostRoot, rootDir: __rootDir, crashFlag: __wasiThreadCrashFlag, crashReport: __wasiThreadCrashReport, addonCrashFlag: __wasiAddonCrashFlag },
       });
     } catch (error) {
       if (!error || error.code !== "ERR_WORKER_INVALID_EXEC_ARGV") {
@@ -923,6 +1011,7 @@ function createWasiNodeBinding(options) {
     initialMemory = DEFAULT_INITIAL_MEMORY,
     maximumMemory = DEFAULT_MAXIMUM_MEMORY,
   } = options;
+  require("./binding-target.cjs").assertBindingTargetIdentFree(options.idents || []);
   const wasiPackageName = optionalPackageName(packageName, platformArchABI);
   const memoryName = threads ? "__sharedMemory" : "__wasmMemory";
   const workerImports = threads ? `const { Worker } = require("node:worker_threads");\n` : "";
@@ -939,6 +1028,7 @@ function createWasiNodeBinding(options) {
     ? `    onCreateWorker() {
       const worker = __createWasiWorker(__nodePath.join(__dirname, "wasi-worker.mjs"));
       __wasiWorkers.add(worker);
+      worker.on("error", error => { __wasiThreadCrashCause = error; Atomics.store(__wasiThreadCrashFlag, 0, 1); });
       worker.onmessage = ({ data }) => {
         __wasmCreateOnMessageForFsProxy(__nodeFs)(data);
       };
@@ -979,6 +1069,7 @@ function createWasiNodeBinding(options) {
 
   return `/* eslint-disable */
 /* auto-generated by zig-napi */
+const __zigNapiBindingTarget = ${JSON.stringify(platformArchABI)};
 
 const __nodeFs = require("node:fs");
 const __nodePath = require("node:path");
@@ -1225,7 +1316,7 @@ ${CAPTURE_EMNAPI_AUTO_DESTROY_LISTENER("process")}${instantiationMemoryHint({ th
 try {
   const __finishAutoDestroyCapture = __captureEmnapiAutoDestroyListener();
   try {
-    __emnapiContext = __emnapiCreateContext({ autoDestroy: false });
+    __emnapiContext = __emnapiCreateContext({ autoDestroy: false, features: { setImmediate: __wasiSetImmediate } });
     __emnapiContext.suppressDestroy();
   } finally {
     __finishAutoDestroyCapture?.();
@@ -1250,6 +1341,7 @@ ${workerOption}    overwriteImports(importObject) {
     },
     beforeInit({ instance }) {
       __napiInstance = instance;
+      __captureWasiAddonCrashFlag(instance, ${memoryName});
       for (const name of Object.keys(instance.exports)) {
         if (name.startsWith("__napi_register__")) {
           instance.exports[name]();
@@ -1294,6 +1386,7 @@ function createWasiBrowserBinding(options) {
     errorEvent = false,
     threads = true,
   } = options;
+  require("./binding-target.cjs").assertBindingTargetIdentFree(options.idents || []);
   const effectiveAsyncInit = asyncInit || threads;
   const fsImport = fs
     ? buffer
@@ -1362,6 +1455,8 @@ const __workerPoolSize = __normalizeWorkerCount(
         type: "module",
       });
       __wasiWorkers.add(worker);
+      if (__wasiAddonCrashFlag) worker.postMessage({ __zigNapiAddonCrashFlag: __wasiAddonCrashFlag });
+      worker.addEventListener("error", event => { __wasiThreadCrashCause = event.error || new Error(event.message); Atomics.store(__wasiThreadCrashFlag, 0, 1); });
 ${workerFsHandler}${workerErrorHandler}      return worker;
     },
 `
@@ -1369,6 +1464,8 @@ ${workerFsHandler}${workerErrorHandler}      return worker;
 
   return `/* eslint-disable */
 /* auto-generated by zig-napi */
+const __zigNapiBindingTarget = ${JSON.stringify(threads ? "wasm32-wasi" : "wasm32-wasip1")};
+export const __napiBindingTarget = __zigNapiBindingTarget;
 import {
   emnapiAsyncWorkPlugin as __emnapiAsyncWorkPlugin,
   emnapiTSFNPlugin as __emnapiTSFNPlugin,
@@ -1417,7 +1514,7 @@ let __wasiModule;
 let __napiModule;
 
 try {
-  __emnapiContext = __emnapiCreateContext({ autoDestroy: false });
+  __emnapiContext = __emnapiCreateContext({ autoDestroy: false, features: { setImmediate: __wasiSetImmediate } });
   __emnapiContext.suppressDestroy();
 ${emnapiInjectBuffer}  ;({
     instance: __napiInstance,
@@ -1438,6 +1535,7 @@ ${workerOption}    overwriteImports(importObject) {
     },
     beforeInit({ instance }) {
       __napiInstance = instance;
+      __captureWasiAddonCrashFlag(instance, ${memoryName});
       for (const name of Object.keys(instance.exports)) {
         if (name.startsWith("__napi_register__")) {
           instance.exports[name]();
@@ -1466,7 +1564,7 @@ const WASI_WORKER_TEMPLATE = (() => {
 import { createRequire } from "node:module";
 import { parse } from "node:path";
 import { WASI } from "node:wasi";
-import { parentPort, Worker, workerData } from "node:worker_threads";
+import { parentPort, threadId, Worker, workerData } from "node:worker_threads";
 
 const require = createRequire(import.meta.url);
 
@@ -1476,7 +1574,10 @@ const {
   getDefaultContext,
   instantiateNapiModuleSync,
   MessageHandler,
-} = require("@napi-rs/wasm-runtime");
+} = (() => {
+  try { return require("@napi-rs/wasm-runtime"); }
+  catch (error) { __raiseWasiThreadCrashFlags(error); throw error; }
+})();
 
 if (parentPort) {
   parentPort.on("message", (data) => {
@@ -1544,6 +1645,14 @@ const handler = new MessageHandler({
   },
 });
 
+${require("./worker-crash.cjs")}
+const __beforeReportError = handler.beforeReportError;
+handler.beforeReportError = function (...args) {
+  if (!__raiseWasiThreadCrashFlags(args[0])) {
+    try { this.instance?.exports?.napi_wasm_thread_crashed?.(); } catch {}
+  }
+  return __beforeReportError?.apply(this, args);
+};
 globalThis.onmessage = function (event) {
   handler.handle(event);
 };
@@ -1634,7 +1743,14 @@ const handler = new MessageHandler({
 ${errorHandler}
 });
 
+let __addonCrashFlag;
+const __beforeReportError = handler.beforeReportError;
+handler.beforeReportError = function (...args) {
+  if (__addonCrashFlag) { try { Atomics.store(__addonCrashFlag, 0, 1); } catch {} }
+  return __beforeReportError?.apply(this, args);
+};
 globalThis.onmessage = function (event) {
+  if (event.data?.__zigNapiAddonCrashFlag) { __addonCrashFlag = event.data.__zigNapiAddonCrashFlag; return; }
   handler.handle(event);
 };
 `;
@@ -1662,6 +1778,8 @@ function createWasiDeferredBrowserBinding(options) {
 
   return `/* eslint-disable */
 /* auto-generated by zig-napi */
+export const __napiBindingTarget = "wasm32-wasip1";
+${require("./binding-target.cjs").BINDING_TARGET_STAMP_HELPER}
 import {
   emnapiAsyncWorkPlugin as __emnapiAsyncWorkPlugin,
   emnapiTSFNPlugin as __emnapiTSFNPlugin,
@@ -2396,6 +2514,7 @@ ${emnapiInjectBuffer}    let __napiModule;
         }
       },
     }));
+    __napiStampBindingTarget(__napiModule.exports, __napiBindingTarget);
     if (__lifecycleState === "pending") {
       __lifecycleState = "succeeded";
     }
@@ -2675,16 +2794,18 @@ export function dispose(): Promise<void>;
  * the binding module re-exported through \`export =\`, which is what the CJS
  * loader provides.
  */
-function createWasiBindingTypeDef(bindingModuleSpecifier, hasTypeDef = true) {
-  const bindingType = `typeof import("${bindingModuleSpecifier}")`;
-  if (hasTypeDef) {
-    return `declare const binding: ${bindingType};
-export = binding;
-`;
-  }
-  return `declare const binding: Record<string, unknown>;
-export = binding;
-`;
+function createWasiBindingTypeDef(source = "", sourcePath, destinationPath) {
+  if (!source.trim()) return "declare const binding: Record<string, unknown>;\nexport = binding;\n";
+  // Re-declare actual exports: importing the adjacent .cjs from its own .d.cts
+  // resolves back to this file and gives TypeScript a circular binding type.
+  const { commonJsDeclarationBarrier, rebaseDeclarationSpecifiers } = require("./declarations.cjs");
+  const barrier = commonJsDeclarationBarrier(source);
+  if (barrier)
+    throw new WasiConfigError(
+      `The root declaration contains ${barrier}; use a CommonJS compatible declaration for WASI`,
+    );
+  if (!sourcePath || !destinationPath) return source;
+  return rebaseDeclarationSpecifiers(source, sourcePath, destinationPath);
 }
 
 /** Root `browser.js` entry: re-exports the wasm package of the flavor. */

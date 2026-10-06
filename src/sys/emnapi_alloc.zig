@@ -159,12 +159,18 @@ var lock_entries: u32 = 0;
 var lock_spins: u32 = 0;
 
 fn lockAcquire() void {
+    @import("wasm_crash.zig").check();
     if (!needs_lock) return;
     var spins: u32 = 0;
     while (!lock.tryLock()) {
+        @import("wasm_crash.zig").check();
         spins +%= 1;
         std.atomic.spinLoopHint();
     }
+    // Catch up with growth by another instance before touching shared headers.
+    // This object and the Zig page allocator have separate free lists, so both
+    // allocation entry paths must refresh their own worker's view.
+    _ = @wasmMemoryGrow(0, 0);
     lock_entries +%= 1;
     lock_spins +%= spins;
 }

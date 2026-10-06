@@ -2,7 +2,7 @@ import fs from "node:fs";
 import { createRequire } from "node:module";
 import { parse } from "node:path";
 import { WASI } from "node:wasi";
-import { parentPort, Worker, workerData } from "node:worker_threads";
+import { parentPort, threadId, Worker, workerData } from "node:worker_threads";
 
 const require = createRequire(import.meta.url);
 
@@ -12,7 +12,10 @@ const {
   getDefaultContext,
   instantiateNapiModuleSync,
   MessageHandler,
-} = require("@napi-rs/wasm-runtime");
+} = (() => {
+  try { return require("@napi-rs/wasm-runtime"); }
+  catch (error) { __raiseWasiThreadCrashFlags(error); throw error; }
+})();
 
 if (parentPort) {
   parentPort.on("message", (data) => {
@@ -114,6 +117,68 @@ const handler = new MessageHandler({
   },
 });
 
+function __raiseWasiThreadCrashFlags(error) {
+  try {
+    __writeCrashReport(workerData.crashReport, error)
+  } catch {}
+  try {
+    Atomics.store(workerData.crashFlag, 0, 1)
+  } catch {}
+  const addonCrashFlag = workerData.addonCrashFlag
+  if (!(addonCrashFlag instanceof Int32Array)) {
+    return false
+  }
+  try {
+    Atomics.store(addonCrashFlag, 0, 1)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function __writeCrashReport(report, error) {
+  if (!(report instanceof SharedArrayBuffer) || report.byteLength <= 12) {
+    return
+  }
+  const header = new Int32Array(report, 0, 3)
+  if (Atomics.compareExchange(header, 0, 0, 1) !== 0) {
+    return
+  }
+  let length = 0
+  try {
+    const body = new Uint8Array(report, 12)
+    const isObject =
+      error !== null && (typeof error === 'object' || typeof error === 'function')
+    const name = isObject && typeof error.name === 'string' ? error.name : 'Error'
+    const message = isObject && typeof error.message === 'string'
+      ? error.message
+      : String(error)
+    const stack = isObject && typeof error.stack === 'string' ? error.stack : undefined
+    const encoder = new TextEncoder()
+    let bytes = encoder.encode(JSON.stringify({ name, message, stack }))
+    if (bytes.length > body.length) {
+      bytes = encoder.encode(
+        JSON.stringify({ name, message: message.slice(0, body.length >> 3) }),
+      )
+    }
+    if (bytes.length <= body.length) {
+      body.set(bytes)
+      length = bytes.length
+    }
+    Atomics.store(header, 2, threadId)
+  } finally {
+    Atomics.store(header, 1, length)
+    Atomics.store(header, 0, 2)
+  }
+}
+
+const __beforeReportError = handler.beforeReportError;
+handler.beforeReportError = function (...args) {
+  if (!__raiseWasiThreadCrashFlags(args[0])) {
+    try { this.instance?.exports?.napi_wasm_thread_crashed?.(); } catch {}
+  }
+  return __beforeReportError?.apply(this, args);
+};
 globalThis.onmessage = function (event) {
   handler.handle(event);
 };

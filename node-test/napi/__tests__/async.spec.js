@@ -37,7 +37,7 @@ function runIsolated(body, extraArgs = [], timeoutMs = 5000) {
   return childProcess().spawnSync(
     process.execPath,
     [...extraArgs, "-e", `const a=require(${JSON.stringify(loaderPath)})("async_tasks");${body}`],
-    { encoding: "utf8", timeout: timeoutMs },
+    { encoding: "utf8", timeout: require("../../test-timeout")(timeoutMs) },
   );
 }
 
@@ -745,7 +745,8 @@ nativeOnlyTest("an abandoned producer finishes after its environment is torn dow
   await worker.terminate();
   // The addon's state is process wide: the counter proves the task ran to its
   // end (reading its own captured input) after the environment was destroyed.
-  await delay(2000);
+  const deadline = Date.now() + require("../../test-timeout")(5000);
+  while (native.completedThreadedOperations() <= before && Date.now() < deadline) await delay(50);
   const after = native.completedThreadedOperations();
   t.true(after > before, `abandoned producer did not finish (${before} -> ${after})`);
   // ... and the runtime is still usable by the surviving environment.

@@ -35,8 +35,16 @@ const handler = new MessageHandler({
       },
     });
   },
+
 });
 
+let __addonCrashFlag;
+const __beforeReportError = handler.beforeReportError;
+handler.beforeReportError = function (...args) {
+  if (__addonCrashFlag) { try { Atomics.store(__addonCrashFlag, 0, 1); } catch {} }
+  return __beforeReportError?.apply(this, args);
+};
 globalThis.onmessage = function (event) {
+  if (event.data?.__zigNapiAddonCrashFlag) { __addonCrashFlag = event.data.__zigNapiAddonCrashFlag; return; }
   handler.handle(event);
 };

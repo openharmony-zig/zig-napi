@@ -1,2 +1,2 @@
-declare const binding: typeof import("./async_tasks.wasip1.cjs");
+declare const binding: Record<string, unknown> & { __napiBindingTarget: "wasm32-wasip1" };
 export = binding;

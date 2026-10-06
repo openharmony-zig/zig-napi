@@ -13,6 +13,7 @@ pub const leak_tracker_live_bytes = tracker.leak_tracker_live_bytes;
 pub const leak_tracker_abort = tracker.leak_tracker_abort;
 pub const tracked_alloc_roundtrip = tracker.tracked_alloc_roundtrip;
 pub const begin_finalizer_state_check = finalizer_state.begin_finalizer_state_check;
+pub const finalizer_stats = finalizer_state.finalizer_stats;
 
 pub const hello = sync.hello;
 pub const get_object = sync.get_object;

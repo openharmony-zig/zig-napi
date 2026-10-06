@@ -34,6 +34,25 @@ pub const PromiseValue = struct {
         return from_raw(env, raw);
     }
 
+    pub fn then(self: Self, callback: anytype) !Self {
+        return self.chain("then", callback);
+    }
+
+    pub fn catchError(self: Self, callback: anytype) !Self {
+        return self.chain("catch", callback);
+    }
+
+    pub fn finally(self: Self, callback: anytype) !Self {
+        return self.chain("finally", callback);
+    }
+
+    fn chain(self: Self, comptime method: []const u8, callback: anytype) !Self {
+        const Fn = @import("./function.zig").Function(struct { @TypeOf(callback) }, Self);
+        const object = @import("./object.zig").Object.from_raw(self.env, self.raw);
+        const function = try object.Get(method, Fn);
+        return function.Apply(object, .{callback});
+    }
+
     pub fn toPromise(self: Self) Promise {
         return Promise.from_raw(self.env, self.raw);
     }

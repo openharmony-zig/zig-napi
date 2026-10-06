@@ -37,8 +37,10 @@
   },
   "dependencies": {
     "@inquirer/prompts": "^8.5.2",
-    "@napi-rs/cli": "3.9.1",
-    "commander": "^9.5.0"
+    "@napi-rs/cli": "3.10.7",
+    "commander": "^9.5.0",
+    "emnapi": "2.0.0-alpha.5",
+    "typescript": "6.0.3"
   },
   "engines": {
     "node": "^20.17.0 || ^22.13.0 || >=23.5.0"

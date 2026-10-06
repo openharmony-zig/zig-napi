@@ -14,9 +14,9 @@ of the host that loads it.
 
 | Component | Node.js |
 | --- | --- |
-| `zig-napi` build CLI | `^20.17.0 \|\| ^22.13.0 \|\| >=23.5.0` — the range `@napi-rs/cli` 3.9.1 and `@inquirer/prompts` require (Node 21 and 22.0–22.12 are not supported by them) |
+| `zig-napi` build CLI | `^20.17.0 \|\| ^22.13.0 \|\| >=23.5.0` — the range `@napi-rs/cli` 3.10.7 and `@inquirer/prompts` require (Node 21 and 22.0–22.12 are not supported by them) |
 | Native addons (`*.node`) | any Node.js exposing the N-API version the addon targets; see the supported runtime matrix in the repository README |
-| WASI loaders (`*.wasi.cjs`, `*.wasip1.cjs`, `*-browser.js`) | `^20.19.0 \|\| ^22.13.0 \|\| >=23.5.0`, the range `@napi-rs/wasm-runtime` 1.2.4 requires. The threaded flavor additionally needs `SharedArrayBuffer`; the threadless `wasm32-wasip1` flavor runs without cross-origin isolation |
+| WASI loaders (`*.wasi.cjs`, `*.wasip1.cjs`, `*-browser.js`) | `^20.19.0 \|\| ^22.13.0 \|\| >=23.5.0`, the range `@napi-rs/wasm-runtime` 1.2.5 requires. The threaded flavor additionally needs `SharedArrayBuffer`; the threadless `wasm32-wasip1` flavor runs without cross-origin isolation |
 
 ## Install
 
@@ -113,6 +113,12 @@ Node addon builds use the hand-written `src/sys/node.zig` sys layer, matching na
 
 On Windows MSVC, `nodeAddonBuild` follows napi-rs and does not require a `node.lib` lookup by default; the Node-API symbols are resolved from the current Node.js process at runtime. If a build needs to force an import library, pass `.node_import_lib`, set `NODE_LIB_FILE`, or set `NODE_LIB_DIR`. Windows GNU builds follow napi-rs' `LIBNODE_PATH`, `LIBPATH`, then `PATH` search for `libnode.dll` before linking `node`.
 
+## napi-rs parity and E2E
+
+The 2026-10-06 baseline is napi-rs `a713fcb` (`napi` 3.14.1, CLI 3.10.7, wasm-runtime 1.2.5). New bindings cover captured closures, typed Promise/iterator/stream protocols, owned collections and JSON, shared/weak references, native Promise waiting, class identity, export metadata and TSFN callback results. See [the parity inventory](docs/NAPI_RS_PARITY.md) for APIs, ownership rules and platform boundaries.
+
+OHOS runtime regression is mandatory in QEMU through signed UIAbility HAPs. The combined [QEMU E2E pipeline](docs/QEMU_E2E.md) also cross-builds the Node products and runs their full regression and WASM acceptance in a Linux QEMU guest. Run `pnpm test:e2e:qemu -- <runner arguments>` from the repository root.
+
 ## Usage
 
 ```zig
@@ -160,7 +166,7 @@ pnpm test
 
 It installs the addon as `zig-out/node/hello.<platform-arch-abi>.node`, for example `hello.darwin-arm64.node`, `hello.linux-x64-gnu.node`, or `hello.win32-x64-msvc.node`. For WASI threads, use `zig-napi build --target wasm32-wasip1-threads`; the CLI maps that to Zig's `wasm32-wasi` target with atomics/shared-memory features, and the output follows napi-rs naming as `hello.wasm32-wasi.wasm`.
 
-WASI addons link emnapi's `libemnapi-basic-napi-rs.a` from a `node_modules/emnapi` install (`emnapi` `2.0.0-alpha.5`, a prerelease to pin exactly, with `@emnapi/core` and `@emnapi/runtime` at the same version and `@napi-rs/wasm-runtime` `1.2.4` for the loaders), which the build looks for next to the addon project and upwards. `--target wasm32-wasip1` builds the single-threaded flavor as `hello.wasm32-wasip1.wasm` (`hello.wasip1.cjs`, unshared imported memory), and `--target wasm32-wasip1-threads` builds the shared-memory flavor as `hello.wasm32-wasi.wasm` (`hello.wasi.cjs`, worker pool); the single-threaded flavor additionally ships a deferred ESM binding (`hello.wasip1-deferred.js`) with `instantiate()`/`createInstance()`/`dispose()`. Both are passed to Zig as `-Dtarget=wasm32-wasi` — Zig only knows that spelling — with `-Dcpu=baseline+atomics+bulk_memory+mutable_globals` on the threaded one, which is also the flag that selects the flavor.
+WASI addons link emnapi's `libemnapi-basic-napi-rs.a` from a `node_modules/emnapi` install (`emnapi` `2.0.0-alpha.5`, a prerelease to pin exactly, with `@emnapi/core` and `@emnapi/runtime` at the same version and `@napi-rs/wasm-runtime` `1.2.5` for the loaders), which the build looks for next to the addon project and upwards. `--target wasm32-wasip1` builds the single-threaded flavor as `hello.wasm32-wasip1.wasm` (`hello.wasip1.cjs`, unshared imported memory), and `--target wasm32-wasip1-threads` builds the shared-memory flavor as `hello.wasm32-wasi.wasm` (`hello.wasi.cjs`, worker pool); the single-threaded flavor additionally ships a deferred ESM binding (`hello.wasip1-deferred.js`) with `instantiate()`/`createInstance()`/`dispose()`. Both are passed to Zig as `-Dtarget=wasm32-wasi` — Zig only knows that spelling — with `-Dcpu=baseline+atomics+bulk_memory+mutable_globals` on the threaded one, which is also the flag that selects the flavor.
 
 Async work and thread-safe functions come from the `@emnapi/core` plugins in both flavors; the threaded flavor runs them on the plugin's JavaScript worker threads through the `emnapi_async_worker_create` / `emnapi_async_worker_init` exports. That is deliberately **not** napi-rs' implementation, which links emnapi's full C composition and uses the uv/libuv thread pool over real wasi pthreads: Zig 0.16 cannot build a multithreaded wasm module, so a zig-napi WASI addon has no libuv/Tokio-style async API. Memory stays a loader decision — the module imports memory with the linker minimum (257 pages by default) and a 4 GiB maximum, and the loader's `wasm.initialMemory` (4000 pages by default) must stay below `wasm.maximumMemory`, because the Zig allocator grows the linear memory past its current size. A **single** allocation is capped at 1 GiB − 64 KiB (a wasm32 bump-allocator size-class limit: `malloc`/Zig `Allocator` return null/an out-of-memory error instead of trapping above it, and a failed `realloc` keeps the old block), while the total memory can still be 4 GiB across many allocations. Build-side overrides: `-Dwasi-initial-memory-pages=<pages>`, `-Dwasi-max-memory-pages=<pages>`, `-Dwasi-stack-size=<bytes>`, plus `-Demnapi-link-dir=<dir>` (or `EMNAPI_LINK_DIR`) and `-Demnapi-archive=<name-or-path>` to select a different emnapi archive.
 

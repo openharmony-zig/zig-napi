@@ -158,7 +158,7 @@ jobs:
       # raw C allocator edges (overflow, class-limit requests, alignments) that
       # have to return null instead of trapping.
       - name: WASI concurrent producer and allocator acceptance (both flavors)
-        run: node --test --test-timeout=300000 node-test/wasm/concurrency.test.cjs
+        run: node --test --test-timeout=300000 node-test/wasm/concurrency.test.cjs node-test/wasm/crash.test.cjs node-test/wasm/strings.test.cjs
 
       # The allocator's checks behave differently per optimization mode: Debug
       # and ReleaseSafe have the checked arithmetic and the header canary,
@@ -186,7 +186,7 @@ jobs:
       - name: WASI allocator acceptance in ReleaseSafe and ReleaseFast
         run: |
           for dir in zig-out/opt-release-safe zig-out/opt-release-fast; do
-            ZIG_NAPI_WASM_ARTIFACT_ROOT="$PWD/$dir" node --test --test-timeout=300000 node-test/wasm/concurrency.test.cjs
+            ZIG_NAPI_WASM_ARTIFACT_ROOT="$PWD/$dir" node --test --test-timeout=300000 node-test/wasm/concurrency.test.cjs node-test/wasm/crash.test.cjs node-test/wasm/strings.test.cjs
             ZIG_NAPI_WASM_ARTIFACT_ROOT="$PWD/$dir" node --test --test-timeout=300000 node-test/wasm/abi.test.cjs
           done
 
@@ -206,7 +206,7 @@ jobs:
       - name: Build and run the worker out-of-memory acceptance
         run: |
           cd node-test
-          zig build -Dtarget=wasm32-wasi -Dcpu=baseline+atomics+bulk_memory+mutable_globals -Dwasi-max-memory-pages=520 --summary all
+          zig build -Dtarget=wasm32-wasi -Dcpu=baseline+atomics+bulk_memory+mutable_globals -Dwasi-max-memory-pages=1024 --summary all
           mkdir -p ../zig-out/oom-artifacts
           cp async_tasks.wasm32-wasi.wasm ../zig-out/oom-artifacts/
           zig build -Dtarget=wasm32-wasi -Dcpu=baseline+atomics+bulk_memory+mutable_globals --summary all
