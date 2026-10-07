@@ -511,7 +511,7 @@ test("weak references collect their target and survive environment termination",
     ],
     { encoding: "utf8", timeout: require("../../test-timeout")(20000) },
   );
-  t.is(result.error, undefined, result.error?.message);
+  t.is(result.error, undefined, result.error && result.error.message);
   t.is(result.status, 0, result.stderr);
   t.true(result.stdout.includes("WEAK_REFERENCE_CLEANUP_OK"));
 });
@@ -557,7 +557,7 @@ test("weak references collect their target and survive environment termination",
       ],
       { encoding: "utf8", timeout: require("../../test-timeout")(20000) },
     );
-    t.is(result.error, undefined, result.error?.message);
+    t.is(result.error, undefined, result.error && result.error.message);
     t.is(result.status, 0, result.stderr);
     t.true(result.stdout.includes("PROMISE_WAITER_CLEANUP_OK"));
   },
