@@ -5,6 +5,9 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { NapiCli, writeJsBinding } = require("@napi-rs/cli");
 const { Command } = require("commander");
+const upstream = require("./upstream.cjs");
+const scaffold = require("./scaffold.cjs");
+const { zigTarget } = require("./targets.cjs");
 const {
   WasiConfigError,
   WASI_WORKER_TEMPLATE,
@@ -131,10 +134,10 @@ function resolveNewTargets(flags) {
 }
 
 function resolveNonInteractiveTargets(flags) {
-  const targets = flags.enableAllTargets
-    ? availableTargets
-    : flags.targets.length
-      ? flags.targets
+  const targets = flags.targets.length
+    ? flags.targets
+    : flags.enableAllTargets
+      ? availableTargets
       : flags.enableDefaultTargets
         ? defaultTargets
         : [];
@@ -218,7 +221,7 @@ async function promptNewOptions(projectDir, flags) {
     };
   }
 
-  const { checkbox, input } = await import("@inquirer/prompts");
+  const { checkbox, input, select, confirm } = await import("@inquirer/prompts");
   const targetPath =
     projectDir ||
     (await input({
@@ -241,10 +244,28 @@ async function promptNewOptions(projectDir, flags) {
       validate: validateAddonName,
     }));
 
-  const targets = flags.enableAllTargets
-    ? availableTargets
-    : flags.targets.length
-      ? flags.targets
+  flags.minNodeApi ??= await select({
+    message: "Minimum Node-API version",
+    choices: Array.from({ length: 10 }, (_, i) => ({
+      name: `napi${i + 1} (${scaffold.nodeEngine(i + 1)})`,
+      value: i + 1,
+    })),
+    default: 4,
+  });
+  flags.license ??= await input({ message: "License for open-sourced project", default: "MIT" });
+  flags.enableTypeDef ??= await confirm({
+    message: "Enable type definition auto-generation",
+    default: true,
+  });
+  flags.enableGithubActions ??= await confirm({
+    message: "Enable GitHub Actions CI",
+    default: true,
+  });
+
+  const targets = flags.targets.length
+    ? flags.targets
+    : flags.enableAllTargets
+      ? availableTargets
       : await checkbox({
           loop: false,
           message: "Choose target(s) your addon will be compiled to",
@@ -310,22 +331,9 @@ function repairZigFingerprint(projectDir) {
   );
 }
 
-function napiOptions(flags) {
-  readZigNapiConfig(path.resolve(process.cwd(), flags.cwd || "."), flags);
-  return {
-    cwd: path.resolve(process.cwd(), flags.cwd || "."),
-    configPath: flags.configPath,
-    packageJsonPath: flags.packageJsonPath,
-    npmDir: flags.npmDir,
-    outputDir: flags.outputDir,
-    buildOutputDir: flags.buildOutputDir,
-    tagStyle: flags.tagStyle,
-    ghRelease: flags.ghRelease,
-    ghReleaseName: flags.ghReleaseName,
-    ghReleaseId: flags.ghReleaseId,
-    skipOptionalPublish: flags.skipOptionalPublish,
-    dryRun: flags.dryRun,
-  };
+async function napiOptions(flags) {
+  await readZigNapiConfig(path.resolve(process.cwd(), flags.cwd || "."), flags);
+  return { ...flags, cwd: path.resolve(process.cwd(), flags.cwd || ".") };
 }
 
 function cleanOptions(options) {
@@ -344,16 +352,26 @@ function readDtsExportIdents(cwd) {
   const dtsPath = path.join(cwd, "index.d.ts");
   if (!fs.existsSync(dtsPath)) return [];
 
-  const dts = fs.readFileSync(dtsPath, "utf8");
+  const dts = require("./build-output.cjs").readDeclarationSource(cwd);
+  const ts = require("typescript");
+  const tree = ts.createSourceFile(dtsPath, dts, ts.ScriptTarget.Latest, true);
   const idents = new Set();
-  const exportDeclaration =
-    /^export\s+(?:declare\s+)?(?:function|const|let|var|class|enum|namespace)\s+([A-Za-z_$][\w$]*)/gm;
-  let match = exportDeclaration.exec(dts);
-  while (match) {
-    idents.add(match[1]);
-    match = exportDeclaration.exec(dts);
+  for (const node of tree.statements) {
+    if (!node.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword))
+      continue;
+    if (ts.isVariableStatement(node)) {
+      for (const declaration of node.declarationList.declarations)
+        if (ts.isIdentifier(declaration.name)) idents.add(declaration.name.text);
+    } else if (
+      ts.isFunctionDeclaration(node) ||
+      ts.isClassDeclaration(node) ||
+      ts.isEnumDeclaration(node) ||
+      ts.isModuleDeclaration(node)
+    ) {
+      if (node.name && ts.isIdentifier(node.name)) idents.add(node.name.text);
+    }
   }
-  if (dts.includes("/* zig-napi binding target */")) idents.delete("__napiBindingTarget");
+  idents.delete("__napiBindingTarget");
   return [...idents];
 }
 
@@ -453,27 +471,27 @@ function resolveZigNapiPath(targetDir, value) {
   return path.relative(fs.realpathSync(targetDir), fs.realpathSync(source)) || ".";
 }
 
-function readZigNapiConfig(cwd, flags) {
+async function readZigNapiConfig(cwd, flags) {
   const packageJsonPath = path.resolve(cwd, flags.packageJsonPath || "package.json");
   const packageJson = readJson(packageJsonPath);
-  const configPath = flags.configPath ? path.resolve(cwd, flags.configPath) : null;
-  const config = configPath ? readJson(configPath) : packageJson.napi || {};
-  const targets = Array.isArray(config.targets) ? [...config.targets] : [];
-  // Match napi-rs' deprecated triples fallback so delegated packaging commands
-  // cannot admit an OHOS target that the Zig build path has not validated.
-  if (targets.length === 0) {
-    if (config.triples?.defaults) targets.push(...defaultTargets);
-    if (Array.isArray(config.triples?.additional)) targets.push(...config.triples.additional);
-  }
-  validateConfiguredTargets([...(flags.target ? [flags.target] : []), ...targets]);
+  const configPath = flags.configPath ? path.resolve(cwd, flags.configPath) : undefined;
+  const raw = { ...packageJson.napi, ...(configPath ? readJson(configPath) : {}) };
+  validateConfiguredTargets([
+    ...(flags.target ? [flags.target] : []),
+    ...(raw.targets || []),
+    ...(raw.triples?.additional || []),
+  ]);
+  const config = await upstream.api.readNapiConfig(packageJsonPath, configPath);
   return {
-    binaryName: config.binaryName,
+    ...config,
+    // binaryNames is the Zig workspace extension for multiple addons.
+    binaryName:
+      !raw.binaryName && !raw.name && raw.binaryNames?.length ? undefined : config.binaryName,
     binaryNames: Array.isArray(config.binaryNames) ? config.binaryNames : [],
-    packageName: config.packageName || packageJson.name,
-    targets,
+    targets: config.targets.map((target) => target.triple),
     wasm: config.wasm || {},
     version: packageJson.version || "0.0.0",
-    packageJson,
+    typeDef: packageJson.zigNapi?.typeDef !== false,
   };
 }
 
@@ -686,7 +704,7 @@ function resolveBrowserEntryFlavor(flavors) {
 }
 
 async function generateWasiBindings(cwd, flags) {
-  const config = readZigNapiConfig(cwd, flags);
+  const config = await readZigNapiConfig(cwd, flags);
   return generateWasiBindingsWithConfig(cwd, flags, config, readDtsExportIdents(cwd));
 }
 
@@ -710,7 +728,7 @@ async function generateWasiBindingsWithConfig(cwd, flags, config, exportIdents) 
   const outputDir = path.resolve(cwd, flags.buildOutputDir || ".");
   fs.mkdirSync(outputDir, { recursive: true });
 
-  const declarationPath = path.join(cwd, "index.d.ts");
+  const declarationPath = flags.declarationPath || path.join(cwd, "index.d.ts");
   const declarationSource = fs.existsSync(declarationPath)
     ? fs
         .readFileSync(declarationPath, "utf8")
@@ -887,9 +905,28 @@ function resolveWasiEmnapiEnv(cwd) {
 
 async function commandNew(projectDir, flags) {
   const options = await promptNewOptions(projectDir, flags);
+  const projectOptions = scaffold.options(flags);
   const targetDir = path.resolve(process.cwd(), options.projectDir);
   if (fs.existsSync(targetDir) && fs.readdirSync(targetDir).length && !flags.force) {
     fail(`${targetDir} is not empty; pass --force to write into it`);
+  }
+  if (projectOptions.dryRun) {
+    console.log(
+      JSON.stringify(
+        {
+          directory: targetDir,
+          packageName: options.packageName,
+          targets: options.targets,
+          minNodeApi: projectOptions.minNodeApiVersion,
+          packageManager: projectOptions.packageManager,
+          typeDef: projectOptions.enableTypeDef,
+          githubActions: projectOptions.enableGithubActions,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
   }
 
   const packageName = options.packageName;
@@ -906,39 +943,44 @@ async function commandNew(projectDir, flags) {
     __FINGERPRINT__: "0x0",
     __CLI_VERSION__: readJson(path.join(packageDir, "package.json")).version,
   });
+  scaffold.configure(targetDir, projectOptions, options.targets, addonName);
   // Loaders are generated from the same code path a build uses, so a scaffold
   // and a built project cannot drift apart.
   await generateWasiBindings(targetDir, { target: undefined, buildOutputDir: "." });
   updateTemplatePackageForTargets(targetDir, options.targets);
+  await commandCreateNpmDirs({ cwd: targetDir });
   repairZigFingerprint(targetDir);
 
   console.log(`Created ${packageName} in ${targetDir}`);
 }
 
 async function commandBuild(flags, passthrough = []) {
+  const output = require("./build-output.cjs");
+  flags = { ...flags, jsBinding: flags.jsBinding ?? flags.js };
+  output.validate(flags, passthrough);
   validateBuildTargets(flags, passthrough);
   const cwd = path.resolve(process.cwd(), flags.cwd || ".");
-  const config = readZigNapiConfig(cwd, flags);
-  // Validate before spending a build on a configuration the generated loaders
-  // could not use.
+  const config = await readZigNapiConfig(cwd, flags);
   const flavors = resolveConfiguredFlavors(config, flags);
-  try {
-    resolveWasmConfig(config);
-  } catch (error) {
-    if (error instanceof WasiConfigError) fail(error.message);
-    throw error;
+  resolveWasmConfig(config);
+  if (config.packageJson.zigNapi?.managedZigDependency) {
+    scaffold.resolveDependency(cwd, resolveZigNapiPath(cwd), config.packageJson);
   }
   const args = ["build"];
+  if (flags.manifestPath) args.push("--build-file", flags.manifestPath.replace(/\.zon$/, ""));
+  if (flags.targetDir) args.push("--prefix", flags.targetDir);
   if (flags.release) args.push("-Doptimize=fast");
-  if (flags.target) {
-    // Both WASI flavors build Zig's wasm32-wasi target; only the threaded one
-    // enables atomics/shared memory.
-    args.push(`-Dtarget=${isWasiTargetName(flags.target) ? "wasm32-wasi" : flags.target}`);
-  }
+  if (flags.strip !== undefined) args.push(`-Dstrip=${flags.strip}`);
+  if (flags.dtsCache === false && config.typeDef) args.push("-Ddts-cache=false");
+  if (flags.target)
+    args.push(
+      `-Dtarget=${isWasiTargetName(flags.target) ? "wasm32-wasi" : zigTarget(flags.target)}`,
+    );
   appendWasiThreadsBuildFlags(args, flags.target, passthrough);
   appendWasiMemoryBuildFlags(args, config, flavors);
   args.push(...passthrough);
   const emnapiEnv = flavors.length > 0 ? resolveWasiEmnapiEnv(cwd) : undefined;
+  if (flags.verbose) console.log(`zig ${args.map((arg) => JSON.stringify(arg)).join(" ")}`);
   const built = run("zig", args, {
     cwd,
     env: emnapiEnv ? { ...process.env, ...emnapiEnv } : process.env,
@@ -946,87 +988,108 @@ async function commandBuild(flags, passthrough = []) {
     keepAlive: flags.watch,
   });
   if (!built) return;
-  const buildOutput = path.resolve(cwd, flags.buildOutputDir || ".");
-  fs.mkdirSync(buildOutput, { recursive: true });
-  const installedOutput = path.resolve(cwd, flags.outputDir || "zig-out/node");
+  const outputDir = path.resolve(cwd, flags.buildOutputDir || flags.outputDir || ".");
+  fs.mkdirSync(outputDir, { recursive: true });
+  let prefix = flags.targetDir || "zig-out";
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--prefix") prefix = args[i + 1];
+    else if (args[i].startsWith("--prefix=")) prefix = args[i].slice(9);
+  }
+  const installedOutput = path.resolve(cwd, prefix, "node");
+  const written = new Set();
+  const explicitTarget = args.findLast((arg) => arg.startsWith("-Dtarget="))?.slice(9);
+  const platform = require("./targets.cjs").platformId(explicitTarget || flags.target);
   for (const binary of readBinaryNames(config)) {
-    for (const flavor of flavors) {
-      const name = `${binary}.${flavor.platformArchABI}.wasm`;
+    const names = [
+      `${binary}.${platform}.node`,
+      ...flavors.map((flavor) => `${binary}.${flavor.platformArchABI}.wasm`),
+    ];
+    for (const name of names) {
       const source = [path.join(installedOutput, name), path.join(cwd, name)].find((file) =>
         fs.existsSync(file),
       );
-      const destination = path.join(buildOutput, name);
-      if (source && source !== destination) fs.copyFileSync(source, destination);
+      if (!source) continue;
+      const destination = path.join(
+        outputDir,
+        name.endsWith(".node") && !flags.platform ? `${binary}.node` : name,
+      );
+      if (source !== destination) fs.copyFileSync(source, destination);
+      written.add(destination);
     }
   }
-  await generateWasiBindingsWithConfig(cwd, flags, config, readDtsExportIdents(cwd));
-  if (readBinaryNames(config).length === 1 && flags.jsBinding !== false) {
-    const format =
-      flags.format ||
-      (flags.esm
-        ? "esm"
-        : flags.commonjs
-          ? "commonjs"
-          : config.packageJson.type === "module"
-            ? "esm"
-            : "commonjs");
-    if (!["esm", "commonjs"].includes(format) || (flags.esm && flags.commonjs))
-      fail("choose one build format: esm or commonjs");
-    const outputDir = path.resolve(cwd, flags.buildOutputDir || ".");
-    const nativeDir = path.resolve(cwd, flags.outputDir || "zig-out/node");
-    const binaryName = readBinaryNames(config)[0];
-    if (fs.existsSync(nativeDir))
-      for (const name of fs.readdirSync(nativeDir)) {
-        if (name.startsWith(`${binaryName}.`) && name.endsWith(".node")) {
-          const destination = path.join(outputDir, name);
-          if (destination !== path.join(nativeDir, name))
-            fs.copyFileSync(path.join(nativeDir, name), destination);
-        }
-      }
-    const jsBinding =
-      typeof flags.jsBinding === "string"
-        ? flags.jsBinding
-        : format === "esm"
-          ? "index.mjs"
-          : "index.cjs";
-    const binding = await writeJsBinding({
-      platform: true,
-      idents: readDtsExportIdents(cwd),
+  const idents = config.typeDef ? readDtsExportIdents(cwd) : [];
+  const bindingConfig =
+    flags.platform && flags.jsPackageName
+      ? { ...config, packageName: flags.jsPackageName }
+      : config;
+  const format = flags.format || (flags.esm ? "esm" : flags.commonjs ? "commonjs" : "commonjs");
+  const jsBinding = typeof flags.jsBinding === "string" ? flags.jsBinding : "index.js";
+  let binding;
+  if (readBinaryNames(config).length === 1) {
+    binding = await writeJsBinding({
+      platform: flags.platform || false,
+      noJsBinding: flags.jsBinding === false,
+      idents,
       format,
       jsBinding,
-      binaryName,
-      packageName: config.packageName,
+      binaryName: readBinaryNames(config)[0],
+      packageName: bindingConfig.packageName,
       version: config.version,
       outputDir,
       wasiFlavors: collectWasiFlavors(config.targets).map((f) => f.platformArchABI),
     });
-    const dtsPath = path.join(cwd, "index.d.ts");
-    if (binding && fs.existsSync(dtsPath)) {
-      const source = fs
-        .readFileSync(dtsPath, "utf8")
-        .replace(
-          /^\/\* zig-napi binding target \*\/\nexport declare const __napiBindingTarget:[^\n]*\n?/gm,
-          "",
-        );
-      fs.writeFileSync(
-        dtsPath,
-        source.trimEnd() +
-          '\n/* zig-napi binding target */\nexport declare const __napiBindingTarget: "native" | "wasm32-wasi" | "wasm32-wasip1";\n',
-      );
+    if (binding) {
+      output.rebaseNativeBinding(binding.path, outputDir, readBinaryNames(config)[0]);
+      written.add(binding.path);
     }
-    if (outputDir === cwd && fs.existsSync(path.join(outputDir, jsBinding))) {
-      config.packageJson.main = jsBinding;
-      config.packageJson.files = [...new Set([...(config.packageJson.files || []), jsBinding])];
-      const packagePath = path.resolve(cwd, flags.packageJsonPath || "package.json");
-      const content = `${JSON.stringify(config.packageJson, null, 2)}\n`;
-      if (fs.readFileSync(packagePath, "utf8") !== content) fs.writeFileSync(packagePath, content);
+  }
+  const dts = await output.declarations(cwd, flags, config, outputDir, Boolean(binding));
+  if (dts) written.add(dts);
+  await generateWasiBindingsWithConfig(
+    cwd,
+    { ...flags, buildOutputDir: outputDir, declarationPath: dts },
+    bindingConfig,
+    idents,
+  );
+  for (const name of [
+    ...readBinaryNames(config).flatMap((binary) => [...managedWasiFileNames(binary)]),
+    "browser.js",
+  ]) {
+    const file = path.join(outputDir, name);
+    if (fs.existsSync(file)) written.add(file);
+  }
+  if (outputDir === cwd) {
+    if (binding) config.packageJson.main = jsBinding;
+    if (dts) config.packageJson.types = normalizePathForZig(path.relative(cwd, dts));
+    config.packageJson.files = [
+      ...new Set([
+        ...(config.packageJson.files || []),
+        ...[...written].map((file) => normalizePathForZig(path.relative(cwd, file))),
+      ]),
+    ];
+    const packagePath = path.resolve(cwd, flags.packageJsonPath || "package.json");
+    const content = `${JSON.stringify(config.packageJson, null, 2)}\n`;
+    if (fs.readFileSync(packagePath, "utf8") !== content) fs.writeFileSync(packagePath, content);
+  }
+  if (flags.pipe) {
+    for (const file of written) {
+      const command = `${flags.pipe} ${process.platform === "win32" ? '"%ZIG_NAPI_PIPE_FILE%"' : '"$ZIG_NAPI_PIPE_FILE"'}`;
+      const result = childProcess.spawnSync(command, {
+        cwd,
+        shell: true,
+        stdio: "inherit",
+        env: { ...process.env, ZIG_NAPI_PIPE_FILE: file },
+      });
+      if (result.error) throw result.error;
+      if (result.status !== 0) throw new Error(`--pipe failed for ${file} (exit ${result.status})`);
     }
   }
 }
 
 async function commandWatch(flags, passthrough) {
+  require("./build-output.cjs").validate(flags, passthrough);
   validateBuildTargets(flags, passthrough);
-  readZigNapiConfig(path.resolve(flags.cwd || "."), flags);
+  await readZigNapiConfig(path.resolve(flags.cwd || "."), flags);
   const cwd = path.resolve(flags.cwd || ".");
   let timer;
   let building = false;
@@ -1075,15 +1138,15 @@ async function commandWatch(flags, passthrough) {
   console.log(`Watching Zig sources in ${cwd}`);
 }
 
-function commandDts(flags, passthrough = []) {
+async function commandDts(flags, passthrough = []) {
   const cwd = path.resolve(process.cwd(), flags.cwd || ".");
   validateBuildTargets(flags, passthrough);
-  readZigNapiConfig(cwd, flags);
+  await readZigNapiConfig(cwd, flags);
   run("zig", ["build", ...passthrough], { cwd });
 }
 
 async function commandCreateNpmDirs(flags) {
-  readZigNapiConfig(path.resolve(process.cwd(), flags.cwd || "."), flags);
+  await readZigNapiConfig(path.resolve(process.cwd(), flags.cwd || "."), flags);
   await napiCli.createNpmDirs(
     cleanOptions({
       cwd: path.resolve(process.cwd(), flags.cwd || "."),
@@ -1096,17 +1159,30 @@ async function commandCreateNpmDirs(flags) {
 }
 
 async function commandArtifacts(flags) {
-  await generateWasiBindings(path.resolve(process.cwd(), flags.cwd || "."), flags);
-  await napiCli.artifacts(cleanOptions(napiOptions(flags)));
+  if (!flags.dryRun)
+    await generateWasiBindings(path.resolve(process.cwd(), flags.cwd || "."), flags);
+  await napiCli.artifacts(cleanOptions(await napiOptions(flags)));
 }
 
 async function commandPrePublish(flags) {
-  await napiCli.prePublish(cleanOptions(napiOptions(flags)));
+  await napiCli.prePublish(cleanOptions(await napiOptions(flags)));
 }
 
 async function commandPackage(flags) {
+  require("./build-output.cjs").validate(flags, []);
   const cwd = path.resolve(process.cwd(), flags.cwd || ".");
-  readZigNapiConfig(cwd, flags);
+  await readZigNapiConfig(cwd, flags);
+  validateBuildTargets(flags, []);
+  if (flags.dryRun) {
+    console.log(
+      JSON.stringify(
+        { cwd, steps: ["create-npm-dirs", "build", "artifacts"], target: flags.target || "host" },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
   await napiCli.createNpmDirs(
     cleanOptions({
       cwd,
@@ -1116,13 +1192,15 @@ async function commandPackage(flags) {
       dryRun: flags.dryRun,
     }),
   );
-  await commandBuild({ ...flags, cwd, release: flags.release, target: flags.target });
+  await commandBuild({ ...flags, cwd, platform: true });
+  const buildOutputDir = flags.buildOutputDir || flags.outputDir || ".";
   await napiCli.artifacts(
     cleanOptions({
       cwd,
       configPath: flags.configPath,
       packageJsonPath: flags.packageJsonPath,
-      outputDir: flags.outputDir || "zig-out/node",
+      outputDir:
+        buildOutputDir === "." ? path.join(flags.targetDir || "zig-out", "node") : buildOutputDir,
       npmDir: flags.npmDir,
       buildOutputDir: flags.buildOutputDir,
     }),
@@ -1135,24 +1213,52 @@ function addCwdOption(command) {
 
 function addBuildOptions(command) {
   return addBuildFlags(addNapiPathOptions(command))
-    .option("--output-dir <dir>", "native artifact directory", "zig-out/node")
-    .option("--build-output-dir <dir>", "generated binding directory", ".");
+    .option(
+      "-o, --output-dir <dir>",
+      "directory for built binaries, bindings and declarations",
+      ".",
+    )
+    .option("--build-output-dir <dir>", "legacy override for the generated output directory");
 }
 
 function addBuildFlags(command) {
   return command
-    .option("--release", "build with fast optimization")
-    .option("--target <zig-target>", "Zig target triple")
+    .option("-r, --release", "build with fast optimization")
+    .option("--no-release", "use a debug build")
+    .option("-t, --target <target>", "napi-rs or Zig target triple")
+    .option("--manifest-path <file>", "Zig build.zig or build.zig.zon path")
+    .option("--target-dir <dir>", "Zig installation prefix (default: zig-out)")
+    .option("--platform", "use platform binary names and generate a platform loader")
+    .option("--no-platform", "use a plain addon filename without generating a platform loader")
+    .option("--js-package-name <name>", "package name used by the platform binding")
+    .option("--const-enum", "emit const enums (default: true)")
+    .option("--no-const-enum", "emit runtime numeric enums and string unions")
+    .option("--runtime-string-enum", "emit runtime string enums with --no-const-enum")
+    .option("--no-runtime-string-enum", "emit string unions with --no-const-enum")
+    .option("--dts <file>", "declaration path relative to the output directory")
+    .option("--dts-header <text>", "custom declaration header")
+    .option("--no-dts-header", "omit the declaration header")
+    .option("--dts-cache", "cache declaration generation (default: true)")
+    .option("--no-dts-cache", "force declaration generation")
+    .option("-s, --strip", "strip debug information from the addon")
+    .option("--no-strip", "retain debug information")
+    .option("-v, --verbose", "print the Zig build command")
+    .option("--no-verbose", "disable verbose output")
+    .option("-x, --cross-compile", "use Zig's built-in cross compilation with --target")
+    .option("--no-cross-compile", "disable the compatibility flag")
+    .option("--pipe <command>", "run a command for each generated output file")
     .option("--format <format>", "binding module format: esm or commonjs")
     .option("--esm", "generate an ES module binding")
     .option("--commonjs", "generate a CommonJS binding")
     .option("--js-binding <file>", "generated binding filename")
+    .option("--js <file>", "alias for --js-binding")
+    .option("--no-js", "skip the platform binding")
     .option("--no-js-binding", "skip the platform binding");
 }
 
 function addNapiPathOptions(command) {
   return addCwdOption(command)
-    .option("--config-path <file>", "path to napi config")
+    .option("-c, --config-path <file>", "path to napi config")
     .option("--package-json-path <file>", "path to package.json")
     .option("--npm-dir <dir>", "npm package directory");
 }
@@ -1167,7 +1273,9 @@ function addNapiOptions(command) {
     .option("--gh-release-name <name>", "GitHub release name")
     .option("--gh-release-id <id>", "GitHub release id")
     .option("--skip-optional-publish", "skip optional dependency package publishing")
-    .option("--dry-run", "print planned changes without writing");
+    .option("--root-publisher <manager>", "root publisher: npm, pnpm, yarn or yarn-classic")
+    .option("--dry-run", "print planned changes without writing")
+    .option("--no-dry-run", "execute the command");
 }
 
 function createProgram() {
@@ -1175,6 +1283,7 @@ function createProgram() {
 
   program
     .name("zig-napi")
+    .version(readJson(path.join(packageDir, "package.json")).version, "-v, --version")
     .description("CLI tools for building Node.js addons with zig-napi")
     .showHelpAfterError()
     .showSuggestionAfterError();
@@ -1183,7 +1292,20 @@ function createProgram() {
     .command("new")
     .description("create a Zig Node-API addon project")
     .argument("[dir]", "project directory")
-    .option("--name <package>", "npm package name")
+    .option("-n, --name <package>", "npm package name")
+    .option("-v, --min-node-api <version>", "minimum Node-API version (1–10; default: 4)")
+    .option("--package-manager <manager>", "package manager: yarn or pnpm (default: yarn)")
+    .option("-l, --license <license>", "package license (default: MIT)")
+    .option("--enable-type-def", "generate TypeScript declarations (default: true)")
+    .option("--no-enable-type-def", "disable TypeScript declaration generation")
+    .option(
+      "--enable-github-actions",
+      "generate a target build and package workflow (default: true)",
+    )
+    .option("--no-enable-github-actions", "disable GitHub Actions generation")
+    .option("--test-framework <framework>", "test framework (ava)")
+    .option("--dry-run", "print the project plan without writing or invoking Zig")
+    .option("--no-dry-run", "execute the command")
     .option("--addon <name>", "native addon binary name")
     .option("--zig-napi <path>", "path to zig-napi Zig package, relative to the current directory")
     .option("-i, --interactive", "ask project information interactively", true)
@@ -1197,6 +1319,7 @@ function createProgram() {
     .option("--enable-default-targets", "enable the default napi-rs targets", true)
     .option("--no-enable-default-targets", "disable the default napi-rs targets")
     .option("--enable-all-targets", "enable all napi-rs targets")
+    .option("--no-enable-all-targets", "do not enable all targets")
     .option("--force", "write into a non-empty directory")
     .action(commandNew);
 
@@ -1208,6 +1331,7 @@ function createProgram() {
       .argument("[zigBuildArgs...]", "extra arguments forwarded to zig build"),
   )
     .option("-w, --watch", "rebuild when Zig sources change")
+    .option("--no-watch", "disable watch mode")
     .action((zigBuildArgs, options) =>
       options.watch ? commandWatch(options, zigBuildArgs) : commandBuild(options, zigBuildArgs),
     );
@@ -1224,6 +1348,7 @@ function createProgram() {
     program.command("create-npm-dirs").description("call @napi-rs/cli createNpmDirs API"),
   )
     .option("--dry-run", "print planned changes without writing")
+    .option("--no-dry-run", "execute the command")
     .action(commandCreateNpmDirs);
 
   addNapiOptions(
@@ -1231,29 +1356,43 @@ function createProgram() {
   ).action(commandArtifacts);
 
   addNapiOptions(
-    program.command("pre-publish").description("call @napi-rs/cli prePublish API"),
+    program
+      .command("pre-publish")
+      .alias("prepublish")
+      .description("call @napi-rs/cli prePublish API"),
   ).action(commandPrePublish);
 
   addNapiPathOptions(
     program.command("version").description("update versions in platform npm packages"),
-  ).action((flags) => napiCli.version(cleanOptions(napiOptions(flags))));
+  ).action(async (flags) => napiCli.version(cleanOptions(await napiOptions(flags))));
   addNapiPathOptions(
     program.command("universalize").description("combine macOS binaries into a universal binary"),
   )
     .option("--output-dir <dir>", "directory containing platform binaries", ".")
-    .action((flags) => napiCli.universalize(cleanOptions(napiOptions(flags))));
+    .action(async (flags) => napiCli.universalize(cleanOptions(await napiOptions(flags))));
   addNapiPathOptions(
     program.command("rename").description("rename Zig addon and platform package metadata"),
   )
-    .option("--binary-name <name>", "new native binary name")
+    .option("-n, --name <name>", "new root package name")
+    .option("-b, --binary-name <name>", "new native binary name")
     .option("--package-name <name>", "new npm package name")
+    .option("--manifest-path <file>", "Zig package manifest to rename (build.zig.zon)")
+    .option("--repository <url>", "new repository URL")
     .option("--description <text>", "package description")
     .option("--author <author>", "package author")
     .option("--dry-run", "print the complete file changes without writing")
+    .option("--no-dry-run", "execute the command")
     .action(async (flags) => {
       const cwd = path.resolve(flags.cwd || ".");
-      readZigNapiConfig(cwd, flags);
-      require("./rename-project.cjs")(cwd, flags);
+      await readZigNapiConfig(cwd, flags);
+      if (!flags.binaryName && !flags.dryRun && !flags.author) {
+        await napiCli.rename(cleanOptions({ ...flags, cwd }));
+      } else {
+        require("./rename-project.cjs")(cwd, flags);
+      }
+      const manifest = path.resolve(cwd, flags.manifestPath || "build.zig.zon");
+      if (flags.binaryName && !flags.dryRun && fs.existsSync(manifest))
+        repairZigFingerprint(path.dirname(manifest));
       if (!flags.dryRun) await generateWasiBindings(cwd, flags);
     });
 
@@ -1262,21 +1401,75 @@ function createProgram() {
       program.command("package").description("run create-npm-dirs, build, and artifacts"),
     ),
   )
-    .option("--output-dir <dir>", "Zig build output directory", "zig-out/node")
+    .option(
+      "-o, --output-dir <dir>",
+      "directory for built binaries, bindings and declarations",
+      ".",
+    )
     .option("--build-output-dir <dir>", "build output directory")
     .option("--dry-run", "print planned changes without writing")
+    .option("--no-dry-run", "execute the command")
     .action(commandPackage);
 
   return program;
 }
 
 async function main() {
+  let [command, ...args] = process.argv.slice(2);
+  if (command === "help" && upstream.parsers[args[0]]) {
+    command = args[0];
+    args = ["--help"];
+  }
+  const delegated = upstream.parse(command, args);
+  if (delegated) {
+    if (delegated.help) {
+      process.stdout.write(delegated.help);
+      return;
+    }
+    const handlers = {
+      "create-npm-dirs": commandCreateNpmDirs,
+      artifacts: commandArtifacts,
+      "pre-publish": commandPrePublish,
+      prepublish: commandPrePublish,
+      version: async (flags) => napiCli.version(cleanOptions(await napiOptions(flags))),
+      universalize: async (flags) => napiCli.universalize(cleanOptions(await napiOptions(flags))),
+    };
+    await handlers[command](delegated.options);
+    return;
+  }
   const program = createProgram();
   if (process.argv.length <= 2) {
     program.outputHelp();
     return;
   }
-  await program.parseAsync(process.argv);
+  const booleans = new Set([
+    "enable-default-targets",
+    "enable-all-targets",
+    "enable-type-def",
+    "enable-github-actions",
+    "interactive",
+    "platform",
+    "const-enum",
+    "runtime-string-enum",
+    "dts-cache",
+    "strip",
+    "release",
+    "verbose",
+    "watch",
+    "cross-compile",
+    "dry-run",
+  ]);
+  const argv = process.argv.map((arg, index) => {
+    if (index > 2 && arg === "-v") {
+      if (command === "new") return "--min-node-api";
+      if (command === "build" || command === "package") return "--verbose";
+    }
+    const match = arg.match(/^--([a-z-]+)=(true|false)$/);
+    return match && booleans.has(match[1])
+      ? `--${match[2] === "false" ? "no-" : ""}${match[1]}`
+      : arg;
+  });
+  await program.parseAsync(argv);
 }
 
 module.exports = { main };

@@ -193,7 +193,9 @@ pnpm test
 pnpm --filter @ohos-rs/zig-cli cli new ../../my-addon --no-interactive --name my-addon --addon my_addon --targets x86_64-unknown-linux-gnu
 ```
 
-Pass `--targets <triple>` repeatedly or as a comma-separated list to choose the generated package targets manually, or pass `--enable-all-targets` to enable every napi-rs target known to the CLI.
+Pass `--targets <triple>` repeatedly or as a comma-separated list to choose the generated package targets manually, or pass `--enable-all-targets` to enable every Node/WASI target known to the CLI. `new` immediately creates a `package.json` and README in `npm/<platform-arch-abi>/` for each selected target, including separate `wasm32-wasi` and `wasm32-wasip1` packages when both WASI flavors are selected. These directories contain package metadata; build each target with `zig-napi build --platform --target <triple>` and run `zig-napi artifacts --output-dir zig-out/node` to fill them with binaries and loaders. A build compiles the host target by default, or the one specified by `--target`.
+
+`new` uses napi-rs' defaults: Node-API 4, MIT, Yarn, AVA, TypeScript declarations and GitHub Actions enabled. Set `--min-node-api 1` through `10`, `--license`, `--package-manager yarn|pnpm`, `--enable-type-def=false`, or `--enable-github-actions=false` to change them. The generated CI builds the selected targets with stock Zig 0.17, tests host-compatible/WASI binaries and collects the platform packages. `new --dry-run` prints the plan without creating files or invoking Zig. The default Zig dependency follows the installed CLI when a project moves; an explicit `--zig-napi` path remains user-managed.
 
 Run the bundled Node example:
 
@@ -205,7 +207,20 @@ pnpm --filter zig-napi-node-example run test
 
 `zig-napi create-npm-dirs` calls `@napi-rs/cli`'s `createNpmDirs` API and creates `npm/<platform-arch-abi>` packages from the `napi` field in `package.json`. `zig-napi artifacts --output-dir zig-out/node` calls the community `artifacts` API and copies Zig's `<binary>.<platform-arch-abi>.node` or `<binary>.wasm32-wasi.wasm` outputs into those packages and into the root package. When `wasm32-wasip1-threads` is configured, `zig-napi build`, `artifacts`, and `package` also generate the napi-rs compatible `.wasi.cjs` and worker files used by `@napi-rs/wasm-runtime`. `zig-napi pre-publish` calls the community `prePublish` API to update optional dependencies and handle publish preparation.
 
-Upstream `napi build` and `napi new` are not used directly for Zig addons because they currently expect Cargo projects and napi-rs' Rust templates.
+CLI compatibility is checked against the pinned `@napi-rs/cli` **3.10.7** command definitions:
+
+| Commands | Implementation |
+| --- | --- |
+| `create-npm-dirs`, `artifacts`, `pre-publish` / `prepublish`, `version`, `universalize` | Public napi-rs argument parsers and APIs, including their defaults, aliases, configuration merging and `--root-publisher`. |
+| `new` | Zig scaffold with the corresponding Node-API, license, target, package manager, declarations, CI and dry-run choices; platform metadata uses `createNpmDirs`. |
+| `build` | Zig compilation; public `readNapiConfig`, `writeJsBinding` and declaration-header API, with Zig declaration processing. |
+| `rename` | Public napi-rs API for metadata changes; Zig adapter for binary names, source references, manifests and generated files. `--name` changes the root package, while `--package-name` changes the platform package prefix. |
+
+Build output defaults follow napi-rs: plain `<binary>.node` without `--platform`; `<binary>.<platform>.node` and an `index.js` platform loader with `--platform`. Generated build scripts pass `--platform`. `--output-dir/-o` selects the final binary/binding/declaration directory; `--target-dir` selects Zig's installation prefix. `--js/--js-binding`, `--no-js`, `--format esm|commonjs`, `--esm` and `--commonjs` control bindings. For example, use `--esm --js index.mjs` for an ESM filename in a CommonJS package. Rust-style target triples and Zig triples are accepted; `--cross-compile` uses Zig's built-in cross compilation.
+
+`--dts`, `--dts-header`, `--no-dts-header`, `--const-enum=false`, `--runtime-string-enum`, `--dts-cache=false`, `--strip`, `--release`, `--verbose`, `--watch` and `--pipe` are implemented for Zig builds. Header configuration (`napi.dtsHeader`, `napi.dtsHeaderFile`) follows the public upstream API. `--manifest-path` takes a Zig build file (or `.zig.zon`); for `rename` it takes the `.zig.zon` manifest. Global `-v/--version` prints the CLI version; `new -v` selects Node-API and `build -v` enables verbose output.
+
+Cargo-specific `--bin`, `--package/-p`, `--profile`, `--features/-F`, `--all-features`, `--no-default-features`, `--use-cross` and `--use-napi-cross` are rejected before compilation. Use Zig build options after `--` instead. OHOS targets and `--ohos-sign` belong to the separate OHOS toolchain. These are explicit language/platform boundaries, not supported Cargo behaviors. Zig-only `dts` and `package` remain convenience commands; `package --dry-run` performs no build or writes. Upstream `new` and `build` themselves require Rust/Cargo and are not called.
 
 Node.js matrix tests live in `node-test`. It mirrors the NAPI-RS example split with two independent demos:
 

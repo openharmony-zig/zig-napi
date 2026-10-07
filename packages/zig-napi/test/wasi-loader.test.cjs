@@ -792,6 +792,8 @@ test("the Node CLI rejects OHOS targets before invoking Zig or writing packages"
     targets: ["x86_64-unknown-linux-gnu"],
     regenerate: false,
   });
+  // Start without the packages that `new` now creates for its valid targets.
+  fs.rmSync(project.file("npm"), { recursive: true });
   project.zig.clearArgs();
   const rejected = (args) => {
     const result = runCli(args, { env: project.zig.env });
@@ -858,6 +860,56 @@ test("a native-only scaffold carries no WASI loader files", () => {
   );
   assert.equal(packageJson.browser, undefined);
   assert.ok(!packageJson.files.some((file) => /wasi|wasm|deferred/.test(file)));
+  assert.deepEqual(fs.readdirSync(project.file("npm")), ["darwin-arm64"]);
+});
+
+test("new creates npm package metadata for every selected native and WASI target", () => {
+  const project = createProject("platform-packages", {
+    targets: [
+      "aarch64-apple-darwin",
+      "x86_64-unknown-linux-gnu",
+      "x86_64-unknown-linux-musl",
+      "x86_64-pc-windows-msvc",
+      "wasm32-wasip1-threads",
+      "wasm32-wasip1",
+    ],
+    packageName: "@scope/platform-packages",
+    regenerate: false,
+  });
+  const expected = {
+    "darwin-arm64": { main: "probe_addon.darwin-arm64.node", os: ["darwin"], cpu: ["arm64"] },
+    "linux-x64-gnu": {
+      main: "probe_addon.linux-x64-gnu.node",
+      os: ["linux"],
+      cpu: ["x64"],
+      libc: ["glibc"],
+    },
+    "linux-x64-musl": {
+      main: "probe_addon.linux-x64-musl.node",
+      os: ["linux"],
+      cpu: ["x64"],
+      libc: ["musl"],
+    },
+    "win32-x64-msvc": { main: "probe_addon.win32-x64-msvc.node", os: ["win32"], cpu: ["x64"] },
+    "wasm32-wasi": { main: "probe_addon.wasi.cjs" },
+    "wasm32-wasip1": { main: "probe_addon.wasip1.cjs" },
+  };
+  assert.deepEqual(fs.readdirSync(project.file("npm")).sort(), Object.keys(expected).sort());
+  for (const [platform, fields] of Object.entries(expected)) {
+    const directory = project.file(path.join("npm", platform));
+    const manifest = JSON.parse(fs.readFileSync(path.join(directory, "package.json"), "utf8"));
+    assert.equal(manifest.name, `${project.packageName}-${platform}`);
+    assert.equal(manifest.version, "0.1.0");
+    for (const field of ["main", "os", "cpu", "libc"]) {
+      assert.deepEqual(manifest[field], fields[field], `${platform}: ${field}`);
+    }
+    assert.ok(manifest.files.includes(manifest.main));
+    assert.ok(fs.existsSync(path.join(directory, "README.md")));
+    assert.ok(
+      !fs.existsSync(path.join(directory, manifest.main)),
+      "new does not compile artifacts",
+    );
+  }
 });
 
 test("a native target plus a WASI target scaffolds both flavors' files", () => {

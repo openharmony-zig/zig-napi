@@ -4,6 +4,8 @@ The baseline for this branch is [napi-rs a713fcb](https://github.com/napi-rs/nap
 
 The CLI executable in `bin/zig-napi.js` loads the maintained CommonJS source modules in `lib/`. Binding-target metadata, declaration handling and worker crash reporting are adapted directly from the corresponding upstream TypeScript source files, with source paths and the pinned revision recorded in each module. Upstream notices ship in `licenses/NAPI-RS-LICENSE`. The CLI handles Node.js/WASI; OHOS builds and SDK HAP signing remain in the separate QEMU pipeline.
 
+Platform package metadata is generated through the public `NapiCli.createNpmDirs` API, including during `zig-napi new`. Artifact collection, publish preparation, version updates and universal binaries use `NapiCli.artifacts`, `prePublish`, `version` and `universalize`; platform JS bindings use `writeJsBinding`. These APIs own platform names, package metadata and packaging behavior. Zig templates, compilation and source renaming adapt the operations whose upstream implementations depend on Cargo or Rust sources. Selecting multiple targets creates their package metadata; each target's binary must be built before artifact collection, which retains upstream's missing-artifact checks.
+
 ## Capabilities and regression coverage
 
 | Capability | Zig API / implementation | Regression |
