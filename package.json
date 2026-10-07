@@ -63,6 +63,7 @@
     "website:test:browser": "pnpm --filter zig-napi-website run test:browser",
     "website:preview": "pnpm --filter zig-napi-website run preview",
     "test:e2e:qemu": "python3 scripts/qemu/run_matrix.py",
+    "test:e2e:node": "python3 scripts/run_node_e2e.py",
     "check:declarations": "node scripts/check_declarations.cjs"
   },
   "devDependencies": {

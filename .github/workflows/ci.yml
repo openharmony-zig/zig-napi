@@ -90,7 +90,7 @@ jobs:
             --hdc "${OHOS_BASE_SDK_HOME}/toolchains/hdc"
       - name: Run every OHOS HAP suite three times in QEMU
         run: |
-          python3 scripts/qemu/run_matrix.py --product ohos --repeat 3 \
+          python3 scripts/qemu/run_matrix.py --repeat 3 \
             --output .tmp_qemu_e2e/ci/ohos \
             --ohos-guest .tmp_qemu_e2e/ci/ohos-guest/guest.json \
             --ohos-zig "${{ steps.zig.outputs.zig-path }}/zig" \
@@ -110,10 +110,10 @@ jobs:
             .tmp_qemu_e2e/ci/ohos-guest/*.log
             .tmp_qemu_e2e/ci/signer/signer.json
 
-  node-qemu-e2e:
+  node-e2e:
     runs-on: ubuntu-24.04
-    name: Node.js QEMU E2E
-    timeout-minutes: 60
+    name: Node.js host E2E
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -126,67 +126,12 @@ jobs:
         with:
           version: 0.16.0
       - run: pnpm install --frozen-lockfile
-      - name: Install QEMU and enable KVM
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils genisoimage
-          sudo chmod a+rw /dev/kvm
-          test -r /dev/kvm && test -w /dev/kvm
-      - name: Download and verify Linux image and Node.js archive
-        run: |
-          mkdir -p .tmp_qemu_e2e/ci/downloads
-          cd .tmp_qemu_e2e/ci/downloads
-          curl -fL --retry 5 --retry-all-errors -O https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
-          curl -fL --retry 5 --retry-all-errors -o ubuntu-SHA256SUMS https://cloud-images.ubuntu.com/noble/current/SHA256SUMS
-          awk '$2 == "*noble-server-cloudimg-amd64.img" || $2 == "noble-server-cloudimg-amd64.img"' ubuntu-SHA256SUMS > image.sha256
-          test -s image.sha256
-          sha256sum --check image.sha256
-          curl -fL --retry 5 --retry-all-errors -O https://nodejs.org/dist/v24.14.0/node-v24.14.0-linux-x64.tar.xz
-          curl -fL --retry 5 --retry-all-errors -O https://nodejs.org/dist/v24.14.0/SHASUMS256.txt
-      - name: Boot isolated Linux QEMU and wait for cloud-init
-        run: |
-          python3 scripts/qemu/boot_node_guest.py \
-            --image .tmp_qemu_e2e/ci/downloads/noble-server-cloudimg-amd64.img \
-            --output .tmp_qemu_e2e/ci/node-guest --accel kvm
-          python3 - <<'PYTHON'
-          import json, subprocess, time
-          from pathlib import Path
-          root = Path('.tmp_qemu_e2e/ci/node-guest')
-          guest = json.loads((root / 'guest.json').read_text())
-          command = ['ssh', '-i', guest['key'], '-p', str(guest['sshPort']),
-                     '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5',
-                     '-o', 'StrictHostKeyChecking=accept-new',
-                     '-o', 'UserKnownHostsFile=' + str(root / 'known_hosts'),
-                     guest['user'] + '@127.0.0.1', 'sudo cloud-init status --wait']
-          deadline = time.monotonic() + 600
-          with (root / 'boot.log').open('w') as log:
-              while time.monotonic() < deadline:
-                  try:
-                      if subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, timeout=60).returncode == 0:
-                          break
-                  except subprocess.TimeoutExpired:
-                      pass
-                  time.sleep(3)
-              else:
-                  raise RuntimeError('Linux QEMU/cloud-init did not become ready')
-          PYTHON
-      - name: Run all Node.js and WASI E2E in QEMU
-        run: |
-          python3 scripts/qemu/run_matrix.py --product node --repeat 3 \
-            --output .tmp_qemu_e2e/ci/node \
-            --node-guest .tmp_qemu_e2e/ci/node-guest/guest.json \
-            --node-archive .tmp_qemu_e2e/ci/downloads/node-v24.14.0-linux-x64.tar.xz \
-            --node-shasums .tmp_qemu_e2e/ci/downloads/SHASUMS256.txt
-      - name: Stop Linux QEMU
-        if: always()
-        run: python3 scripts/qemu/stop_guest.py --guest .tmp_qemu_e2e/ci/node-guest/guest.json
+      - name: Run all Node.js and WASI E2E directly on the runner
+        run: pnpm test:e2e:node --output zig-out/e2e-node --repeat 3
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: node-qemu-e2e-evidence
+          name: node-host-e2e-evidence
           path: |
-            .tmp_qemu_e2e/ci/node/**/*.json
-            .tmp_qemu_e2e/ci/node/**/*.log
-            .tmp_qemu_e2e/ci/node-guest/guest.json
-            .tmp_qemu_e2e/ci/node-guest/*.log
-            .tmp_qemu_e2e/ci/downloads/image.sha256
+            zig-out/e2e-node/**/*.json
+            zig-out/e2e-node/**/*.log

@@ -117,7 +117,7 @@ On Windows MSVC, `nodeAddonBuild` follows napi-rs and does not require a `node.l
 
 The 2026-10-06 baseline is napi-rs `a713fcb` (`napi` 3.14.1, CLI 3.10.7, wasm-runtime 1.2.5). New bindings cover captured closures, typed Promise/iterator/stream protocols, owned collections and JSON, shared/weak references, native Promise waiting, class identity, export metadata and TSFN callback results. See [the parity inventory](docs/NAPI_RS_PARITY.md) for APIs, ownership rules and platform boundaries.
 
-OHOS runtime regression is mandatory in QEMU through signed UIAbility HAPs. The combined [QEMU E2E pipeline](docs/QEMU_E2E.md) also cross-builds the Node products and runs their full regression and WASM acceptance in a Linux QEMU guest. Run `pnpm test:e2e:qemu -- <runner arguments>` from the repository root.
+OHOS runtime regression uses the [QEMU HAP pipeline](docs/QEMU_E2E.md): `pnpm test:e2e:qemu -- <runner arguments>`. Node.js native addons and WASI products run directly on the host with `pnpm test:e2e:node --output zig-out/e2e-node`; CI also retains the Linux, Windows and macOS Node runtime matrix.
 
 ## Usage
 

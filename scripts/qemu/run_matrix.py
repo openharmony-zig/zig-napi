@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the selected products and require real Node/OHOS QEMU E2E results."""
+"""Build all OHOS HAP suites and require real QEMU E2E results."""
 import argparse
 import hashlib
 import json
@@ -11,12 +11,10 @@ import sys
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--product', choices=['both', 'node', 'ohos'], default='both')
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--ohos-zig')
     parser.add_argument('--ohos-arch', choices=['arm64', 'x86_64'])
     parser.add_argument('--ohos-guest', type=Path, help='guest.json from boot_ohos_guest.py supplies the live QEMU connection')
-    parser.add_argument('--node-zig', default='zig')
     parser.add_argument('--ndk', type=Path)
     parser.add_argument('--sdk', type=Path)
     parser.add_argument('--signer-dist', type=Path)
@@ -26,10 +24,6 @@ def main():
     parser.add_argument('--server')
     parser.add_argument('--target')
     parser.add_argument('--qmp', type=Path)
-    parser.add_argument('--node-guest', type=Path)
-    parser.add_argument('--node-archive', type=Path)
-    parser.add_argument('--node-shasums', type=Path)
-    parser.add_argument('--zig-archive', type=Path, help='Optional local official Zig 0.16 Linux x64 archive for the Node guest')
     parser.add_argument('--repeat', type=int, default=3)
     args = parser.parse_args()
     ohos_guest = None
@@ -42,14 +36,10 @@ def main():
             setattr(args, name, ohos_guest[name])
         args.qmp = Path(ohos_guest['qmp'])
     args.ohos_arch = args.ohos_arch or 'arm64'
-    required = []
-    if args.product in ('both', 'ohos'):
-        required += ['ohos_zig', 'ndk', 'sdk', 'signer_dist', 'udid', 'target', 'qmp']
-    if args.product in ('both', 'node'):
-        required += ['node_guest', 'node_archive', 'node_shasums']
+    required = ['ohos_zig', 'ndk', 'sdk', 'signer_dist', 'udid', 'target', 'qmp']
     for name in required:
         if getattr(args, name) is None:
-            parser.error('--' + name.replace('_', '-') + ' is required for ' + args.product)
+            parser.error('--' + name.replace('_', '-') + ' is required for OHOS')
     if not 1 <= args.repeat <= 20:
         parser.error('--repeat must be between 1 and 20')
     repo = Path(__file__).resolve().parents[2]
@@ -69,7 +59,7 @@ def main():
         if result.returncode:
             raise RuntimeError(f'{name} failed: {output / (name + ".log")}')
 
-    suites = ['basic', 'allocator-builtin', 'allocator-custom', 'init', 'memory'] if args.product in ('both', 'ohos') else []
+    suites = ['basic', 'allocator-builtin', 'allocator-custom', 'init', 'memory']
     evidence = {}
     target, abi = {'arm64': ('aarch64-linux-ohos', 'arm64-v8a'), 'x86_64': ('x86_64-linux-ohos', 'x86_64')}[args.ohos_arch]
     for suite in suites:
@@ -98,22 +88,6 @@ def main():
 
     run('check-declarations', ['node', repo / 'scripts/check_declarations.cjs'])
 
-    if args.product in ('both', 'node'):
-        node_tests = repo / 'node-test'
-        cli = repo / 'packages/zig-napi/bin/zig-napi.js'
-        run('build-wasi-threads', ['node', cli, 'build', '--target', 'wasm32-wasi'], node_tests)
-        run('build-wasi-single', ['node', cli, 'build', '--target', 'wasm32-wasip1'], node_tests)
-        oom = output / 'wasm-oom'
-        oom_install = output / 'oom-install'
-        run('build-wasi-oom', ['node', cli, 'build', '--target', 'wasm32-wasi', '--output-dir', oom_install / 'node', '--build-output-dir', oom, '--', '--prefix', oom_install, '-Dwasi-max-memory-pages=1024'], node_tests)
-        native = output / 'node-linux'
-        run('build-node-linux', [args.node_zig, 'build', '-Dtarget=x86_64-linux-gnu', '-Dnapi-version=10', '--prefix', native, '--summary', 'all'], node_tests)
-        result = output / 'results-node'
-        node_command = [sys.executable, scripts / 'run_node_e2e.py', '--guest', args.node_guest, '--artifacts', native / 'node', '--wasm-oom', oom / 'async_tasks.wasm32-wasi.wasm', '--node-archive', args.node_archive, '--node-shasums', args.node_shasums, '--output', result, '--repeat', args.repeat]
-        if args.zig_archive:
-            node_command += ['--zig-archive', args.zig_archive]
-        run('e2e-node', node_command)
-        evidence['node'] = json.loads((result / 'evidence.json').read_text())
     source = {}
     files = subprocess.check_output(['git', 'ls-files', '-m', '-o', '--exclude-standard'], cwd=repo, text=True).splitlines()
     for name in sorted(set(files)):
@@ -121,7 +95,7 @@ def main():
         if path.is_file():
             source[name] = hashlib.sha256(path.read_bytes()).hexdigest()
     revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=repo, text=True).strip()
-    (output / 'matrix.json').write_text(json.dumps({'revision': revision, 'product': args.product, 'ohosGuest': ohos_guest, 'sourceSha256': source, 'evidence': evidence, 'commands': commands}, indent=2))
+    (output / 'matrix.json').write_text(json.dumps({'revision': revision, 'product': 'ohos', 'ohosGuest': ohos_guest, 'sourceSha256': source, 'evidence': evidence, 'commands': commands}, indent=2))
     print(output / 'matrix.json', flush=True)
 
 

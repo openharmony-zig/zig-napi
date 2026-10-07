@@ -28,6 +28,18 @@ The last four addons are built with a counting allocator so their specs can
 assert that native allocations return to their baseline, on the failure paths
 included.
 
+## Full host E2E
+
+Run directly on the development host or CI runner:
+
+```bash
+pnpm test:e2e:node --output zig-out/e2e-node --repeat 3
+```
+
+This builds native addons, both WASI flavors and an isolated OOM artifact, then
+requires complete WASM acceptance and three full regression rounds with zero
+skips. QEMU is required only for the separate OHOS HAP E2E pipeline.
+
 ## Native tests
 
 ```bash
@@ -56,8 +68,12 @@ instead of falling back to a native binary.
 All commands in this section run from the repository root.
 
 Build both flavors first; a build only regenerates the flavor it targets, and it
-also regenerates the committed `.wasi.cjs`/`.wasip1.cjs` loaders, their browser
-variants and worker files:
+also generates the `.wasi.cjs`/`.wasip1.cjs` loaders, their browser variants,
+deferred entry points, type declarations and shared worker files. The six addons
+produce 51 loader/type files plus 12 `.wasm` binaries across both flavors. These
+are ignored build outputs; their maintained source is in
+`packages/zig-napi/lib/cli.cjs` and `packages/zig-napi/lib/wasi-templates.cjs`.
+A fresh checkout must build the requested flavors before running WASI tests:
 
 ```bash
 node packages/zig-napi/bin/zig-napi.js build --cwd node-test --target wasm32-wasip1-threads -- --summary all

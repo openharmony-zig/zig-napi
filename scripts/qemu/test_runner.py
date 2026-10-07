@@ -56,14 +56,12 @@ class RunnerTests(unittest.TestCase):
                     thread.join(timeout=10)
                 self.assertFalse(thread.is_alive())
 
-    def test_product_prerequisites_fail_before_build(self):
+    def test_ohos_prerequisites_fail_before_build(self):
         script = Path(__file__).with_name('run_matrix.py')
-        for product, missing in [('ohos', '--ohos-zig'), ('node', '--node-guest'), ('both', '--ohos-zig')]:
-            with self.subTest(product=product):
-                result = subprocess.run([sys.executable, str(script), '--product', product,
-                                         '--output', '/unused'], capture_output=True, text=True)
-                self.assertEqual(result.returncode, 2)
-                self.assertIn(missing + ' is required', result.stderr)
+        result = subprocess.run([sys.executable, str(script), '--output', '/unused'],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('--ohos-zig is required for OHOS', result.stderr)
 
 
 if __name__ == '__main__':

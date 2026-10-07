@@ -98,7 +98,7 @@ Passing `napi_module` lets the configured version flow into both the addon root 
 
 OHOS regression uses a signed UIAbility HAP installed in a real OpenHarmony QEMU guest. The shared E2E suites run through the application's native host and verify fresh result IDs, exact test groups, finalizers and allocator cleanup across repeated launches.
 
-The repository's `pnpm test:e2e:qemu -- <runner arguments>` pipeline builds both OHOS and Node.js products, runs the five OHOS HAP suites, and tests native Node.js plus both WASI flavors inside a Linux QEMU guest. See [QEMU runner setup and evidence](https://github.com/openharmony-zig/zig-napi/blob/main/docs/QEMU_E2E.md).
+The repository's `pnpm test:e2e:qemu <runner arguments>` pipeline builds and runs the five OHOS HAP suites in the OHOS QEMU guest. Node.js native addons and both WASI flavors run directly on the host with `pnpm test:e2e:node --output zig-out/e2e-node`. See [OHOS QEMU setup and Node host regression](https://github.com/openharmony-zig/zig-napi/blob/main/docs/QEMU_E2E.md).
 
 ## Helper Functions
 

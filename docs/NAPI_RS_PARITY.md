@@ -53,6 +53,6 @@ OHOS APIs follow the installed SDK headers. Registry symbols use `Symbol.for` wh
 
 The default native API remains v8. `node-test` supports `-Dnapi-version=10` to exercise modern APIs without raising the minimum version of existing addons. Node-API version selection and experimental APIs remain compile-time gates.
 
-See [QEMU E2E](QEMU_E2E.md) for the mandatory real-guest validation pipeline and evidence format.
+See [OHOS QEMU E2E and Node host regression](QEMU_E2E.md) for the validation pipelines and evidence format. Only OHOS requires QEMU; Node.js and WASI regression runs directly on the runner.
 
 The original parity run is recorded in [qemu-e2e-results.json](qemu-e2e-results.json). The Node-only CLI source migration has a separate full matrix report in [cli-refactor-e2e-results.json](cli-refactor-e2e-results.json).

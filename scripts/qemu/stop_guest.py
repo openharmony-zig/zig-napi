@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stop a guest created by boot_ohos_guest.py or boot_node_guest.py through QMP."""
+"""Stop an OHOS guest created by boot_ohos_guest.py through QMP."""
 import argparse
 import json
 from pathlib import Path
@@ -14,7 +14,7 @@ def main():
     if not args.guest.is_file():
         return
     guest = json.loads(args.guest.read_text())
-    qmp = Path(guest.get('qmp', args.guest.resolve().parent / 'qmp.sock'))
+    qmp = Path(guest['qmp'])
     if qmp.exists():
         try:
             qmp_command(qmp, 'quit')
