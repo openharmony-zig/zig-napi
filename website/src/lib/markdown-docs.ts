@@ -26,6 +26,7 @@ type VisitorContext = {
   textContent(node: HastElement): string;
   setProperty(node: HastElement, key: string, value: unknown): void;
   wrapNode(node: HastElement, wrapper: HastElement): void;
+  prependChild(node: HastElement, child: HastElement): void;
 };
 
 export type MarkdownDocsOptions = {
@@ -33,14 +34,21 @@ export type MarkdownDocsOptions = {
   base: string;
   /** Ids of the API documents that relative links may point at. */
   docIds: string[];
+  /** Current heading slug -> published id, keyed by document id. */
+  headingRenames?: Record<string, Record<string, string>>;
 };
 
 const HEADING_TAGS = ["h1", "h2", "h3", "h4", "h5", "h6"];
 
 export function markdownDocs(options: MarkdownDocsOptions) {
   // Plugin factories run once per document, so the slugger state is per page.
-  return () => {
+  return (document: { fileURL?: URL }) => {
     const slugify = createLegacySlugger();
+    const docId = document.fileURL?.pathname
+      .split("/")
+      .pop()
+      ?.replace(/\.mdx?$/, "");
+    const headingRenames = new Map(Object.entries(options.headingRenames?.[docId ?? ""] ?? {}));
 
     return {
       name: "zig-napi-docs",
@@ -50,7 +58,19 @@ export function markdownDocs(options: MarkdownDocsOptions) {
           visit(node: unknown, context: unknown) {
             const heading = node as HastElement;
             const ctx = context as VisitorContext;
-            ctx.setProperty(heading, "id", slugify(ctx.textContent(heading)));
+            const slug = slugify(ctx.textContent(heading));
+            const publishedId = headingRenames.get(slug);
+            ctx.setProperty(heading, "id", publishedId ?? slug);
+            if (publishedId && publishedId !== slug) {
+              // Keep the published id on its heading and expose the current
+              // title's slug at the same location, without changing its text.
+              ctx.prependChild(heading, {
+                type: "element",
+                tagName: "span",
+                properties: { id: slug, className: ["heading-alias"] },
+                children: [],
+              });
+            }
           },
         },
         {
