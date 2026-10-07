@@ -27,7 +27,7 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
             return Self{ .env = env, .raw = raw, .type = napi.napi_function, .inner_fn = null, .args = undefined, .return_type = undefined };
         }
 
-        pub fn New(env: Env, comptime name: []const u8, value: anytype) !Self {
+        pub fn New(env: Env, comptime function_name: []const u8, value: anytype) !Self {
             const value_type = @TypeOf(value);
             const infos = @typeInfo(value_type);
             const params = infos.@"fn".params;
@@ -39,6 +39,13 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
             const FnImpl = struct {
                 const has_env = params.len > 0 and params[0].type.? == Env;
                 const env_index = if (has_env) 1 else 0;
+                const this_count = blk: {
+                    var count: usize = 0;
+                    for (params) |param| if (helper.isThis(param.type.?)) {
+                        count += 1;
+                    };
+                    break :blk count;
+                };
 
                 fn cleanupArgs(args: *std.meta.ArgsTuple(value_type), initialized: usize, allocator: std.mem.Allocator) void {
                     inline for (params, 0..) |param, i| {
@@ -152,13 +159,14 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                     const return_payload = returnPayloadType(return_info);
                     const async_returns_descriptor = comptime helper.isAsyncDescriptor(return_payload);
                     const has_async_events = comptime async_returns_descriptor and return_payload.async_has_events;
-                    const expected_argc = params.len - env_index + if (has_async_events) 1 else 0;
+                    const expected_argc = params.len - env_index - this_count + if (has_async_events) 1 else 0;
 
                     var init_argc: usize = expected_argc;
                     var args_raw: [expected_argc]napi.napi_value = undefined;
                     const args_ptr = if (expected_argc == 0) null else args_raw[0..].ptr;
 
-                    const cb_status = napi.napi_get_cb_info(inner_env, info, &init_argc, args_ptr, null, null);
+                    var receiver: napi.napi_value = null;
+                    const cb_status = napi.napi_get_cb_info(inner_env, info, &init_argc, args_ptr, &receiver, null);
                     if (cb_status != napi.napi_ok) {
                         return NapiError.checkNapiStatus(inner_env, NapiError.Status.New(cb_status));
                     }
@@ -207,11 +215,12 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                     }
 
                     var abort_signal: ?AbortSignal = null;
+                    var positional: usize = 0;
                     inline for (params[env_index..], env_index..) |param_index, i| {
                         NapiError.clearLastError();
                         const converted = Napi.from_napi_value_auto_with_allocator(
                             inner_env,
-                            args_raw[i - env_index],
+                            if (comptime helper.isThis(param_index.type.?)) receiver else args_raw[positional],
                             param_index.type.?,
                             frame_allocator,
                         ) catch |err| {
@@ -219,12 +228,13 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                         };
                         napi_params[i] = converted;
                         initialized_params = i + 1;
+                        if (comptime !helper.isThis(param_index.type.?)) positional += 1;
                         if (comptime helper.isAbortSignal(param_index.type.?)) {
                             abort_signal = napi_params[i];
                         }
                     }
 
-                    const event_listener = if (has_async_events and copied_argc > params.len - env_index)
+                    const event_listener = if (has_async_events and copied_argc > params.len - env_index - this_count)
                         args_raw[copied_argc - 1]
                     else
                         null;
@@ -244,13 +254,101 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
             };
 
             var result: napi.napi_value = undefined;
-            const fn_status = napi.napi_create_function(env.raw, @ptrCast(name.ptr), 0, FnImpl.inner_fn, null, &result);
+            const fn_status = napi.napi_create_function(env.raw, @ptrCast(function_name.ptr), 0, FnImpl.inner_fn, null, &result);
             if (fn_status != napi.napi_ok) {
                 return NapiError.Error.fromStatus(NapiError.Status.New(fn_status));
             }
             var func = Self.from_raw(env.raw, result);
             func.inner_fn = FnImpl.inner_fn;
             return func;
+        }
+
+        /// Move context into the JavaScript function. If Context defines deinit,
+        /// its finalizer calls deinit(*Context) before releasing the allocation.
+        pub fn NewClosure(env: Env, name_: []const u8, context: anytype, comptime callback: anytype) !Self {
+            const Context = @TypeOf(context);
+            const Closure = struct {
+                allocator: std.mem.Allocator,
+                context: Context,
+
+                fn finalize(_: napi.napi_env, data: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
+                    const state: *@This() = @ptrCast(@alignCast(data.?));
+                    const allocator = state.allocator;
+                    if (comptime @typeInfo(Context) == .@"struct" and @hasDecl(Context, "deinit")) state.context.deinit();
+                    allocator.destroy(state);
+                }
+
+                fn invoke(inner_env: napi.napi_env, info: napi.napi_callback_info) callconv(.c) napi.napi_value {
+                    const frame = NapiError.ErrorFrame.save();
+                    NapiError.clearLastError();
+                    defer frame.restore();
+                    const count = if (ArgsInfos == .@"struct" and ArgsInfos.@"struct".is_tuple) ArgsInfos.@"struct".fields.len else if (ArgsInfos == .@"struct" and ArgsInfos.@"struct".fields.len == 0) 0 else 1;
+                    var argv: [count]napi.napi_value = undefined;
+                    var argc: usize = count;
+                    var data: ?*anyopaque = null;
+                    const status = napi.napi_get_cb_info(inner_env, info, &argc, if (count == 0) null else &argv, null, &data);
+                    if (status != napi.napi_ok) {
+                        const err = NapiError.failStatus(status);
+                        NapiError.mapAnyError(err).throwInto(Env.from_raw(inner_env));
+                        NapiError.throwCurrent(Env.from_raw(inner_env));
+                        return null;
+                    }
+                    const state: *@This() = @ptrCast(@alignCast(data.?));
+                    const allocator = GlobalAllocator.capture();
+                    var conversion = Napi.ConversionFrame{};
+                    conversion.start(allocator);
+                    defer conversion.end();
+                    var args: Args = undefined;
+                    var initialized: usize = 0;
+                    defer {
+                        if (comptime ArgsInfos == .@"struct" and ArgsInfos.@"struct".is_tuple) Napi.cleanupStructPrefix(Args, &args, initialized, allocator) else if (initialized != 0) Napi.deinit_napi_value_with_allocator(Args, args, allocator);
+                    }
+                    defer conversion.rollbackUncommitted();
+                    if (argc < count) {
+                        const err = NapiError.failTypeError("Expected {d} callback arguments, got {d}", .{ count, argc });
+                        NapiError.mapAnyError(err).throwInto(Env.from_raw(inner_env));
+                        NapiError.throwCurrent(Env.from_raw(inner_env));
+                        return null;
+                    }
+                    if (comptime count == 0) {
+                        args = .{};
+                    } else if (comptime ArgsInfos == .@"struct" and ArgsInfos.@"struct".is_tuple) {
+                        inline for (ArgsInfos.@"struct".fields, 0..) |field, i| {
+                            args[i] = Napi.from_napi_value_auto_with_allocator(inner_env, argv[i], field.type, allocator) catch {
+                                NapiError.throwCurrent(Env.from_raw(inner_env));
+                                return null;
+                            };
+                            initialized += 1;
+                        }
+                    } else {
+                        args = Napi.from_napi_value_auto_with_allocator(inner_env, argv[0], Args, allocator) catch {
+                            NapiError.throwCurrent(Env.from_raw(inner_env));
+                            return null;
+                        };
+                        initialized = 1;
+                    }
+                    conversion.commit();
+                    const result = callback(&state.context, Env.from_raw(inner_env), if (comptime count == 0) .{} else args) catch |err| {
+                        if (err != error.PendingException and !NapiError.hasPendingException()) NapiError.mapAnyError(err).throwInto(Env.from_raw(inner_env));
+                        return null;
+                    };
+                    defer if (comptime Napi.containsOwnedValue(@TypeOf(result))) Napi.disposeOwnedParts(@TypeOf(result), result, allocator);
+                    return Napi.to_napi_value_auto(inner_env, result, null) catch {
+                        NapiError.throwCurrent(Env.from_raw(inner_env));
+                        return null;
+                    };
+                }
+            };
+            const allocator = GlobalAllocator.capture();
+            const state = try allocator.create(Closure);
+            errdefer allocator.destroy(state);
+            state.* = .{ .allocator = allocator, .context = context };
+            var raw: napi.napi_value = null;
+            var status = napi.napi_create_function(env.raw, name_.ptr, name_.len, Closure.invoke, state, &raw);
+            if (status != napi.napi_ok) return NapiError.failStatus(status);
+            status = napi.napi_add_finalizer(env.raw, raw, state, Closure.finalize, null, null);
+            if (status != napi.napi_ok) return NapiError.failStatus(status);
+            return Self.from_raw(env.raw, raw);
         }
 
         /// Call the function with the given arguments
@@ -266,6 +364,40 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
         /// When the callback throws, `error.PendingException` is returned and the
         /// original JavaScript exception stays pending in the environment.
         pub fn Call(self: Self, args: Args) !Return {
+            const receiver = try Undefined.create(Env.from_raw(self.env));
+            return self.Apply(receiver, args);
+        }
+
+        pub fn Apply(self: Self, receiver: anytype, args: Args) !Return {
+            const raw = try self.invoke(receiver, args, false);
+            NapiError.clearLastError();
+            if (comptime Return == void) return;
+            return Napi.from_napi_value_auto(self.env, raw, Return);
+        }
+
+        pub fn NewInstance(self: Self, args: Args) !@import("./object.zig").Object {
+            return @import("./object.zig").Object.from_raw(self.env, try self.invoke({}, args, true));
+        }
+
+        pub fn Bind(self: Self, receiver: anytype) !Self {
+            var bind: napi.napi_value = undefined;
+            var result: napi.napi_value = undefined;
+            const get_status = napi.napi_get_named_property(self.env, self.raw, "bind", &bind);
+            if (get_status != napi.napi_ok) return NapiError.failStatus(get_status);
+            const raw_receiver = try Napi.to_napi_value_auto(self.env, receiver, null);
+            const status = napi.napi_call_function(self.env, self.raw, bind, 1, @ptrCast(&raw_receiver), &result);
+            if (status != napi.napi_ok) return NapiError.failStatus(status);
+            return Self.from_raw(self.env, result);
+        }
+
+        pub fn name(self: Self) !@import("./string.zig").String {
+            var result: napi.napi_value = undefined;
+            const status = napi.napi_get_named_property(self.env, self.raw, "name", &result);
+            if (status != napi.napi_ok) return NapiError.failStatus(status);
+            return @import("./string.zig").String.from_raw(self.env, result);
+        }
+
+        fn invoke(self: Self, receiver: anytype, args: Args, comptime construct: bool) !napi.napi_value {
             const isTuple = ArgsInfos == .@"struct" and ArgsInfos.@"struct".is_tuple;
             const isEmptyStruct = ArgsInfos == .@"struct" and ArgsInfos.@"struct".fields.len == 0;
 
@@ -283,25 +415,15 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                 args_raw[0] = try Napi.to_napi_value_auto(self.env, args, null);
             }
 
-            const this = try Undefined.create(Env.from_raw(self.env));
-
             var result: napi.napi_value = undefined;
 
             const args_ptr = if (args_len == 0) null else args_raw[0..].ptr;
-            const status = napi.napi_call_function(self.env, this.raw, self.raw, args_len, args_ptr, &result);
-            if (status != napi.napi_ok) {
-                return NapiError.failStatus(status);
-            }
-
-            // Discard error state produced by nested callbacks; only the outcome
-            // of this call may decide whether `Call` fails.
-            NapiError.clearLastError();
-
-            if (comptime Return == void) {
-                return;
-            }
-
-            return Napi.from_napi_value_auto(self.env, result, Return);
+            const status = if (construct)
+                napi.napi_new_instance(self.env, self.raw, args_len, args_ptr, &result)
+            else
+                napi.napi_call_function(self.env, try Napi.to_napi_value_auto(self.env, receiver, null), self.raw, args_len, args_ptr, &result);
+            if (status != napi.napi_ok) return NapiError.failStatus(status);
+            return result;
         }
 
         pub fn CreateRef(self: Self) !Reference(Self) {

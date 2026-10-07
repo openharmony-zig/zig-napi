@@ -160,6 +160,16 @@ pub fn asyncThreadValue(input: u32) napi.Async(u32, .thread) {
     return napi.Async(u32, .thread).from(input, slowEcho);
 }
 
+pub fn wasmTrapAsync() napi.Async(void, .thread) {
+    const Trap = struct {
+        fn execute(_: void) !void {
+            if (comptime builtin.cpu.arch.isWasm()) @trap();
+            return error.WasmOnly;
+        }
+    };
+    return napi.Async(void, .thread).from({}, Trap.execute);
+}
+
 fn unusedInput(_: i32) i32 {
     return 1;
 }

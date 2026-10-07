@@ -168,7 +168,10 @@ fn callNodeApi(comptime name: [:0]const u8, comptime Fn: type, args: anytype) no
         return @call(.auto, function, args);
     }
 
-    const function = @extern(Fn, .{ .name = name });
+    // emnapi's async-cleanup archive imports these two symbols from napi.
+    // Match that module when Zig also calls them directly in the same image.
+    const library: ?[]const u8 = comptime if (wasm.enabled and (std.mem.eql(u8, name, "napi_add_env_cleanup_hook") or std.mem.eql(u8, name, "napi_remove_env_cleanup_hook"))) "napi" else null;
+    const function = @extern(Fn, .{ .name = name, .library_name = library });
     return @call(.auto, function, args);
 }
 
@@ -335,7 +338,8 @@ fn loadAllNodeApiSymbols() void {
     loadNodeApi("node_api_create_property_key_utf16", node_api_create_property_key_utf16);
     loadNodeApi("node_api_create_buffer_from_arraybuffer", node_api_create_buffer_from_arraybuffer);
     loadNodeApi("node_api_post_finalizer", node_api_post_finalizer);
-    loadNodeApi("napi_create_object_with_properties", napi_create_object_with_properties);
+    loadNodeApi("node_api_create_object_with_properties", node_api_create_object_with_properties);
+    loadNodeApi("napi_get_uv_event_loop", napi_get_uv_event_loop);
 }
 pub fn napi_get_last_error_info(arg0: node_api_basic_env, arg1: [*c][*c]const napi_extended_error_info) callconv(.c) napi_status {
     if (wasm.enabled) return wasm.getLastErrorInfo(arg0, arg1);
@@ -934,9 +938,9 @@ pub const napi_type_tag = extern struct {
     lower: u64,
     upper: u64,
 };
-pub const napi_async_cleanup_hook_handle__ = opaque {};
-pub const napi_async_cleanup_hook_handle = ?*napi_async_cleanup_hook_handle__;
-pub const napi_async_cleanup_hook = ?*const fn (handle: napi_async_cleanup_hook_handle, data: ?*anyopaque) callconv(.c) void;
+pub const napi_async_cleanup_hook_handle__ = types.napi_async_cleanup_hook_handle__;
+pub const napi_async_cleanup_hook_handle = types.napi_async_cleanup_hook_handle;
+pub const napi_async_cleanup_hook = types.napi_async_cleanup_hook;
 
 pub fn napi_type_tag_object(arg0: napi_env, arg1: napi_value, arg2: [*c]const napi_type_tag) callconv(.c) napi_status {
     const Fn = *const fn (napi_env, napi_value, [*c]const napi_type_tag) callconv(.c) napi_status;
@@ -1012,8 +1016,16 @@ pub fn node_api_post_finalizer(arg0: node_api_basic_env, arg1: napi_finalize, ar
     const Fn = *const fn (node_api_basic_env, napi_finalize, ?*anyopaque, ?*anyopaque) callconv(.c) napi_status;
     return callNodeApi("node_api_post_finalizer", Fn, .{ arg0, arg1, arg2, arg3 });
 }
-pub fn napi_create_object_with_properties(arg0: napi_env, arg1: napi_value, arg2: [*c]const napi_value, arg3: [*c]const napi_value, arg4: usize, arg5: [*c]napi_value) callconv(.c) napi_status {
+pub fn node_api_create_object_with_properties(arg0: napi_env, arg1: napi_value, arg2: [*c]const napi_value, arg3: [*c]const napi_value, arg4: usize, arg5: [*c]napi_value) callconv(.c) napi_status {
     const Fn = *const fn (napi_env, napi_value, [*c]const napi_value, [*c]const napi_value, usize, [*c]napi_value) callconv(.c) napi_status;
-    if (wasm.enabled) return wasm.callEmnapiApi("napi_create_object_with_properties", Fn, .{ arg0, arg1, arg2, arg3, arg4, arg5 });
-    return callNodeApi("napi_create_object_with_properties", Fn, .{ arg0, arg1, arg2, arg3, arg4, arg5 });
+    if (wasm.enabled) return wasm.callEmnapiApi("node_api_create_object_with_properties", Fn, .{ arg0, arg1, arg2, arg3, arg4, arg5 });
+    return callNodeApi("node_api_create_object_with_properties", Fn, .{ arg0, arg1, arg2, arg3, arg4, arg5 });
+}
+
+/// Compatibility alias. Node exports the node_api_ spelling of this API.
+pub const napi_create_object_with_properties = node_api_create_object_with_properties;
+pub const uv_loop_s = opaque {};
+pub fn napi_get_uv_event_loop(env: napi_env, result: [*c]?*uv_loop_s) callconv(.c) napi_status {
+    const Fn = *const fn (napi_env, [*c]?*uv_loop_s) callconv(.c) napi_status;
+    return callNodeApi("napi_get_uv_event_loop", Fn, .{ env, result });
 }

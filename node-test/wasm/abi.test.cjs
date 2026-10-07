@@ -29,6 +29,7 @@ const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const { test } = require("node:test");
 const assert = require("node:assert");
+const testTimeout = require("../test-timeout.js");
 
 const CHILD_FLAG = "--zig-napi-abi-child";
 const OOM_CHILD_FLAG = "--zig-napi-abi-oom-child";
@@ -79,8 +80,8 @@ function artifactRoot() {
 // Parent: run each flavor in a child with a deadline
 // ---------------------------------------------------------------------------
 
-/// Root of an out-of-memory build (`-Dwasi-max-memory-pages=520`, which makes
-/// the wasm heap exhaustible in a few MiB). Optional: the default artifacts
+/// Root of an out-of-memory build (`-Dwasi-max-memory-pages=1024`, which makes
+/// the wasm heap exhaustible below 64 MiB). Optional: the default artifacts
 /// have a 4 GiB maximum, so this only runs when the environment points at a
 /// small-memory build instead of allocating gigabytes to reach the limit.
 function oomArtifactRoot() {
@@ -258,7 +259,7 @@ function registerBuildOptionTests() {
         const result = spawnSync("zig", ["build", "-Dtarget=wasm32-wasi", ...args], {
           cwd: nodeTestDir,
           encoding: "utf8",
-          timeout: 120000,
+          timeout: testTimeout(120000),
           env: { ...process.env },
         });
         const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;

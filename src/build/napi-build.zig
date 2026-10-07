@@ -876,6 +876,7 @@ pub fn nodeAddonBuild(build: *std.Build, option: NodeAddonBuildOptionsWithModule
     const build_options_module = addon_build_options.createModule();
     addConfiguredNapiImport(build, compile.root_module, option.napi_module, build_options_module, true);
     compile.linker_allow_shlib_undefined = true;
+    if (target.result.os.tag != .windows) compile.root_module.link_libc = true;
     if (is_wasi) {
         compile.rdynamic = true;
         compile.root_module.link_libc = true;

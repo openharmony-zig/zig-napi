@@ -27,15 +27,34 @@ pub const NapiVersion = options.NapiVersion;
 pub const selectedNapiVersion = options.selectedNapiVersion;
 pub const experimentalEnabled = options.experimentalEnabled;
 pub const Env = env.Env;
+pub const AsyncCleanupHook = env.AsyncCleanupHook;
+pub const HandleScope = @import("./napi/wrapper/scope.zig").HandleScope;
+pub const EscapableHandleScope = @import("./napi/wrapper/scope.zig").EscapableHandleScope;
 pub const NapiValue = value.NapiValue;
 pub const Object = value.Object;
 pub const Number = value.Number;
 pub const String = value.String;
+pub const Date = @import("./napi/value/special.zig").Date;
+pub const Symbol = @import("./napi/value/special.zig").Symbol;
+pub const This = @import("./napi/value/special.zig").This;
+pub const TaggedUnion = @import("./napi/value/tagged_union.zig").TaggedUnion;
 pub const BigInt = value.BigInt;
 pub const Null = value.Null;
 pub const Undefined = value.Undefined;
 pub const Promise = value.Promise;
 pub const PromiseValue = value.PromiseValue;
+pub const NativePromise = @import("./napi/value/native_promise.zig").NativePromise;
+pub const PromiseOf = @import("./napi/value/protocol.zig").PromiseOf;
+pub const ReadableStream = @import("./napi/value/streams.zig").ReadableStream;
+pub const ReadableStreamReader = @import("./napi/value/streams.zig").ReadableStreamReader;
+pub const WritableStream = @import("./napi/value/streams.zig").WritableStream;
+pub const WritableStreamWriter = @import("./napi/value/streams.zig").WritableStreamWriter;
+pub const Iterator = @import("./napi/value/protocol.zig").Iterator;
+pub const AsyncIterator = @import("./napi/value/protocol.zig").AsyncIterator;
+pub const StringMap = @import("./napi/value/collections.zig").StringMap;
+pub const Set = @import("./napi/value/collections.zig").Set;
+pub const Json = @import("./napi/value/collections.zig").Json;
+pub const Iteration = @import("./napi/value/protocol.zig").Iteration;
 pub const Bool = value.Bool;
 pub const Array = value.Array;
 
@@ -59,6 +78,7 @@ pub const tryWorkerBorrowed = worker.tryWorkerBorrowed;
 /// Transfer mode of the `data` field; declare it on a named init struct:
 /// `pub const data_transfer: napi.WorkerDataTransfer = .borrowed;`
 pub const WorkerDataTransfer = worker.DataTransfer;
+pub const JsCallResult = thread_safe_function.JsCallResult;
 pub const ThreadSafeFunction = thread_safe_function.ThreadSafeFunction;
 pub const ThreadSafeFunctionMode = thread_safe_function.ThreadSafeFunctionMode;
 pub const ThreadSafeFunctionReleaseMode = thread_safe_function.ThreadSafeFunctionReleaseMode;
@@ -67,6 +87,12 @@ pub const CancelToken = async.CancelToken;
 pub const AbortSignal = abort_signal.AbortSignal;
 pub const resolveRequestedRuntime = async.resolveRequestedRuntime;
 pub const Class = class.Class;
+pub fn ClassInstance(comptime T: type) type {
+    return class.ClassInstance(T, true);
+}
+pub fn FactoryClassInstance(comptime T: type) type {
+    return class.ClassInstance(T, false);
+}
 pub const ClassWithoutInit = class.ClassWithoutInit;
 /// Policy for the converted `init`/factory arguments of a class; declare it on
 /// the class: `pub const arg_ownership: napi.ArgOwnership = .transient;`
@@ -87,6 +113,12 @@ pub const BigInt64Array = typedarray.BigInt64Array;
 pub const BigUint64Array = typedarray.BigUint64Array;
 pub const DataView = dataview.DataView;
 pub const Reference = reference.Reference;
+pub fn SharedReference(comptime T: type) type {
+    return @import("./napi/wrapper/managed_reference.zig").ManagedReference(T, true);
+}
+pub fn WeakReference(comptime T: type) type {
+    return @import("./napi/wrapper/managed_reference.zig").ManagedReference(T, false);
+}
 pub const Ref = reference.Reference;
 pub const External = external.External;
 pub const NativeWrap = native_wrap;
@@ -94,6 +126,9 @@ pub fn FunctionRef(comptime Args: type, comptime Return: type) type {
     return reference.Reference(function.Function(Args, Return));
 }
 pub const ObjectRef = reference.Reference(value.Object);
+pub const exportMetadata = @import("./napi/metadata.zig");
+pub const ExportOptions = @import("./napi/metadata.zig").ExportOptions;
+pub const MemberKind = @import("./napi/metadata.zig").MemberKind;
 pub const Dts = dts_override.Dts;
 pub const dts = dts_override.dts;
 

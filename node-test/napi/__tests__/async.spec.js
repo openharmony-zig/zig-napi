@@ -37,7 +37,7 @@ function runIsolated(body, extraArgs = [], timeoutMs = 5000) {
   return childProcess().spawnSync(
     process.execPath,
     [...extraArgs, "-e", `const a=require(${JSON.stringify(loaderPath)})("async_tasks");${body}`],
-    { encoding: "utf8", timeout: timeoutMs },
+    { encoding: "utf8", timeout: require("../../test-timeout")(timeoutMs) },
   );
 }
 
@@ -52,6 +52,16 @@ function settlementStateSize() {
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function waitForFullEventQueue(expectedInFlight) {
+  const deadline = Date.now() + require("../../test-timeout")(5000);
+  // Keep JS from draining the queue while the native producer runs. QEMU may
+  // need more time to schedule/fill it; readiness is the actual queue water
+  // mark, and the caller still asserts its exact limit after this deadline.
+  while (native.eventQueueHighWater() < expectedInFlight && Date.now() < deadline) {
+    // Wait for native progress without returning to the JS event loop.
+  }
 }
 
 async function settlesWithin(promise, ms) {
@@ -330,10 +340,7 @@ test("the event queue is bounded and still delivers every event in order", async
   });
   // Block the JavaScript thread so nothing drains while the producer fills the
   // queue: it has to wait for capacity instead of allocating `total` payloads.
-  const until = Date.now() + 300;
-  while (Date.now() < until) {
-    // busy wait
-  }
+  waitForFullEventQueue(expectedInFlight);
   t.is(native.eventQueueHighWater(), expectedInFlight, "the producer must stop at the queue limit");
   t.is(await pending, total);
   t.is(seen.length, total, "no event may be lost");
@@ -360,10 +367,7 @@ abortTest("cancelling releases a producer that waits for queue capacity", async 
   // Make the JavaScript side slow enough that the producer fills the queue and
   // blocks, then abort: the cancellation must wake it even though the
   // JavaScript thread cannot drain the queue it is waiting on.
-  const until = Date.now() + 50;
-  while (Date.now() < until) {
-    // busy wait
-  }
+  waitForFullEventQueue(expectedInFlight);
   t.is(
     native.eventQueueHighWater(),
     expectedInFlight,
@@ -745,7 +749,8 @@ nativeOnlyTest("an abandoned producer finishes after its environment is torn dow
   await worker.terminate();
   // The addon's state is process wide: the counter proves the task ran to its
   // end (reading its own captured input) after the environment was destroyed.
-  await delay(2000);
+  const deadline = Date.now() + require("../../test-timeout")(5000);
+  while (native.completedThreadedOperations() <= before && Date.now() < deadline) await delay(50);
   const after = native.completedThreadedOperations();
   t.true(after > before, `abandoned producer did not finish (${before} -> ${after})`);
   // ... and the runtime is still usable by the surviving environment.

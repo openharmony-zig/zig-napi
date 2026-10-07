@@ -17,7 +17,7 @@ function abortSignal(aborted: boolean): ESObject {
   };
 }
 
-export async function testAsync(native: NativeAddon) {
+export async function testAsync(native: NativeAddon, fixtureRoot: string = "fixtures") {
   assertEqual(await native.fib_async(10), 55, "fib_async");
 
   const progressEvents: Array<ESObject> = [];
@@ -32,16 +32,20 @@ export async function testAsync(native: NativeAddon) {
 
   const firstText = "alpha\n";
   const secondText = "bravo\n";
-  assertEqual(await native.read_file_async("fixtures/first.txt"), firstText, "read_file_async");
+  assertEqual(
+    await native.read_file_async(`${fixtureRoot}/first.txt`),
+    firstText,
+    "read_file_async",
+  );
 
-  const summary = await native.read_file_summary_async("fixtures/first.txt");
-  assertEqual(summary.path, "fixtures/first.txt", "read_file_summary path");
+  const summary = await native.read_file_summary_async(`${fixtureRoot}/first.txt`);
+  assertEqual(summary.path, `${fixtureRoot}/first.txt`, "read_file_summary path");
   assertEqual(summary.bytes, firstText.length, "read_file_summary bytes");
   assertEqual(summary.text, firstText, "read_file_summary text");
 
   const parallel = await native.parallel_read_files_async({
-    first_path: "fixtures/first.txt",
-    second_path: "fixtures/second.txt",
+    first_path: `${fixtureRoot}/first.txt`,
+    second_path: `${fixtureRoot}/second.txt`,
     preview_bytes: 3,
   });
   assertEqual(parallel.first_bytes, firstText.length, "parallel first bytes");

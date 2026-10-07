@@ -167,10 +167,10 @@ fn enumTypeToObject(env: napi.napi_env, comptime E: type) !napi.napi_value {
     const object = NapiValue.Object.from_raw(env, raw);
     inline for (@typeInfo(E).@"enum".fields) |field| {
         if (comptime isStringEnum(E)) {
-            try object.Set(field.name, field.name);
+            try object.Define(field.name, field.name);
         } else {
             const Tag = @typeInfo(E).@"enum".tag_type;
-            try object.Set(field.name, @as(Tag, @intCast(field.value)));
+            try object.Define(field.name, @as(Tag, @intCast(field.value)));
         }
     }
     return raw;
@@ -196,6 +196,7 @@ fn acceptsAnyValue(comptime T: type) bool {
 
 fn valueMatchesType(env: napi.napi_env, raw: napi.napi_value, comptime T: type) anyerror!bool {
     if (comptime acceptsAnyValue(T)) return true;
+    if (comptime helper.isCustom(T)) return T.matches_napi_value(env, raw);
 
     if (comptime helper.isDts(T)) {
         return valueMatchesType(env, raw, T.wrapped_type);
@@ -627,6 +628,7 @@ pub const Napi = struct {
             @compileError("cleanupStructPrefix expects a struct or tuple type, got: " ++ @typeName(T));
         }
         inline for (infos.@"struct".fields, 0..) |field, i| {
+            if (comptime @import("../metadata.zig").get(T, field.name).skip) continue;
             if (i < initialized) {
                 Napi.deinit_napi_value_with_allocator(field.type, @field(result.*, field.name), allocator);
             }
@@ -658,6 +660,10 @@ pub const Napi = struct {
         }
 
         const infos = @typeInfo(T);
+        if (comptime helper.isCustom(T)) {
+            if (comptime @hasDecl(T, "napi_deinit")) value.napi_deinit(allocator);
+            return;
+        }
 
         if (comptime helper.isJsHandle(T)) {
             return;
@@ -718,6 +724,7 @@ pub const Napi = struct {
                 }
 
                 inline for (infos.@"struct".fields) |field| {
+                    if (comptime @import("../metadata.zig").get(T, field.name).skip) continue;
                     Napi.deinit_napi_value_inner(field.type, @field(value, field.name), allocator, state);
                 }
             },
@@ -745,6 +752,7 @@ pub const Napi = struct {
     /// and async tasks need. JavaScript handles cannot be copied: they belong to
     /// a specific `napi_env` and must not silently become shared state.
     pub fn clone_napi_value(comptime T: type, value: T, allocator: std.mem.Allocator) !T {
+        if (comptime helper.isCustom(T) and @hasDecl(T, "napi_clone")) return T.napi_clone(value, allocator);
         if (comptime helper.isOwned(T)) {
             return T.init(try Napi.clone_napi_value(helper.ownedPayload(T), value.value, allocator), allocator);
         }
@@ -847,12 +855,18 @@ pub const Napi = struct {
                 errdefer {
                     // Fields cloned before the failing field must not be lost.
                     inline for (infos.@"struct".fields, 0..) |field, i| {
+                        if (comptime @import("../metadata.zig").get(T, field.name).skip) continue;
                         if (i < initialized) {
                             Napi.deinit_napi_value_with_allocator(field.type, @field(copy, field.name), allocator);
                         }
                     }
                 }
                 inline for (infos.@"struct".fields, 0..) |field, i| {
+                    if (comptime @import("../metadata.zig").get(T, field.name).skip) {
+                        const default = field.default_value_ptr orelse @compileError("Skipped fields require a default value: " ++ field.name);
+                        @field(copy, field.name) = @as(*const field.type, @ptrCast(@alignCast(default))).*;
+                        continue;
+                    }
                     @field(copy, field.name) = try Napi.clone_napi_value(field.type, @field(value, field.name), allocator);
                     initialized = i + 1;
                 }
@@ -875,6 +889,7 @@ pub const Napi = struct {
     /// memory that is released elsewhere and must never be read during cleanup.
     pub fn containsOwnedValue(comptime T: type) bool {
         if (comptime helper.isOwned(T)) return true;
+        if (comptime helper.isCustom(T)) return false;
 
         switch (@typeInfo(T)) {
             .optional => |optional| return Napi.containsOwnedValue(optional.child),
@@ -1013,6 +1028,8 @@ pub const Napi = struct {
                 );
             }
         }
+
+        if (comptime helper.isCustom(T)) return T.from_napi_value_with_allocator(env, raw, allocator);
 
         switch (T) {
             NapiValue.NapiValue, NapiValue.BigInt, NapiValue.Number, NapiValue.String, NapiValue.Object, NapiValue.Promise, NapiValue.PromiseValue, NapiValue.Array, NapiValue.Undefined, NapiValue.Null, Buffer, ArrayBuffer, DataView => {
@@ -1209,6 +1226,8 @@ pub const Napi = struct {
             return try Napi.to_napi_value_auto(env, value.value, name);
         }
 
+        if (comptime helper.isCustom(value_type)) return value.to_napi_value(env);
+
         if (comptime NapiError.isResult(value_type)) {
             return switch (value) {
                 .ok => |payload| try Napi.to_napi_value_auto(env, payload, name),
@@ -1221,10 +1240,12 @@ pub const Napi = struct {
 
         switch (value_type) {
             NapiValue.NapiValue, NapiValue.BigInt, NapiValue.Bool, NapiValue.Number, NapiValue.String, NapiValue.Object, NapiValue.Promise, NapiValue.PromiseValue, NapiValue.Array, NapiValue.Undefined, NapiValue.Null, Buffer, ArrayBuffer, DataView => {
+                if (value.raw == null) return NapiError.failTypeError("Cannot return a null native JavaScript handle", .{});
                 return value.raw;
             },
             // If value is already a napi_value, return it directly
             napi.napi_value => {
+                if (value == null) return NapiError.failTypeError("Cannot return a null native JavaScript handle", .{});
                 return value;
             },
             else => {
@@ -1352,7 +1373,12 @@ pub const Napi = struct {
                             },
                             else => {
                                 if (comptime class.isClass(value)) {
-                                    return try value.to_napi_value(Env.from_raw(env));
+                                    const constructor = try value.to_napi_value(Env.from_raw(env));
+                                    if (name) |public_name| {
+                                        const string = try NapiValue.String.createUtf8(Env.from_raw(env), public_name);
+                                        try NapiValue.Object.from_raw(env, constructor).DefineProperty("name", string, napi.napi_configurable);
+                                    }
+                                    return constructor;
                                 }
                                 // TODO: Implement this
                                 @compileError("Unsupported type: " ++ @typeName(value));
@@ -1522,4 +1548,23 @@ test "owned-part cleanup leaves javascript handles, literals and aliases alone" 
     // released (freeing any of them would be reported by the testing allocator).
     try std.testing.expect(!Napi.containsOwnedValue(Holder));
     Napi.disposeOwnedParts(Holder, value, std.testing.allocator);
+}
+
+test "metadata skipped fields retain borrowed defaults during deep clone and rollback" {
+    const Data = struct {
+        first: []const u8,
+        hidden: []const u8 = "borrowed-default",
+        last: []const u8,
+        pub const napi_config = .{ .hidden = @import("../metadata.zig").ExportOptions{ .skip = true } };
+    };
+    const source = Data{ .first = "first", .hidden = "not-exported", .last = "last" };
+    for (0..3) |fail_index| {
+        var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = fail_index });
+        const copy = Napi.clone_napi_value(Data, source, failing.allocator()) catch continue;
+        defer Napi.deinit_napi_value_with_allocator(Data, copy, failing.allocator());
+        try std.testing.expectEqualStrings("borrowed-default", copy.hidden);
+        try std.testing.expectEqualStrings("first", copy.first);
+        try std.testing.expectEqualStrings("last", copy.last);
+        try std.testing.expect(source.first.ptr != copy.first.ptr);
+    }
 }

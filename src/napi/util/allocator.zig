@@ -30,7 +30,15 @@ const PageLock = struct {
     var mutex: std.atomic.Mutex = .unlocked;
 
     fn lock() void {
-        while (!mutex.tryLock()) std.atomic.spinLoopHint();
+        @import("napi-sys").wasmCrash.check();
+        while (!mutex.tryLock()) {
+            @import("napi-sys").wasmCrash.check();
+            std.atomic.spinLoopHint();
+        }
+        // V8 may still bounds-check this worker using the memory size from
+        // before another worker grew it. Refresh only after owning the lock,
+        // before reading free-list headers or copying a cross-thread payload.
+        if (comptime builtin.cpu.arch.isWasm()) _ = @wasmMemoryGrow(0, 0);
     }
 
     fn unlock() void {

@@ -14,7 +14,7 @@
   "devDependencies": {
     "@emnapi/core": "2.0.0-alpha.5",
     "@emnapi/runtime": "2.0.0-alpha.5",
-    "@napi-rs/wasm-runtime": "1.2.4",
+    "@napi-rs/wasm-runtime": "1.2.5",
     "ava": "3.15.0",
     "emnapi": "2.0.0-alpha.5",
     "vite": "^8.1.0"

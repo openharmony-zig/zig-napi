@@ -16,16 +16,21 @@ pub const String = struct {
     }
 
     pub fn utf8Len(self: String) !usize {
-        return self.length(napi.napi_get_value_string_utf8);
+        return self.length(u8, napi.napi_get_value_string_utf8);
     }
 
     pub fn utf16Len(self: String) !usize {
-        return self.length(napi.napi_get_value_string_utf16);
+        return self.length(u16, napi.napi_get_value_string_utf16);
+    }
+
+    pub fn latin1Len(self: String) !usize {
+        return self.length(u8, napi.napi_get_value_string_latin1);
     }
 
     fn length(
         self: String,
-        comptime get_value: *const fn (napi.napi_env, napi.napi_value, [*c]u8, usize, ?*usize) callconv(.c) napi.napi_status,
+        comptime Unit: type,
+        comptime get_value: *const fn (napi.napi_env, napi.napi_value, [*c]Unit, usize, ?*usize) callconv(.c) napi.napi_status,
     ) !usize {
         var len: usize = 0;
         const status = get_value(self.env, self.raw, null, 0, &len);
@@ -41,6 +46,26 @@ pub const String = struct {
 
     pub fn copyUtf16(self: String) ![]u16 {
         return String.from_napi_value(self.env, self.raw, []u16);
+    }
+
+    pub fn copyLatin1(self: String) ![]u8 {
+        return copyNullTerminated(u8, napi.napi_get_value_string_latin1, self.env, self.raw, try self.latin1Len(), GlobalAllocator.capture());
+    }
+
+    pub fn createLatin1(env: Env, value: []const u8) !String {
+        if (comptime @import("../options.zig").isWasmNodeAddon()) {
+            // emnapi alpha.5's Latin1 encoder stops at NUL even with an
+            // explicit length. Its UTF16 path preserves every code unit.
+            const allocator = GlobalAllocator.capture();
+            const wide = try allocator.alloc(u16, value.len);
+            defer allocator.free(wide);
+            for (value, wide) |byte, *unit| unit.* = byte;
+            return createUtf16(env, wide);
+        }
+        var raw: napi.napi_value = undefined;
+        const status = napi.napi_create_string_latin1(env.raw, value.ptr, value.len, &raw);
+        if (status != napi.napi_ok) return NapiError.failStatus(status);
+        return from_raw(env.raw, raw);
     }
 
     fn copyNullTerminated(
@@ -146,6 +171,41 @@ pub const String = struct {
 
         const buf = try copyNullTerminated(Unit, get_value, env, raw, len, allocator);
         return @as(T, buf);
+    }
+
+    pub const ExternalResult = struct { value: String, copied: bool };
+
+    /// Duplicate input with the captured allocator and transfer that allocation
+    /// to the host. A copying host invokes the same finalizer immediately.
+    pub fn createExternalLatin1(env: Env, value: []const u8) !ExternalResult {
+        if (comptime !@import("../options.zig").isWasmNodeAddon() and @import("../options.zig").selectedNapiVersion().isAtLeast(.v10) and @hasDecl(napi, "node_api_create_external_string_latin1")) return createExternal(u8, env, value, napi.node_api_create_external_string_latin1);
+        return .{ .value = try createLatin1(env, value), .copied = true };
+    }
+    pub fn createExternalUtf16(env: Env, value: []const u16) !ExternalResult {
+        if (comptime @import("../options.zig").selectedNapiVersion().isAtLeast(.v10) and @hasDecl(napi, "node_api_create_external_string_utf16")) return createExternal(u16, env, value, napi.node_api_create_external_string_utf16);
+        return .{ .value = try createUtf16(env, value), .copied = true };
+    }
+    fn createExternal(comptime Unit: type, env: Env, value: []const Unit, comptime create: anytype) !ExternalResult {
+        const State = struct {
+            allocator: std.mem.Allocator,
+            bytes: []Unit,
+            fn finalize(_: napi.node_api_basic_env, _: ?*anyopaque, hint: ?*anyopaque) callconv(.c) void {
+                const state: *@This() = @ptrCast(@alignCast(hint.?));
+                const allocator = state.allocator;
+                allocator.free(state.bytes);
+                allocator.destroy(state);
+            }
+        };
+        const allocator = GlobalAllocator.capture();
+        const state = try allocator.create(State);
+        errdefer allocator.destroy(state);
+        state.* = .{ .allocator = allocator, .bytes = try allocator.dupe(Unit, value) };
+        errdefer allocator.free(state.bytes);
+        var raw: napi.napi_value = null;
+        var copied = false;
+        const status = create(env.raw, state.bytes.ptr, state.bytes.len, State.finalize, state, &raw, &copied);
+        if (status != napi.napi_ok) return NapiError.failStatus(status);
+        return .{ .value = from_raw(env.raw, raw), .copied = copied };
     }
 
     pub fn New(env: Env, value: []const u8) String {

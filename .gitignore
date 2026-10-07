@@ -12,6 +12,22 @@ examples/node/*.node
 examples/node/npm/*/*.node
 node-test/*.node
 node-test/*.wasm
+# Node test loaders and declarations are regenerated from the CLI source.
+/node-test/*.wasi.cjs
+/node-test/*.wasi.d.cts
+/node-test/*.wasi-browser.js
+/node-test/*.wasip1.cjs
+/node-test/*.wasip1.d.cts
+/node-test/*.wasip1-browser.js
+/node-test/*.wasip1-deferred.js
+/node-test/*.wasip1-deferred.d.ts
+/node-test/browser.js
+/node-test/wasi-worker.mjs
+/node-test/wasi-worker-browser.mjs
 .tmp_arkvm_runner
 .tmp_arkvm_memory_runner
 packages/zig-napi/zig/
+
+.tmp_qemu_e2e/
+
+/scripts/qemu/__pycache__/

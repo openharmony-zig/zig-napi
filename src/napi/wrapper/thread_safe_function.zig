@@ -66,11 +66,62 @@ pub const ThreadSafeFunctionCallVariant = enum {
 /// to `Err` borrows its message and code from the caller (often a stack buffer
 /// that is reused right after the call), so the text is copied into memory owned
 /// by the queue item before the call is queued.
-fn CallData(comptime Args: type) type {
+pub fn JsCallResult(comptime Return: type) type {
+    return union(enum) {
+        ok: Return,
+        thrown: @import("../value.zig").NapiValue,
+        failure: NapiError.Error,
+        closed: void,
+    };
+}
+
+// OHOS SDK checks queue.size() > limit before enqueueing. Keep a separate
+// ledger to provide the documented >= limit contract, including limit == 1.
+// Queue items retain it independently of the engine's wrapper finalizer.
+const QueueState = struct {
+    allocator: std.mem.Allocator,
+    limit: usize,
+    thread: std.Thread.Id,
+    owners: std.atomic.Value(usize) = .init(1),
+    pending: std.atomic.Value(usize) = .init(0),
+    epoch: std.atomic.Value(u32) = .init(0),
+    closed: std.atomic.Value(bool) = .init(false),
+    fn release(self: *@This()) void {
+        if (self.owners.fetchSub(1, .acq_rel) == 1) self.allocator.destroy(self);
+    }
+    fn wake(self: *@This()) void {
+        _ = self.epoch.fetchAdd(1, .release);
+        if (comptime !@import("builtin").cpu.arch.isWasm()) std.Io.futexWake(std.Io.Threaded.global_single_threaded.io(), u32, &self.epoch.raw, std.math.maxInt(u32));
+    }
+    fn reserve(self: *@This(), mode: ThreadSafeFunctionMode) !void {
+        while (true) {
+            const epoch = self.epoch.load(.acquire);
+            if (self.closed.load(.acquire)) return error.Closing;
+            var count = self.pending.load(.monotonic);
+            while (count < self.limit) {
+                count = self.pending.cmpxchgWeak(count, count + 1, .acq_rel, .monotonic) orelse return;
+            }
+            if (mode == .NonBlocking) return error.QueueFull;
+            if (comptime @import("builtin").cpu.arch.isWasm()) return error.WouldDeadlock;
+            if (self.thread == std.Thread.getCurrentId()) return error.WouldDeadlock;
+            std.Io.futexWaitUncancelable(std.Io.Threaded.global_single_threaded.io(), u32, &self.epoch.raw, epoch);
+        }
+    }
+};
+
+fn CallData(comptime Args: type, comptime Return: type) type {
     return struct {
         allocator: std.mem.Allocator,
         args: ?*Args,
         err: ?*ownership.ErrorSnapshot,
+        completion: ?struct {
+            context: ?*anyopaque,
+            callback: *const fn (Env, JsCallResult(Return), ?*anyopaque) void,
+            dispose: ?*const fn (?*anyopaque) void,
+        } = null,
+        completed: bool = false,
+        queue: ?*QueueState = null,
+        reserved: bool = false,
     };
 }
 
@@ -118,6 +169,7 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
         closed: bool,
         aborted: bool,
         failed: bool = false,
+        queue: ?*QueueState = null,
         freed: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
         comptime thread_safe_function_call_variant: bool = ThreadSafeFunctionCalleeHandled,
         comptime max_queue_size: usize = MaxQueueSize,
@@ -156,6 +208,31 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
         /// Fallible construction. Prefer this over `from_raw` when the caller
         /// can propagate the creation error.
         pub fn tryFrom_raw(env: napi.napi_env, raw: napi.napi_value) !*Self {
+            return tryFrom_rawWithOptions(env, raw, .{});
+        }
+        pub const Options = struct { weak: bool = false, max_queue_size: usize = MaxQueueSize };
+        pub const Builder = struct {
+            env: Env,
+            callback: napi.napi_value,
+            options: Options = .{},
+            pub fn weak(self: @This(), enabled: bool) @This() {
+                var copy = self;
+                copy.options.weak = enabled;
+                return copy;
+            }
+            pub fn maxQueueSize(self: @This(), size: usize) @This() {
+                var copy = self;
+                copy.options.max_queue_size = size;
+                return copy;
+            }
+            pub fn build(self: @This()) !*Self {
+                return tryFrom_rawWithOptions(self.env.raw, self.callback, self.options);
+            }
+        };
+        pub fn builder(env: Env, callback: anytype) Builder {
+            return .{ .env = env, .callback = callback.raw };
+        }
+        pub fn tryFrom_rawWithOptions(env: napi.napi_env, raw: napi.napi_value, config: Options) !*Self {
             const ThreadSafe = struct {
                 fn finalize(_: napi.napi_env, data: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
                     const raw_data = data orelse return;
@@ -166,8 +243,9 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
 
                 fn cb(inner_env: napi.napi_env, js_callback: napi.napi_value, context: ?*anyopaque, data: ?*anyopaque) callconv(.c) void {
                     const raw_data = data orelse return;
-                    const call_data: *CallData(Args) = @ptrCast(@alignCast(raw_data));
+                    const call_data: *CallData(Args, Return) = @ptrCast(@alignCast(raw_data));
                     const allocator = call_data.allocator;
+                    releaseQueueSlot(call_data);
                     // Every path below releases the queued payload, including
                     // the null-environment shutdown drain, and the item carries
                     // everything that release needs (its allocator and its own
@@ -235,6 +313,11 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
                     }
 
                     if (conversion_error) |err| {
+                        if (call_data.completion) |completion| {
+                            call_data.completed = true;
+                            completion.callback(Env.from_raw(inner_env), .{ .failure = err }, completion.context);
+                            return;
+                        }
                         // Never pass an invalid handle to JavaScript: report the
                         // conversion failure through the error slot when the
                         // callee accepts one, otherwise as undefined values. An
@@ -246,7 +329,8 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
                     }
 
                     var ret: napi.napi_value = null;
-                    _ = napi.napi_call_function(inner_env, undefined_value, js_callback, args_len + call_variant, argv.ptr, &ret);
+                    const call_status = napi.napi_call_function(inner_env, undefined_value, js_callback, args_len + call_variant, argv.ptr, &ret);
+                    deliverReturn(inner_env, call_data, call_status, ret);
                 }
             };
 
@@ -264,6 +348,16 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
                 .aborted = false,
             };
 
+            if (comptime options.isOhosAddon()) {
+                if (config.max_queue_size != 0) {
+                    const queue = allocator.create(QueueState) catch |err| {
+                        allocator.destroy(self);
+                        return err;
+                    };
+                    queue.* = .{ .allocator = allocator, .limit = config.max_queue_size, .thread = if (@import("builtin").cpu.arch.isWasm()) 0 else std.Thread.getCurrentId() };
+                    self.queue = queue;
+                }
+            }
             var tsfn_raw: napi.napi_threadsafe_function = null;
             const resource = String.New(Env.from_raw(env), "ThreadSafeFunction");
             const create_status = napi.napi_create_threadsafe_function(
@@ -271,7 +365,7 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
                 raw,
                 null,
                 resource.raw,
-                self.max_queue_size,
+                config.max_queue_size,
                 1,
                 @ptrCast(self),
                 ThreadSafe.finalize,
@@ -280,11 +374,16 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
                 &tsfn_raw,
             );
             if (create_status != napi.napi_ok) {
+                if (self.queue) |queue| queue.release();
                 allocator.destroy(self);
                 return NapiError.Error.fromStatus(NapiError.Status.New(create_status));
             }
 
             self.tsfn_raw = tsfn_raw;
+            if (config.weak) self.unref() catch |err| {
+                self.abort() catch {};
+                return err;
+            };
 
             // Promoting a JavaScript function to a TSFN creates an active
             // thread-safe function. While an argument conversion is running the
@@ -317,10 +416,25 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
             // The failure handle is a process-wide singleton.
             if (self.failed) return;
             if (self.freed.swap(true, .acq_rel)) return;
+            if (self.queue) |queue| {
+                queue.closed.store(true, .release);
+                queue.wake();
+                queue.release();
+            }
             self.allocator.destroy(self);
         }
 
-        fn freeCallData(allocator: std.mem.Allocator, data: *CallData(Args)) void {
+        fn releaseQueueSlot(data: *CallData(Args, Return)) void {
+            if (data.reserved) {
+                data.reserved = false;
+                const queue = data.queue.?;
+                _ = queue.pending.fetchSub(1, .acq_rel);
+                queue.wake();
+            }
+        }
+        fn freeCallData(allocator: std.mem.Allocator, data: *CallData(Args, Return)) void {
+            releaseQueueSlot(data);
+            if (data.queue) |queue| queue.release();
             if (data.args) |actual_args| {
                 // `Ok` transfers ownership of the arguments to the queued call.
                 ownership.deinitValue(Args, actual_args.*, allocator);
@@ -333,19 +447,62 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
                 snapshot.deinit();
                 allocator.destroy(snapshot);
             }
+            if (data.completion) |completion| {
+                if (!data.completed) completion.callback(Env.from_raw(null), .closed, completion.context);
+                if (completion.dispose) |dispose| dispose(completion.context);
+            }
             allocator.destroy(data);
         }
 
-        fn callThreadSafeFunction(self: *const Self, data: *CallData(Args), mode: ThreadSafeFunctionMode) !void {
+        fn deliverReturn(env: napi.napi_env, data: *CallData(Args, Return), status: napi.napi_status, raw: napi.napi_value) void {
+            const completion = data.completion orelse return;
+            data.completed = true;
+            if (status == napi.napi_pending_exception) {
+                var thrown: napi.napi_value = null;
+                if (napi.napi_get_and_clear_last_exception(env, &thrown) == napi.napi_ok) {
+                    completion.callback(Env.from_raw(env), .{ .thrown = @import("../value.zig").NapiValue.from_raw(env, thrown) }, completion.context);
+                    return;
+                }
+            }
+            if (status != napi.napi_ok) {
+                completion.callback(Env.from_raw(env), .{ .failure = NapiError.mapAnyError(NapiError.failStatus(status)) }, completion.context);
+                return;
+            }
+            const value: Return = if (Return == void) {} else Napi.from_napi_value_auto_with_allocator(env, raw, Return, data.allocator) catch |err| {
+                if (err == error.PendingException or NapiError.hasPendingException()) {
+                    var thrown: napi.napi_value = null;
+                    if (napi.napi_get_and_clear_last_exception(env, &thrown) == napi.napi_ok) {
+                        completion.callback(Env.from_raw(env), .{ .thrown = @import("../value.zig").NapiValue.from_raw(env, thrown) }, completion.context);
+                        return;
+                    }
+                }
+                completion.callback(Env.from_raw(env), .{ .failure = NapiError.mapAnyError(err) }, completion.context);
+                return;
+            };
+            defer Napi.deinit_napi_value_with_allocator(Return, value, data.allocator);
+            completion.callback(Env.from_raw(env), .{ .ok = value }, completion.context);
+        }
+
+        fn callThreadSafeFunction(self: *const Self, data: *CallData(Args, Return), mode: ThreadSafeFunctionMode) !void {
             if (self.failed or self.tsfn_raw == null) {
                 freeCallData(data.allocator, data);
                 return self.notCreatedError();
+            }
+            if (self.queue) |queue| {
+                _ = queue.owners.fetchAdd(1, .monotonic);
+                data.queue = queue;
+                queue.reserve(mode) catch |err| {
+                    freeCallData(data.allocator, data);
+                    NapiError.last_error = NapiError.Error.withCodeAndMessage(@errorName(err), "ThreadSafeFunction queue cannot accept this call");
+                    return err;
+                };
+                data.reserved = true;
             }
             const status = napi.napi_call_threadsafe_function(self.tsfn_raw, @ptrCast(data), mode.to_raw());
             if (status != napi.napi_ok) {
                 // The item never entered the queue: release it here.
                 freeCallData(data.allocator, data);
-                return NapiError.Error.fromStatus(NapiError.Status.New(status));
+                return NapiError.failStatus(status);
             }
         }
 
@@ -379,6 +536,12 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
 
         pub fn release(self: *const Self, mode: ThreadSafeFunctionReleaseMode) !void {
             if (self.failed or self.tsfn_raw == null) return self.notCreatedError();
+            if (mode == .Abort) {
+                if (self.queue) |queue| {
+                    queue.closed.store(true, .release);
+                    queue.wake();
+                }
+            }
             const status = napi.napi_release_threadsafe_function(self.tsfn_raw, mode.to_raw());
             if (status != napi.napi_ok) {
                 return NapiError.Error.fromStatus(NapiError.Status.New(status));
@@ -433,15 +596,93 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
             };
             args_data.* = args;
 
-            const data = self.allocator.create(CallData(Args)) catch |err| {
+            const data = self.allocator.create(CallData(Args, Return)) catch |err| {
                 ownership.deinitValue(Args, args_data.*, self.allocator);
                 self.allocator.destroy(args_data);
                 return err;
             };
-            data.* = CallData(Args){ .allocator = self.allocator, .args = args_data, .err = null };
+            data.* = CallData(Args, Return){ .allocator = self.allocator, .args = args_data, .err = null };
 
             try self.callThreadSafeFunction(data, mode);
         }
+
+        /// Completion runs on the JS thread; its payload is borrowed for that
+        /// callback. A null Env and .closed report a rejected queue item or
+        /// shutdown drain. dispose runs exactly once on every path.
+        pub fn CallWithReturnValue(self: *const Self, args: Args, mode: ThreadSafeFunctionMode, context: ?*anyopaque, callback: *const fn (Env, JsCallResult(Return), ?*anyopaque) void, dispose: ?*const fn (?*anyopaque) void) !void {
+            if (self.failed or self.tsfn_raw == null) {
+                ownership.deinitValue(Args, args, self.payloadAllocator());
+                callback(Env.from_raw(null), .closed, context);
+                if (dispose) |destroy| destroy(context);
+                return self.notCreatedError();
+            }
+            const args_data = self.allocator.create(Args) catch |err| {
+                ownership.deinitValue(Args, args, self.payloadAllocator());
+                callback(Env.from_raw(null), .closed, context);
+                if (dispose) |destroy| destroy(context);
+                return err;
+            };
+            args_data.* = args;
+            const data = self.allocator.create(CallData(Args, Return)) catch |err| {
+                ownership.deinitValue(Args, args, self.payloadAllocator());
+                self.allocator.destroy(args_data);
+                callback(Env.from_raw(null), .closed, context);
+                if (dispose) |destroy| destroy(context);
+                return err;
+            };
+            data.* = .{ .allocator = self.allocator, .args = args_data, .err = null, .completion = .{ .context = context, .callback = callback, .dispose = dispose } };
+            try self.callThreadSafeFunction(data, mode);
+        }
+
+        /// Called on the environment thread. The queued JS callback may return
+        /// a Promise: resolving the deferred adopts it, including its rejection.
+        pub fn CallAsync(self: *const Self, args: Args, mode: ThreadSafeFunctionMode) !@import("../value/promise.zig").Promise {
+            const Promise = @import("../value/promise.zig").Promise;
+            const Completion = struct {
+                promise: Promise,
+                allocator: std.mem.Allocator,
+                fn complete(env: Env, result: JsCallResult(Return), context: ?*anyopaque) void {
+                    if (env.raw == null) return;
+                    const state: *@This() = @ptrCast(@alignCast(context.?));
+                    switch (result) {
+                        .ok => |value| state.promise.Resolve(value) catch |err| {
+                            state.promise.Reject(NapiError.mapAnyError(err)) catch {};
+                        },
+                        .thrown => |value| state.promise.rejectRaw(value.raw) catch {},
+                        .failure => |err| state.promise.Reject(err) catch {},
+                        .closed => state.promise.Reject(NapiError.Error.withReason("ThreadSafeFunction closed")) catch {},
+                    }
+                }
+                fn destroy(context: ?*anyopaque) void {
+                    const state: *@This() = @ptrCast(@alignCast(context.?));
+                    state.allocator.destroy(state);
+                }
+            };
+            if (self.failed or self.tsfn_raw == null) {
+                ownership.deinitValue(Args, args, self.payloadAllocator());
+                return self.notCreatedError();
+            }
+            const state = self.allocator.create(Completion) catch |err| {
+                ownership.deinitValue(Args, args, self.payloadAllocator());
+                return err;
+            };
+            var promise = Promise.New(Env.from_raw(self.env)) catch |err| {
+                self.allocator.destroy(state);
+                ownership.deinitValue(Args, args, self.payloadAllocator());
+                return err;
+            };
+            state.* = .{ .promise = promise, .allocator = self.allocator };
+            self.CallWithReturnValue(args, mode, state, Completion.complete, Completion.destroy) catch |err| {
+                promise.Reject(NapiError.mapAnyError(err)) catch {};
+                // Once a Promise exists, expose its rejection to the caller.
+                // Throwing here would orphan a rejected, unobservable Promise.
+                return promise;
+            };
+            return promise;
+        }
+        /// JavaScript exceptions are always caught and used as the rejection
+        /// value, including primitive values and errors returned by Promises.
+        pub const CallAsyncCatch = CallAsync;
 
         /// Queue a failed call. The error is released after the JavaScript
         /// callback ran, and the text of the error is copied first: the caller's
@@ -464,12 +705,12 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
             // inside it degrades to a bounded static error instead.
             snapshot.* = ownership.ErrorSnapshot.capture(self.allocator, err);
 
-            const data = self.allocator.create(CallData(Args)) catch |alloc_err| {
+            const data = self.allocator.create(CallData(Args, Return)) catch |alloc_err| {
                 snapshot.deinit();
                 self.allocator.destroy(snapshot);
                 return alloc_err;
             };
-            data.* = CallData(Args){ .allocator = self.allocator, .args = null, .err = snapshot };
+            data.* = CallData(Args, Return){ .allocator = self.allocator, .args = null, .err = snapshot };
 
             try self.callThreadSafeFunction(data, mode);
         }

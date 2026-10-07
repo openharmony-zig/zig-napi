@@ -2,7 +2,7 @@
   "name": "zig-napi-workspace",
   "version": "0.1.0",
   "private": true,
-  "packageManager": "pnpm@10.24.0",
+  "license": "MIT",
   "scripts": {
     "init": "pnpm run init:check && pnpm run init:hooks",
     "init:check": "pnpm exec prek validate-config prek.toml",
@@ -61,13 +61,17 @@
     "website:check": "pnpm --filter zig-napi-website run check",
     "website:test": "pnpm --filter zig-napi-website run test",
     "website:test:browser": "pnpm --filter zig-napi-website run test:browser",
-    "website:preview": "pnpm --filter zig-napi-website run preview"
+    "website:preview": "pnpm --filter zig-napi-website run preview",
+    "test:e2e:qemu": "python3 scripts/qemu/run_matrix.py",
+    "test:e2e:node": "python3 scripts/run_node_e2e.py",
+    "check:declarations": "node scripts/check_declarations.cjs"
   },
   "devDependencies": {
     "@j178/prek": "^0.4.5",
     "@ohos-rs/oxk": "^0.7.2",
     "emnapi": "2.0.0-alpha.5",
-    "oxlint": "^1.71.0"
+    "oxlint": "^1.71.0",
+    "typescript": "6.0.3"
   },
-  "license": "MIT"
+  "packageManager": "pnpm@10.24.0"
 }

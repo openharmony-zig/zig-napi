@@ -19,7 +19,7 @@ const { after, test } = require("node:test");
 
 const packageDir = path.resolve(__dirname, "..");
 const cliPath = path.join(packageDir, "bin", "zig-napi.js");
-const templates = require(path.join(packageDir, "bin", "wasi-templates.cjs"));
+const templates = require(path.join(packageDir, "lib", "wasi-templates.cjs"));
 
 const scratchRoot = fs.mkdtempSync(path.join(os.tmpdir(), "zig-napi-wasi-loader-"));
 const scratchProjects = [];
@@ -785,6 +785,62 @@ test("the CLI generates the artifact set every supported flavor needs", () => {
     assert.ok(packageJson.files.includes(glob), `package.json files is missing ${glob}`);
   }
   assert.equal(packageJson.browser, "browser.js");
+});
+
+test("the Node CLI rejects OHOS targets before invoking Zig or writing packages", () => {
+  const project = createProject("node-cli-scope", {
+    targets: ["x86_64-unknown-linux-gnu"],
+    regenerate: false,
+  });
+  project.zig.clearArgs();
+  const rejected = (args) => {
+    const result = runCli(args, { env: project.zig.env });
+    assert.notEqual(result.status, 0, `${args.join(" ")} unexpectedly succeeded`);
+    assert.match(result.stderr, /CLI supports Node\.js and WASI only/);
+    assert.deepEqual(project.zig.readArgs(), [], "unsupported targets must not invoke Zig");
+    assert.equal(fs.existsSync(project.file("npm")), false, "no platform packages were written");
+  };
+  for (const target of [
+    "aarch64-linux-ohos",
+    "arm-linux-ohoseabi",
+    "x86_64-unknown-linux-ohos",
+    "arm64-openharmony",
+  ]) {
+    rejected(["build", "--cwd", project.projectDir, "--target", target]);
+    rejected(["build", "--cwd", project.projectDir, "--", `-Dtarget=${target}`]);
+    rejected(["dts", "--cwd", project.projectDir, "--", "-Dtarget", target]);
+  }
+  rejected(["build", "--cwd", project.projectDir, "--watch", "--target", "aarch64-linux-ohos"]);
+  const destination = path.join(scratchRoot, "unsupported-ohos-scaffold");
+  rejected(["new", destination, "--no-interactive", "--targets", "aarch64-unknown-linux-ohos"]);
+  assert.equal(fs.existsSync(destination), false);
+  const configuration = { binaryName: "probe_addon", targets: ["aarch64-unknown-linux-ohos"] };
+  fs.writeFileSync(project.file("napi.json"), JSON.stringify(configuration));
+  rejected(["build", "--cwd", project.projectDir, "--config-path", "napi.json"]);
+  const packageJson = JSON.parse(fs.readFileSync(project.file("package.json"), "utf8"));
+  packageJson.napi = configuration;
+  fs.writeFileSync(project.file("package.json"), JSON.stringify(packageJson));
+  for (const command of [
+    "build",
+    "dts",
+    "artifacts",
+    "create-npm-dirs",
+    "package",
+    "pre-publish",
+    "version",
+    "universalize",
+    "rename",
+  ]) {
+    rejected([command, "--cwd", project.projectDir]);
+  }
+  rejected(["build", "--cwd", project.projectDir, "--target", "x86_64-linux-gnu"]);
+  packageJson.napi = {
+    binaryName: "probe_addon",
+    triples: { defaults: true, additional: ["aarch64-unknown-linux-ohos"] },
+  };
+  fs.writeFileSync(project.file("package.json"), JSON.stringify(packageJson));
+  rejected(["build", "--cwd", project.projectDir]);
+  rejected(["create-npm-dirs", "--cwd", project.projectDir]);
 });
 
 test("a native-only scaffold carries no WASI loader files", () => {

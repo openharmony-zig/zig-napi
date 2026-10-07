@@ -14,6 +14,12 @@ pub fn begin_finalizer_state_check(external_count: usize, class_count: usize) vo
     printed.store(false, .monotonic);
 }
 
+pub fn finalizer_stats() struct { external: usize, classes: usize, complete: bool } {
+    const external = seen_external.load(.monotonic);
+    const classes = seen_class.load(.monotonic);
+    return .{ .external = external, .classes = classes, .complete = external == expected_external.load(.monotonic) and classes == expected_class.load(.monotonic) };
+}
+
 pub fn onExternalFinalized() void {
     _ = seen_external.fetchAdd(1, .monotonic);
     maybePrintResult();

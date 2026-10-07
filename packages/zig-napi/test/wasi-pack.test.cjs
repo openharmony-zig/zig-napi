@@ -7,7 +7,7 @@
  * No network is used: the extracted CLI resolves its dependencies from the
  * checkout, and the scaffold's runtime packages are linked from the repository
  * install (emnapi / @emnapi/core / @emnapi/runtime 2.0.0-alpha.5 and
- * @napi-rs/wasm-runtime 1.2.4).
+ * @napi-rs/wasm-runtime 1.2.5).
  *
  * The build half needs the ABI work that links the emnapi v2 archives
  * (`src/build/napi-build.zig`): without it there is nothing to validate here,
@@ -59,8 +59,7 @@ function abiArchiveIntegrated() {
 /**
  * Runtime packages for the scaffold's `node_modules`. The `node-test` install
  * is the one that carries emnapi / @emnapi/core / @emnapi/runtime 2.0.0-alpha.5
- * with @napi-rs/wasm-runtime 1.2.4; the workspace root still links the 1.x
- * versions, which could not load the generated loaders at all.
+ * with @napi-rs/wasm-runtime 1.2.5.
  */
 function runtimePackagesRoot() {
   for (const candidate of [
@@ -260,13 +259,15 @@ test("the packed CLI builds and loads both real WASI flavors", { timeout: 900_00
     );
   }
 
-  // Each generated loader must run the addon on the memory it allocates, let
-  // the process exit on its own, and support explicit disposal followed by a
-  // fresh instance.
+  // Each loader must run on its allocated memory and dispose/reinstantiate.
+  // Workers are unreferenced, and a pending Promise alone cannot keep Node
+  // alive. Hold the test process until the real async lifecycle completes,
+  // then release the handle and require it to exit on its own.
   for (const flavor of flavors) {
     const load = [
       `const loaderPath = "./packed_addon.${flavor.suffix}.cjs";`,
       `const suffix = ${JSON.stringify(flavor.suffix)};`,
+      "const keepAlive = setInterval(() => {}, 1000);",
       'process.on("uncaughtException", (error) => {',
       '  console.error("uncaught: " + (error && error.message));',
       "  process.exit(9);",
@@ -291,7 +292,9 @@ test("the packed CLI builds and loads both real WASI flavors", { timeout: 900_00
       "    }",
       '    return reloaded[Symbol.for("napi.rs.wasi.dispose")]();',
       "  });",
-      '}).then(() => process.stdout.write("disposed"));',
+      '}).then(() => process.stdout.write("disposed"))',
+      ".catch((error) => { console.error(error); process.exitCode = 1; })",
+      ".finally(() => clearInterval(keepAlive));",
     ].join("\n");
     const loaded = run(process.execPath, ["-e", load], { cwd: project, timeout: 120_000 });
     assert.equal(loaded.stdout, "disposed", `${flavor.suffix}: ${loaded.stderr}`);

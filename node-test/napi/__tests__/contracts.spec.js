@@ -11,7 +11,7 @@ function child(body, flags = []) {
   const prelude = `const a=require(${JSON.stringify(loadPath)})("contracts");`;
   const result = spawnSync(process.execPath, [...flags, "-e", prelude + body], {
     encoding: "utf8",
-    timeout: 10000,
+    timeout: require("../../test-timeout")(10000),
   });
   return result;
 }
