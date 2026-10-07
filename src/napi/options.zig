@@ -16,12 +16,12 @@ pub const NapiVersion = enum(i32) {
     experimental = std.math.maxInt(i32),
 
     pub inline fn isAtLeast(self: NapiVersion, min_version: NapiVersion) bool {
-        return @intFromEnum(self) >= @intFromEnum(min_version);
+        return @backingInt(self) >= @backingInt(min_version);
     }
 };
 
 pub fn selectedNapiVersion() NapiVersion {
-    return @enumFromInt(build_options.napi_version);
+    return @fromBackingInt(@intCast(build_options.napi_version));
 }
 
 pub fn experimentalEnabled() bool {
@@ -52,9 +52,9 @@ pub fn requireNapiVersion(comptime required: NapiVersion) void {
             \\
         , .{
             .required_name = required_name,
-            .required_number = @intFromEnum(required),
+            .required_number = @backingInt(required),
             .selected_name = selected_name,
-            .selected_number = @intFromEnum(selected),
+            .selected_number = @backingInt(selected),
         }));
     }
 }

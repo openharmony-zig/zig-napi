@@ -122,7 +122,7 @@ fn enumWideTag(comptime T: type) type {
     if (@typeInfo(tag).int.bits > 64) {
         @compileError("Enum tags wider than 64 bits are not supported: " ++ @typeName(T));
     }
-    return std.meta.Int(@typeInfo(tag).int.signedness, 64);
+    return @Int(@typeInfo(tag).int.signedness, 64);
 }
 
 fn enumFromString(env: napi.napi_env, raw: napi.napi_value, comptime T: type, allocator: std.mem.Allocator) !T {
@@ -132,9 +132,9 @@ fn enumFromString(env: napi.napi_env, raw: napi.napi_value, comptime T: type, al
     const value = try NapiValue.String.from_napi_value_with_allocator(env, raw, []u8, allocator);
     defer allocator.free(value);
 
-    inline for (enum_info.fields) |field| {
-        if (std.mem.eql(u8, value, field.name)) {
-            return @field(T, field.name);
+    inline for (enum_info.field_names) |field_name| {
+        if (std.mem.eql(u8, value, field_name)) {
+            return @field(T, field_name);
         }
     }
 
@@ -148,9 +148,9 @@ fn enumFromNumber(env: napi.napi_env, raw: napi.napi_value, comptime T: type) !T
     // after the member check may the value be narrowed to the enum tag type.
     const value = try Napi.numericFromNapiValue(env, raw, Wide);
 
-    inline for (enum_info.fields) |field| {
-        if (value == @as(Wide, @intCast(field.value))) {
-            return @field(T, field.name);
+    inline for (enum_info.field_names, enum_info.field_values) |field_name, field_value| {
+        if (value == @as(Wide, @intCast(field_value))) {
+            return @field(T, field_name);
         }
     }
 
@@ -165,12 +165,12 @@ fn enumTypeToObject(env: napi.napi_env, comptime E: type) !napi.napi_value {
     }
 
     const object = NapiValue.Object.from_raw(env, raw);
-    inline for (@typeInfo(E).@"enum".fields) |field| {
+    inline for (@typeInfo(E).@"enum".field_names, @typeInfo(E).@"enum".field_values) |field_name, field_value| {
         if (comptime isStringEnum(E)) {
-            try object.Define(field.name, field.name);
+            try object.Define(field_name, field_name);
         } else {
             const Tag = @typeInfo(E).@"enum".tag_type;
-            try object.Define(field.name, @as(Tag, @intCast(field.value)));
+            try object.Define(field_name, @as(Tag, @intCast(field_value)));
         }
     }
     return raw;
@@ -582,12 +582,12 @@ pub const Napi = struct {
             @compileError("Struct " ++ @typeName(T) ++ ".deinit must be a function");
         }
 
-        const params = deinit_info.@"fn".params;
+        const params = deinit_info.@"fn".param_types;
         if (params.len == 0 or params.len > 2) {
             @compileError("Struct " ++ @typeName(T) ++ ".deinit must accept (self) or (self, allocator)");
         }
 
-        const self_type = params[0].type orelse {
+        const self_type = params[0] orelse {
             @compileError("Struct " ++ @typeName(T) ++ ".deinit self parameter must be typed");
         };
         const self_info = @typeInfo(self_type);
@@ -608,7 +608,7 @@ pub const Napi = struct {
             return true;
         }
 
-        const allocator_type = params[1].type orelse {
+        const allocator_type = params[1] orelse {
             @compileError("Struct " ++ @typeName(T) ++ ".deinit allocator parameter must be typed");
         };
         if (allocator_type != std.mem.Allocator) {
@@ -627,10 +627,10 @@ pub const Napi = struct {
         if (comptime infos != .@"struct") {
             @compileError("cleanupStructPrefix expects a struct or tuple type, got: " ++ @typeName(T));
         }
-        inline for (infos.@"struct".fields, 0..) |field, i| {
-            if (comptime @import("../metadata.zig").get(T, field.name).skip) continue;
+        inline for (infos.@"struct".field_names, infos.@"struct".field_types, 0..) |field_name, field_type, i| {
+            if (comptime @import("../metadata.zig").get(T, field_name).skip) continue;
             if (i < initialized) {
-                Napi.deinit_napi_value_with_allocator(field.type, @field(result.*, field.name), allocator);
+                Napi.deinit_napi_value_with_allocator(field_type, @field(result.*, field_name), allocator);
             }
         }
     }
@@ -723,9 +723,9 @@ pub const Napi = struct {
                     return;
                 }
 
-                inline for (infos.@"struct".fields) |field| {
-                    if (comptime @import("../metadata.zig").get(T, field.name).skip) continue;
-                    Napi.deinit_napi_value_inner(field.type, @field(value, field.name), allocator, state);
+                inline for (infos.@"struct".field_names, infos.@"struct".field_types) |field_name, field_type| {
+                    if (comptime @import("../metadata.zig").get(T, field_name).skip) continue;
+                    Napi.deinit_napi_value_inner(field_type, @field(value, field_name), allocator, state);
                 }
             },
             .@"union" => |union_info| {
@@ -854,20 +854,20 @@ pub const Napi = struct {
                 var initialized: usize = 0;
                 errdefer {
                     // Fields cloned before the failing field must not be lost.
-                    inline for (infos.@"struct".fields, 0..) |field, i| {
-                        if (comptime @import("../metadata.zig").get(T, field.name).skip) continue;
+                    inline for (infos.@"struct".field_names, infos.@"struct".field_types, 0..) |field_name, field_type, i| {
+                        if (comptime @import("../metadata.zig").get(T, field_name).skip) continue;
                         if (i < initialized) {
-                            Napi.deinit_napi_value_with_allocator(field.type, @field(copy, field.name), allocator);
+                            Napi.deinit_napi_value_with_allocator(field_type, @field(copy, field_name), allocator);
                         }
                     }
                 }
-                inline for (infos.@"struct".fields, 0..) |field, i| {
-                    if (comptime @import("../metadata.zig").get(T, field.name).skip) {
-                        const default = field.default_value_ptr orelse @compileError("Skipped fields require a default value: " ++ field.name);
-                        @field(copy, field.name) = @as(*const field.type, @ptrCast(@alignCast(default))).*;
+                inline for (infos.@"struct".field_names, infos.@"struct".field_types, infos.@"struct".field_attrs, 0..) |field_name, field_type, field_attrs, i| {
+                    if (comptime @import("../metadata.zig").get(T, field_name).skip) {
+                        const default = field_attrs.default_value_ptr orelse @compileError("Skipped fields require a default value: " ++ field_name);
+                        @field(copy, field_name) = @as(*const field_type, @ptrCast(@alignCast(default))).*;
                         continue;
                     }
-                    @field(copy, field.name) = try Napi.clone_napi_value(field.type, @field(value, field.name), allocator);
+                    @field(copy, field_name) = try Napi.clone_napi_value(field_type, @field(value, field_name), allocator);
                     initialized = i + 1;
                 }
                 return copy;
@@ -897,15 +897,15 @@ pub const Napi = struct {
             .pointer => |ptr| return ptr.size == .slice and Napi.containsOwnedValue(ptr.child),
             .@"struct" => |struct_info| {
                 if (comptime helper.isJsHandle(T)) return false;
-                inline for (struct_info.fields) |field| {
-                    if (comptime Napi.containsOwnedValue(field.type)) return true;
+                inline for (struct_info.field_types) |field_type| {
+                    if (comptime Napi.containsOwnedValue(field_type)) return true;
                 }
                 return false;
             },
             .@"union" => |union_info| {
                 if (union_info.tag_type == null) return false;
-                inline for (union_info.fields) |field| {
-                    if (comptime Napi.containsOwnedValue(field.type)) return true;
+                inline for (union_info.field_types) |field_type| {
+                    if (comptime Napi.containsOwnedValue(field_type)) return true;
                 }
                 return false;
             },
@@ -946,8 +946,8 @@ pub const Napi = struct {
             },
             .@"struct" => |struct_info| {
                 if (comptime helper.isJsHandle(T)) return;
-                inline for (struct_info.fields) |field| {
-                    Napi.disposeOwnedParts(field.type, @field(value, field.name), allocator);
+                inline for (struct_info.field_names, struct_info.field_types) |field_name, field_type| {
+                    Napi.disposeOwnedParts(field_type, @field(value, field_name), allocator);
                 }
             },
             .@"union" => |union_info| {
@@ -1076,18 +1076,18 @@ pub const Napi = struct {
                                         comptime var thread_safe_function_call_variant = false;
                                         comptime var max_queue_size = 0;
 
-                                        inline for (fn_infos.@"struct".fields) |field| {
-                                            if (comptime std.mem.eql(u8, field.name, "args")) {
-                                                args_type = field.type;
+                                        inline for (fn_infos.@"struct".field_names, fn_infos.@"struct".field_types) |field_name, field_type| {
+                                            if (comptime std.mem.eql(u8, field_name, "args")) {
+                                                args_type = field_type;
                                             }
-                                            if (comptime std.mem.eql(u8, field.name, "return_type")) {
-                                                return_type = field.type;
+                                            if (comptime std.mem.eql(u8, field_name, "return_type")) {
+                                                return_type = field_type;
                                             }
-                                            if (comptime std.mem.eql(u8, field.name, "thread_safe_function_call_variant")) {
+                                            if (comptime std.mem.eql(u8, field_name, "thread_safe_function_call_variant")) {
                                                 const temp_instance = @as(child_info, undefined);
                                                 thread_safe_function_call_variant = @field(temp_instance, "thread_safe_function_call_variant");
                                             }
-                                            if (comptime std.mem.eql(u8, field.name, "max_queue_size")) {
+                                            if (comptime std.mem.eql(u8, field_name, "max_queue_size")) {
                                                 const temp_instance = @as(child_info, undefined);
                                                 max_queue_size = @field(temp_instance, "max_queue_size");
                                             }
@@ -1120,12 +1120,12 @@ pub const Napi = struct {
                                     const fn_infos = @typeInfo(T);
                                     comptime var args_type = void;
                                     comptime var return_type = void;
-                                    inline for (fn_infos.@"struct".fields) |field| {
-                                        if (comptime std.mem.eql(u8, field.name, "args")) {
-                                            args_type = field.type;
+                                    inline for (fn_infos.@"struct".field_names, fn_infos.@"struct".field_types) |field_name, field_type| {
+                                        if (comptime std.mem.eql(u8, field_name, "args")) {
+                                            args_type = field_type;
                                         }
-                                        if (comptime std.mem.eql(u8, field.name, "return_type")) {
-                                            return_type = field.type;
+                                        if (comptime std.mem.eql(u8, field_name, "return_type")) {
+                                            return_type = field_type;
                                         }
                                     }
                                     return Function(args_type, return_type).from_raw(env, raw);
@@ -1187,9 +1187,9 @@ pub const Napi = struct {
                                     @compileError("Only tagged union(enum) is supported, got: " ++ @typeName(T));
                                 }
 
-                                inline for (infos.@"union".fields) |field| {
-                                    if (try valueMatchesType(env, raw, field.type)) {
-                                        return @unionInit(T, field.name, try Napi.from_napi_value_with_allocator(env, raw, field.type, allocator));
+                                inline for (infos.@"union".field_names, infos.@"union".field_types) |field_name, field_type| {
+                                    if (try valueMatchesType(env, raw, field_type)) {
+                                        return @unionInit(T, field_name, try Napi.from_napi_value_with_allocator(env, raw, field_type, allocator));
                                     }
                                 }
 
@@ -1345,7 +1345,7 @@ pub const Napi = struct {
                         if (comptime isStringEnum(value_type)) {
                             return (try NapiValue.String.createUtf8(Env.from_raw(env), @tagName(value))).raw;
                         }
-                        return (try NapiValue.Number.create(Env.from_raw(env), @intFromEnum(value))).raw;
+                        return (try NapiValue.Number.create(Env.from_raw(env), @backingInt(value))).raw;
                     },
                     .optional => {
                         if (value) |v| {

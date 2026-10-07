@@ -28,7 +28,7 @@ fn addNodeAddonWith(
         .node_api = .{
             // Keep the node-version matrix loadable on Node 12 while still
             // covering the N-API v4/v5/v6/v7/v8 gated surfaces.
-            .version = @enumFromInt(test_napi_version),
+            .version = @fromBackingInt(@intCast(test_napi_version)),
             .experimental = false,
         },
         .root_module_options = .{

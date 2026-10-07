@@ -42,7 +42,7 @@ pub fn external_finalizer_count() usize {
 }
 
 pub fn create_buffer_copy(env: napi.Env, len: u32) !napi.Buffer {
-    var bytes = [_]u8{0} ** 256;
+    var bytes: [256]u8 = @splat(0);
     const actual_len = @min(@as(usize, len), bytes.len);
     for (bytes[0..actual_len], 0..) |*byte, i| {
         byte.* = @intCast(i % 251);
@@ -75,7 +75,7 @@ pub fn buffer_first_byte(value: napi.Buffer) u8 {
 }
 
 pub fn create_arraybuffer_copy(env: napi.Env, len: u32) !napi.ArrayBuffer {
-    var bytes = [_]u8{0} ** 256;
+    var bytes: [256]u8 = @splat(0);
     const actual_len = @min(@as(usize, len), bytes.len);
     for (bytes[0..actual_len], 0..) |*byte, i| {
         byte.* = @intCast((i + 3) % 251);

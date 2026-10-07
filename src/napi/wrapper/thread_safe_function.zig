@@ -282,7 +282,7 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
                         }
                     }
 
-                    const args_len = if (@typeInfo(Args) == .@"struct" and @typeInfo(Args).@"struct".is_tuple) @typeInfo(Args).@"struct".fields.len else 1;
+                    const args_len = if (@typeInfo(Args) == .@"struct" and @typeInfo(Args).@"struct".is_tuple) @typeInfo(Args).@"struct".field_names.len else 1;
                     const call_variant = if (self.thread_safe_function_call_variant) 1 else 0;
 
                     const argv = allocator.alloc(napi.napi_value, args_len + call_variant) catch return;
@@ -298,8 +298,8 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
                     var conversion_error: ?NapiError.Error = null;
                     if (call_data.args) |actual_args| {
                         if (@typeInfo(Args) == .@"struct" and @typeInfo(Args).@"struct".is_tuple) {
-                            inline for (@typeInfo(Args).@"struct".fields, 0..) |field, i| {
-                                argv[i + call_variant] = Napi.to_napi_value(inner_env, @field(actual_args.*, field.name), null) catch |err| blk: {
+                            inline for (@typeInfo(Args).@"struct".field_names, 0..) |field_name, i| {
+                                argv[i + call_variant] = Napi.to_napi_value(inner_env, @field(actual_args.*, field_name), null) catch |err| blk: {
                                     conversion_error = NapiError.mapAnyError(err);
                                     break :blk undefined_value;
                                 };

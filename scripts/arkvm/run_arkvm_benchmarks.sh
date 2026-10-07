@@ -16,7 +16,7 @@ ABC="${WORKSPACE}/suite.abc"
 FILES_INFO="${WORKSPACE}/filesInfo.txt"
 LOG_FILE="${WORKSPACE}/arkvm.log"
 RESULT_PREFIX="__ZIG_NAPI_BENCHMARK_RESULT__"
-ZIG_BUILD_ARGS="${ARKVM_BUILD_ARGS:--Darkvm-test=true -Doptimize=ReleaseFast}"
+ZIG_BUILD_ARGS="${ARKVM_BUILD_ARGS:--Darkvm-test=true -Doptimize=fast}"
 RESULT_MD="${BENCHMARK_RESULT_MD:-${WORK_ROOT}/benchmark-result.md}"
 
 [[ -x "${ARK_ES2ABC}" ]] || { echo "Missing binary: ${ARK_ES2ABC}" >&2; exit 1; }

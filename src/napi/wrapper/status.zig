@@ -73,7 +73,7 @@ pub const Status = enum(u32) {
     }
 
     pub fn code(self: Status) u32 {
-        return @intFromEnum(self);
+        return @backingInt(self);
     }
 
     pub fn toString(self: Status) []const u8 {

@@ -240,7 +240,7 @@ pub fn nativeWrapDeinitCount() usize {
 }
 
 pub fn enumToI32(value: CustomNumEnum) i32 {
-    return @intFromEnum(value);
+    return @backingInt(value);
 }
 
 pub fn call0(callback: napi.Function(struct {}, i32)) !i32 {

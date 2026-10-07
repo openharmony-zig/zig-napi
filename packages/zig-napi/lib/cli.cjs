@@ -929,7 +929,7 @@ async function commandBuild(flags, passthrough = []) {
     throw error;
   }
   const args = ["build"];
-  if (flags.release) args.push("-Doptimize=ReleaseFast");
+  if (flags.release) args.push("-Doptimize=fast");
   if (flags.target) {
     // Both WASI flavors build Zig's wasm32-wasi target; only the threaded one
     // enables atomics/shared memory.
@@ -1141,7 +1141,7 @@ function addBuildOptions(command) {
 
 function addBuildFlags(command) {
   return command
-    .option("--release", "build with ReleaseFast optimization")
+    .option("--release", "build with fast optimization")
     .option("--target <zig-target>", "Zig target triple")
     .option("--format <format>", "binding module format: esm or commonjs")
     .option("--esm", "generate an ES module binding")

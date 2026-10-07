@@ -108,15 +108,15 @@ fn canCapture(comptime T: type) bool {
         .array => |array| return canCapture(array.child),
         .pointer => |ptr| return ptr.size == .slice and canCapture(ptr.child),
         .@"struct" => |struct_info| {
-            inline for (struct_info.fields) |field| {
-                if (!canCapture(field.type)) return false;
+            inline for (struct_info.field_types) |field_type| {
+                if (!canCapture(field_type)) return false;
             }
             return true;
         },
         .@"union" => |union_info| {
             if (union_info.tag_type == null) return false;
-            inline for (union_info.fields) |field| {
-                if (!canCapture(field.type)) return false;
+            inline for (union_info.field_types) |field_type| {
+                if (!canCapture(field_type)) return false;
             }
             return true;
         },
@@ -132,8 +132,8 @@ fn canCapture(comptime T: type) bool {
 /// nor releases it.
 fn payloadIsStatic(comptime T: type) bool {
     return comptime blk: {
-        for (@typeInfo(T).@"struct".fields) |field| {
-            if (std.mem.eql(u8, field.name, "data")) break :blk field.is_comptime;
+        for (@typeInfo(T).@"struct".field_names, @typeInfo(T).@"struct".field_attrs) |field_name, field_attrs| {
+            if (std.mem.eql(u8, field_name, "data")) break :blk field_attrs.@"comptime";
         }
         break :blk false;
     };
@@ -672,13 +672,13 @@ pub fn WorkerContextWith(comptime T: type, comptime transfer: DataTransfer) type
             };
 
             if (@typeInfo(ExecuteReturn) == .error_union) {
-                const result = if (ExecuteInfo.@"fn".params.len == 1)
+                const result = if (ExecuteInfo.@"fn".param_types.len == 1)
                     try execute_fn(self.data.data)
                 else
                     try execute_fn(napi_env.Env.from_raw(inner_env), self.data.data);
                 try Runner.storeResult(self, result);
             } else {
-                const result = if (ExecuteInfo.@"fn".params.len == 1)
+                const result = if (ExecuteInfo.@"fn".param_types.len == 1)
                     execute_fn(self.data.data)
                 else
                     execute_fn(napi_env.Env.from_raw(inner_env), self.data.data);
@@ -695,19 +695,19 @@ fn toAnyError(err: NapiError.Error) anyerror {
 
 fn validateExecuteSignature(comptime DataType: type, comptime ExecuteFn: type) void {
     const info = @typeInfo(ExecuteFn).@"fn";
-    if (info.params.len != 1 and info.params.len != 2) {
+    if (info.param_types.len != 1 and info.param_types.len != 2) {
         @compileError("Worker Execute must accept (data) or (napi.Env, data)");
     }
 
-    if (info.params.len == 1) {
-        if (info.params[0].type.? != DataType) {
+    if (info.param_types.len == 1) {
+        if (info.param_types[0].? != DataType) {
             @compileError("Worker Execute data type mismatch");
         }
     } else {
-        if (info.params[0].type.? != napi_env.Env) {
+        if (info.param_types[0].? != napi_env.Env) {
             @compileError("Worker Execute first parameter must be napi.Env");
         }
-        if (info.params[1].type.? != DataType) {
+        if (info.param_types[1].? != DataType) {
             @compileError("Worker Execute data type mismatch");
         }
     }
@@ -715,19 +715,19 @@ fn validateExecuteSignature(comptime DataType: type, comptime ExecuteFn: type) v
 
 fn validateOnCompleteSignature(comptime DataType: type, comptime OnCompleteFn: type) void {
     const info = @typeInfo(OnCompleteFn).@"fn";
-    if (info.params.len != 1 and info.params.len != 2) {
+    if (info.param_types.len != 1 and info.param_types.len != 2) {
         @compileError("Worker OnComplete must accept (data) or (napi.Env, data)");
     }
 
-    if (info.params.len == 1) {
-        if (info.params[0].type.? != DataType) {
+    if (info.param_types.len == 1) {
+        if (info.param_types[0].? != DataType) {
             @compileError("Worker OnComplete data type mismatch");
         }
     } else {
-        if (info.params[0].type.? != napi_env.Env) {
+        if (info.param_types[0].? != napi_env.Env) {
             @compileError("Worker OnComplete first parameter must be napi.Env");
         }
-        if (info.params[1].type.? != DataType) {
+        if (info.param_types[1].? != DataType) {
             @compileError("Worker OnComplete data type mismatch");
         }
     }
@@ -736,7 +736,7 @@ fn validateOnCompleteSignature(comptime DataType: type, comptime OnCompleteFn: t
 fn callOnComplete(data: anytype, env: napi_env.Env) void {
     const OnCompleteFn = @TypeOf(data.OnComplete);
     const info = @typeInfo(OnCompleteFn).@"fn";
-    if (info.params.len == 1) {
+    if (info.param_types.len == 1) {
         data.OnComplete(data.data);
     } else {
         data.OnComplete(env, data.data);

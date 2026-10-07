@@ -3,6 +3,7 @@ const std = @import("std");
 pub const napi_build = @import("src/build/napi-build.zig");
 
 pub fn build(b: *std.Build) !void {
+    const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     const napi_sys = b.addModule("napi_sys", .{
         .root_source_file = b.path("src/sys/api.zig"),
@@ -18,6 +19,7 @@ pub fn build(b: *std.Build) !void {
     napi.addImport("napi-sys", napi_sys);
     napi.addImport("build_options", build_options);
     napi_sys.addImport("build_options", build_options);
+    napi_sys.addImport("ohos", napi_build.createOhosBindings(b, b.path("src/sys/ohos/native_api.h"), target, optimize, .{}));
 
     napi.addIncludePath(b.path("src/sys/ohos"));
     napi_sys.addIncludePath(b.path("src/sys/ohos"));

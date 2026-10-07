@@ -123,7 +123,7 @@ pub const Array = struct {
             },
             .@"struct" => {
                 if (comptime helper.isTuple(T)) {
-                    const field_count = infos.@"struct".fields.len;
+                    const field_count = infos.@"struct".field_names.len;
                     const actual_len = try arrayLength(env, raw);
                     if (actual_len != field_count) {
                         return NapiError.failRangeError(
@@ -135,20 +135,20 @@ pub const Array = struct {
                     var result: T = undefined;
                     var initialized: usize = 0;
                     errdefer {
-                        inline for (infos.@"struct".fields, 0..) |field, i| {
+                        inline for (infos.@"struct".field_names, infos.@"struct".field_types, 0..) |field_name, field_type, i| {
                             if (i < initialized) {
-                                Napi.deinit_napi_value_with_allocator(field.type, @field(result, field.name), allocator);
+                                Napi.deinit_napi_value_with_allocator(field_type, @field(result, field_name), allocator);
                             }
                         }
                     }
 
-                    inline for (infos.@"struct".fields, 0..) |field, i| {
+                    inline for (infos.@"struct".field_names, infos.@"struct".field_types, 0..) |field_name, field_type, i| {
                         var element: napi.napi_value = undefined;
                         const status = napi.napi_get_element(env, raw, @intCast(i), &element);
                         if (status != napi.napi_ok) {
                             return NapiError.failStatus(status);
                         }
-                        @field(result, field.name) = try Napi.from_napi_value_auto_with_allocator(env, element, field.type, allocator);
+                        @field(result, field_name) = try Napi.from_napi_value_auto_with_allocator(env, element, field_type, allocator);
                         initialized = i + 1;
                     }
                     return result;
@@ -389,7 +389,7 @@ pub const Array = struct {
         } else if (comptime helper.isSlice(array_type)) {
             len = @intCast(array.len);
         } else if (comptime helper.isTuple(array_type)) {
-            len = infos.@"struct".fields.len;
+            len = infos.@"struct".field_names.len;
         } else if (comptime helper.isArrayList(array_type)) {
             len = @intCast(array.items.len);
         }
@@ -406,8 +406,8 @@ pub const Array = struct {
                 try setElement(env.raw, raw, @intCast(i), napi_value);
             }
         } else if (comptime helper.isTuple(array_type)) {
-            inline for (infos.@"struct".fields, 0..) |item, i| {
-                const value = @field(array, item.name);
+            inline for (infos.@"struct".field_names, 0..) |item_name, i| {
+                const value = @field(array, item_name);
                 const napi_value = try Napi.to_napi_value_auto(env.raw, value, null);
                 try setElement(env.raw, raw, @intCast(i), napi_value);
             }

@@ -31,10 +31,9 @@ jobs:
           fi
 
       - name: Setup Zig
-        uses: mlugg/setup-zig@v2
+        uses: openharmony-zig/setup-zig-ohos@v0.1.0
         with:
-          version: 0.16.0
-          cache-key: npm-publish
+          tag: '0.17.0'
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4

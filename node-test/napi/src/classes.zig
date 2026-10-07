@@ -592,7 +592,7 @@ pub fn workerCancelCaptured(env: napi.Env, input: []const u8) !napi.Promise {
     return promise;
 }
 
-var on_complete_copy: [32]u8 = [_]u8{0} ** 32;
+var on_complete_copy: [32]u8 = @splat(0);
 var on_complete_len: usize = 0;
 var remembered_worker: ?*anyopaque = null;
 var remembered_release: ?*const fn (*anyopaque) void = null;

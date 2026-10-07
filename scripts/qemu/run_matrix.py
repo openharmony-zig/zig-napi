@@ -66,7 +66,7 @@ def main():
         env = dict(os.environ, OHOS_NDK_HOME=str(args.ndk.resolve()))
         example = repo / 'examples' / suite
         install = output / ('ohos-' + suite)
-        run('build-ohos-' + suite, [args.ohos_zig, 'build', '-Dtarget=' + target, '-Doptimize=ReleaseSafe', '--prefix', install, '--summary', 'all'], example, env)
+        run('build-ohos-' + suite, [args.ohos_zig, 'build', '-Dtarget=' + target, '-Doptimize=safe', '--prefix', install, '--summary', 'all'], example, env)
         library = install / abi / 'libhello.so'
         # OHOS native libraries are code-signed by the official HAP signer
         # below (-signCode 1); the Node CLI has no OHOS signing dependency.

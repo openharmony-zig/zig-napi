@@ -67,34 +67,34 @@ pub fn NODE_API_MODULE_WITH_INIT(
             const export_obj = Object.from_raw(env, exports);
             const undefined_value = Undefined.New(inner_env);
 
-            inline for (root_infos.@"struct".fields) |field| {
-                if (comptime Metadata.get(root, field.name).skip) continue;
-                const value = Napi.to_napi_value(env, @field(root, field.name), Metadata.name(root, field.name)) catch |err| {
+            inline for (root_infos.@"struct".field_names) |field_name| {
+                if (comptime Metadata.get(root, field_name).skip) continue;
+                const value = Napi.to_napi_value(env, @field(root, field_name), Metadata.name(root, field_name)) catch |err| {
                     reportInitFailure(inner_env, err);
                     return undefined_value.raw;
                 };
 
-                defineExport(export_obj, field.name, value) catch |err| {
+                defineExport(export_obj, field_name, value) catch |err| {
                     reportInitFailure(inner_env, err);
                     return undefined_value.raw;
                 };
             }
 
-            inline for (root_infos.@"struct".decls) |decl| {
-                if (comptime Metadata.reserved(decl.name) or Metadata.get(root, decl.name).skip) {
+            inline for (root_infos.@"struct".decl_names) |decl| {
+                if (comptime Metadata.reserved(decl) or Metadata.get(root, decl).skip) {
                     continue;
                 }
-                const origin_value = @field(root, decl.name);
+                const origin_value = @field(root, decl);
                 if (comptime @TypeOf(origin_value) == type) {
                     // Object schemas/type aliases produce declarations only.
                     // Enum objects and class constructors have runtime exports.
                     if (comptime @typeInfo(origin_value) != .@"enum" and !@import("../napi/wrapper/class.zig").isClass(origin_value)) continue;
                 }
-                const value = Napi.to_napi_value(env, origin_value, Metadata.name(root, decl.name)) catch |err| {
+                const value = Napi.to_napi_value(env, origin_value, Metadata.name(root, decl)) catch |err| {
                     reportInitFailure(inner_env, err);
                     return undefined_value.raw;
                 };
-                defineExport(export_obj, decl.name, value) catch |err| {
+                defineExport(export_obj, decl, value) catch |err| {
                     reportInitFailure(inner_env, err);
                     return undefined_value.raw;
                 };
@@ -146,7 +146,7 @@ pub fn NODE_API_MODULE_WITH_INIT(
         }
 
         fn node_api_version() callconv(.c) i32 {
-            return @intFromEnum(options.selectedNapiVersion());
+            return @backingInt(options.selectedNapiVersion());
         }
     };
 

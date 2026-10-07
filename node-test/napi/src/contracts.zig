@@ -209,7 +209,7 @@ pub fn workerCapturedInput(env: napi.Env, input: []const u8) !napi.Promise {
     return napi.Worker(env, .{ .data = input, .Execute = delayedWorkerRead }).AsyncQueue();
 }
 const ErrorTsfn = napi.ThreadSafeFunction(struct { u32 }, void, true, 0);
-const EmptyErrorTsfn = napi.ThreadSafeFunction(std.meta.Tuple(&.{}), void, true, 0);
+const EmptyErrorTsfn = napi.ThreadSafeFunction(@Tuple(&.{}), void, true, 0);
 var tsfn_error_message: [12]u8 = "original msg".*;
 pub fn tsfnError(tsfn: *ErrorTsfn) !void {
     @memcpy(&tsfn_error_message, "original msg");
