@@ -47,7 +47,7 @@ Shared native fixtures are in `examples/basic/src/parity.zig`. Node runs them th
 
 The goal is equivalent binding behavior on supported hosts. Rust proc macros, Cargo, Tokio futures and Rust-specific standard-library types are expressed using Zig comptime exports, the Zig CLI, `Async`/`std.Io`, and explicit native wrappers. They are not Rust compatibility APIs.
 
-Zig 0.16 has no usable native evented `std.Io` backend here; `.event` resolves to the threaded backend. WASI async work/TSFN run through emnapi's JS worker plugins. WASI does not provide native `std.Thread`/Tokio pthread semantics, so native-thread reference tests and `NativePromise.wait` are native-target capabilities. WASI worker crash and allocator behavior have separate real WASM acceptance tests.
+With Zig 0.17, `.event` still resolves to the shared threaded backend: the new evented `std.Io` backends are not integrated with the addon lifecycle and Node event loop. WASI async work/TSFN run through emnapi's JS worker plugins. WASI does not provide native `std.Thread`/Tokio pthread semantics, so native-thread reference tests and `NativePromise.wait` are native-target capabilities. WASI worker crash and allocator behavior have separate real WASM acceptance tests.
 
 OHOS APIs follow the installed SDK headers. Registry symbols use `Symbol.for` when the N-API call is unavailable. External strings report a copying fallback. Stream consumers require standard methods; `ReadableStream.New` also requires the host's global `ReadableStream` constructor. OHOS QEMU verifies the native protocol against its actual host; Node additionally verifies actual Web Stream construction and backpressure.
 

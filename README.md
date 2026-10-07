@@ -4,7 +4,7 @@ This project can help us to build native module libraries for OpenHarmony/Harmon
 
 ## Require
 
-For openharmony, we must use a patched zig library to build. See detail with [zig-patch](https://github.com/openharmony-zig/zig-patch).
+Use Zig 0.17.0 from the [zig-patch 0.17.0 release](https://github.com/openharmony-zig/zig-patch/releases/tag/0.17.0) for development and CI. Put the extracted toolchain on `PATH` and check that `zig version` prints `0.17.0`. This patched toolchain supports OpenHarmony, native Node.js addons and WASI builds.
 
 ### Node.js requirements
 
@@ -27,7 +27,7 @@ We recommend you use ZON(Zig Package Manager) to install it.
 .{
     .name = "appname",
     .version = "0.0.0",
-    .minimum_zig_version = "0.16.0",
+    .minimum_zig_version = "0.17.0",
     .dependencies = .{
         .@"zig-napi" = .{
             .url = "https://github.com/openharmony-zig/zig-napi/archive/refs/tags/<GIT_TAG>.tar.gz",
@@ -168,7 +168,7 @@ It installs the addon as `zig-out/node/hello.<platform-arch-abi>.node`, for exam
 
 WASI addons link emnapi's `libemnapi-basic-napi-rs.a` from a `node_modules/emnapi` install (`emnapi` `2.0.0-alpha.5`, a prerelease to pin exactly, with `@emnapi/core` and `@emnapi/runtime` at the same version and `@napi-rs/wasm-runtime` `1.2.5` for the loaders), which the build looks for next to the addon project and upwards. `--target wasm32-wasip1` builds the single-threaded flavor as `hello.wasm32-wasip1.wasm` (`hello.wasip1.cjs`, unshared imported memory), and `--target wasm32-wasip1-threads` builds the shared-memory flavor as `hello.wasm32-wasi.wasm` (`hello.wasi.cjs`, worker pool); the single-threaded flavor additionally ships a deferred ESM binding (`hello.wasip1-deferred.js`) with `instantiate()`/`createInstance()`/`dispose()`. Both are passed to Zig as `-Dtarget=wasm32-wasi` — Zig only knows that spelling — with `-Dcpu=baseline+atomics+bulk_memory+mutable_globals` on the threaded one, which is also the flag that selects the flavor.
 
-Async work and thread-safe functions come from the `@emnapi/core` plugins in both flavors; the threaded flavor runs them on the plugin's JavaScript worker threads through the `emnapi_async_worker_create` / `emnapi_async_worker_init` exports. That is deliberately **not** napi-rs' implementation, which links emnapi's full C composition and uses the uv/libuv thread pool over real wasi pthreads: Zig 0.16 cannot build a multithreaded wasm module, so a zig-napi WASI addon has no libuv/Tokio-style async API. Memory stays a loader decision — the module imports memory with the linker minimum (257 pages by default) and a 4 GiB maximum, and the loader's `wasm.initialMemory` (4000 pages by default) must stay below `wasm.maximumMemory`, because the Zig allocator grows the linear memory past its current size. A **single** allocation is capped at 1 GiB − 64 KiB (a wasm32 bump-allocator size-class limit: `malloc`/Zig `Allocator` return null/an out-of-memory error instead of trapping above it, and a failed `realloc` keeps the old block), while the total memory can still be 4 GiB across many allocations. Build-side overrides: `-Dwasi-initial-memory-pages=<pages>`, `-Dwasi-max-memory-pages=<pages>`, `-Dwasi-stack-size=<bytes>`, plus `-Demnapi-link-dir=<dir>` (or `EMNAPI_LINK_DIR`) and `-Demnapi-archive=<name-or-path>` to select a different emnapi archive.
+Async work and thread-safe functions come from the `@emnapi/core` plugins in both flavors; the threaded flavor runs them on the plugin's JavaScript worker threads through the `emnapi_async_worker_create` / `emnapi_async_worker_init` exports. That is deliberately **not** napi-rs' implementation, which links emnapi's full C composition and uses the uv/libuv thread pool over real wasi pthreads: Zig 0.17 cannot build a multithreaded wasm module, so a zig-napi WASI addon has no libuv/Tokio-style async API. Memory stays a loader decision — the module imports memory with the linker minimum (257 pages by default) and a 4 GiB maximum, and the loader's `wasm.initialMemory` (4000 pages by default) must stay below `wasm.maximumMemory`, because the Zig allocator grows the linear memory past its current size. A **single** allocation is capped at 1 GiB − 64 KiB (a wasm32 bump-allocator size-class limit: `malloc`/Zig `Allocator` return null/an out-of-memory error instead of trapping above it, and a failed `realloc` keeps the old block), while the total memory can still be 4 GiB across many allocations. Build-side overrides: `-Dwasi-initial-memory-pages=<pages>`, `-Dwasi-max-memory-pages=<pages>`, `-Dwasi-stack-size=<bytes>`, plus `-Demnapi-link-dir=<dir>` (or `EMNAPI_LINK_DIR`) and `-Demnapi-archive=<name-or-path>` to select a different emnapi archive.
 
 The package also provides a `zig-napi` CLI for Node.js addons. Zig-specific commands such as `new` and `build` are implemented by this project. Packaging commands reuse the community `@napi-rs/cli` API for npm package directory creation, artifact collection, and pre-publish processing.
 
