@@ -4,7 +4,7 @@ This project can help us to build native module libraries for OpenHarmony/Harmon
 
 ## Require
 
-Use Zig 0.17.0 from the [zig-patch 0.17.0 release](https://github.com/openharmony-zig/zig-patch/releases/tag/0.17.0) for development and CI. Put the extracted toolchain on `PATH` and check that `zig version` prints `0.17.0`. This patched toolchain supports OpenHarmony, native Node.js addons and WASI builds.
+Use [Zig 0.17.0](https://ziglang.org/download/) for Node.js addons and WASI builds. OpenHarmony builds require the patched toolchain from the [zig-patch 0.17.0 release](https://github.com/openharmony-zig/zig-patch/releases/tag/0.17.0). Put the appropriate toolchain on `PATH` and check that `zig version` prints `0.17.0`. CI uses `mlugg/setup-zig@v2` for Node.js/WASI and lint/format, and `openharmony-zig/setup-zig-ohos@v0.1.0` for OpenHarmony.
 
 ### Node.js requirements
 

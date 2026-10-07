@@ -2,7 +2,7 @@
 
 Only OHOS validation uses QEMU. `pnpm test:e2e:qemu` builds the five OHOS HAP suites, installs each signed HAP, launches `EntryAbility` through `aa`, and runs the shared tests in the application's actual native host. `arkdown build` compiles/packages the HAP; validation runs in the full OHOS system.
 
-Node.js native addons and WASI products run directly on the host with `pnpm test:e2e:node --output zig-out/e2e-node`. They require Node.js, zig-patch 0.17.0 and the workspace dependencies. The existing Node addon workflow also tests the supported Node versions on Linux, Windows and macOS.
+Node.js native addons and WASI products run directly on the host with `pnpm test:e2e:node --output zig-out/e2e-node`. They require Node.js, stock Zig 0.17.0 and the workspace dependencies. The existing Node addon workflow also tests the supported Node versions on Linux, Windows and macOS.
 
 ## OHOS runner prerequisites
 
@@ -70,6 +70,6 @@ The historical combined QEMU runs are retained in [`qemu-e2e-results.json`](qemu
 `.github/workflows/ci.yml` runs two independent E2E jobs on GitHub-hosted `ubuntu-24.04` runners:
 
 - `ohos-qemu-e2e` downloads the pinned OHOS phone image, verifies its SHA256, and invokes the release's launcher with KVM and QMP. It installs the full OpenHarmony 7.0 `native;ets;toolchains` SDK, OHOS Zig 0.17.0, ArkDown 0.0.2 and official development signing tools. HDC, AccountMgr user 100/foreground readiness, device UDID, guest architecture and active KVM are required before the five signed HAP suites run three times each. The job stops its owned QEMU through QMP on completion or failure.
-- `node-e2e` uses the runner's Node.js 24.14.0 and zig-patch 0.17.0 to build and execute Node/WASI acceptance and three full regression rounds directly on the runner.
+- `node-e2e` uses the runner's Node.js 24.14.0 and stock Zig 0.17.0 to build and execute Node/WASI acceptance and three full regression rounds directly on the runner.
 
 Both jobs upload result JSON and logs with `always()`. The OHOS job requires no preconfigured guest, private Docker image, repository variable or self-hosted runner. Missing KVM, SDK, device readiness, an installation/signature failure, skipped acceptance or failed assertion fails the appropriate job. `workflow_dispatch` allows a manual regression run on a branch.
