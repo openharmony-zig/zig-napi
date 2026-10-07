@@ -10,7 +10,9 @@ pub fn retain() void {
     if (retained.cmpxchgStrong(false, true, .acq_rel, .acquire) != null) return;
     if (comptime builtin.os.tag == .windows) {
         const Win = struct {
-            extern "kernel32" fn GetModuleHandleExW(u32, ?[*]const u16, *?*anyopaque) callconv(.winapi) i32;
+            // FROM_ADDRESS interprets the second argument as an arbitrary
+            // address inside the module, without reading a UTF16 string.
+            extern "kernel32" fn GetModuleHandleExW(u32, *const anyopaque, *?*anyopaque) callconv(.winapi) i32;
         };
         var handle: ?*anyopaque = null;
         _ = Win.GetModuleHandleExW(1 | 4, @ptrCast(&retain), &handle);

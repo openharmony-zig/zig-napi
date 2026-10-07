@@ -2,6 +2,18 @@ const test = require("ava");
 const loadAddon = require("../../load-addon");
 const native = loadAddon("example");
 
+// Node 16 exposes its real Web Streams through stream/web; Node 18+ also
+// exposes them globally. Older runtimes have no Web Streams implementation.
+if (typeof globalThis.ReadableStream !== "function") {
+  try {
+    const { ReadableStream, WritableStream } = require("stream/web");
+    Object.assign(globalThis, { ReadableStream, WritableStream });
+  } catch (error) {
+    if (error.code !== "MODULE_NOT_FOUND") throw error;
+  }
+}
+const testWebStreams = typeof globalThis.ReadableStream === "function" ? test : test.skip;
+
 test("string codecs count bytes/code units and preserve Latin1 and NUL", (t) => {
   t.deepEqual(native.parityStringLengths("A😀\0é"), { utf8: 8, utf16: 5, latin1: 5 });
   t.is(native.parityLatin1("\0éÿ"), "\0éÿ");
@@ -355,72 +367,75 @@ test("iterator return and throw close native producer state", async (t) => {
   t.true((await rejected.next()).done);
 });
 
-test("real Web Streams native pull, backpressure, reader and writer lifecycle", async (t) => {
-  const stream = native.parityNativeReadable(3);
-  t.true(stream instanceof ReadableStream);
-  const reader = native.parityReadable(stream);
-  t.true(stream.locked);
-  for (let i = 0; i < 3; i++)
-    t.deepEqual(await native.parityRead(reader), { value: i, done: false });
-  t.true((await native.parityRead(reader)).done);
-  native.parityReaderRelease(reader);
-  t.false(stream.locked);
-  const reason = { sentinel: true };
-  let cancelled;
-  const cancelledReader = native.parityReadable(
-    new ReadableStream({
-      cancel(r) {
-        cancelled = r;
+testWebStreams(
+  "real Web Streams native pull, backpressure, reader and writer lifecycle",
+  async (t) => {
+    const stream = native.parityNativeReadable(3);
+    t.true(stream instanceof ReadableStream);
+    const reader = native.parityReadable(stream);
+    t.true(stream.locked);
+    for (let i = 0; i < 3; i++)
+      t.deepEqual(await native.parityRead(reader), { value: i, done: false });
+    t.true((await native.parityRead(reader)).done);
+    native.parityReaderRelease(reader);
+    t.false(stream.locked);
+    const reason = { sentinel: true };
+    let cancelled;
+    const cancelledReader = native.parityReadable(
+      new ReadableStream({
+        cancel(r) {
+          cancelled = r;
+        },
+      }),
+    );
+    await native.parityReaderCancel(cancelledReader, reason);
+    t.is(cancelled, reason);
+    native.parityReaderRelease(cancelledReader);
+    const writes = [];
+    let closed = 0;
+    const output = new WritableStream({
+      write(value) {
+        writes.push(value);
       },
-    }),
-  );
-  await native.parityReaderCancel(cancelledReader, reason);
-  t.is(cancelled, reason);
-  native.parityReaderRelease(cancelledReader);
-  const writes = [];
-  let closed = 0;
-  const output = new WritableStream({
-    write(value) {
-      writes.push(value);
-    },
-    close() {
-      closed++;
-    },
-  });
-  const writer = native.parityWritable(output);
-  await native.parityWrite(writer, 42);
-  await native.parityWriterClose(writer);
-  native.parityWriterRelease(writer);
-  t.deepEqual(writes, [42]);
-  t.is(closed, 1);
-  t.false(output.locked);
-  let aborted;
-  const abortWriter = native.parityWritable(
-    new WritableStream({
-      abort(value) {
-        aborted = value;
+      close() {
+        closed++;
       },
-    }),
-  );
-  await native.parityWriterAbort(abortWriter, reason);
-  native.parityWriterRelease(abortWriter);
-  t.is(aborted, reason);
-  t.throws(() => native.parityReadable({}), { instanceOf: TypeError });
-  const rejectedReader = native.parityReadable(
-    new ReadableStream({
-      start(controller) {
-        controller.error(reason);
-      },
-    }),
-  );
-  try {
-    await native.parityRead(rejectedReader);
-    t.fail("must reject");
-  } catch (err) {
-    t.is(err, reason);
-  }
-  native.parityReaderRelease(rejectedReader);
-});
+    });
+    const writer = native.parityWritable(output);
+    await native.parityWrite(writer, 42);
+    await native.parityWriterClose(writer);
+    native.parityWriterRelease(writer);
+    t.deepEqual(writes, [42]);
+    t.is(closed, 1);
+    t.false(output.locked);
+    let aborted;
+    const abortWriter = native.parityWritable(
+      new WritableStream({
+        abort(value) {
+          aborted = value;
+        },
+      }),
+    );
+    await native.parityWriterAbort(abortWriter, reason);
+    native.parityWriterRelease(abortWriter);
+    t.is(aborted, reason);
+    t.throws(() => native.parityReadable({}), { instanceOf: TypeError });
+    const rejectedReader = native.parityReadable(
+      new ReadableStream({
+        start(controller) {
+          controller.error(reason);
+        },
+      }),
+    );
+    try {
+      await native.parityRead(rejectedReader);
+      t.fail("must reject");
+    } catch (err) {
+      t.is(err, reason);
+    }
+    native.parityReaderRelease(rejectedReader);
+  },
+);
 
 (process.env.NAPI_RS_FORCE_WASI ? test.skip : test)(
   "shared references clone and dispose from native threads",
@@ -470,7 +485,7 @@ test("native collection and JSON captures deep clone for async tasks", async (t)
 });
 
 test("weak references collect their target and survive environment termination", (t) => {
-  const { spawnSync } = require("node:child_process");
+  const { spawnSync } = require("child_process");
   const loader = require.resolve("../../load-addon");
   const result = spawnSync(
     process.execPath,
@@ -478,15 +493,15 @@ test("weak references collect their target and survive environment termination",
       "--expose-gc",
       "-e",
       `
-    const assert = require('node:assert/strict');
+    const assert = require('assert').strict;
     const addon = require(${JSON.stringify(loader)})('example');
-    const {Worker} = require('node:worker_threads');
+    const {Worker} = require('worker_threads');
     (async () => {
       const weak = addon.parityWeakClosure({ sentinel: true });
       for (let i=0;i<20;i++) { await new Promise(r=>setImmediate(r)); global.gc(); }
       assert.equal(weak(), undefined, 'weak reference must not root its target');
       for (let i=0;i<5;i++) {
-        const worker = new Worker(\`const {parentPort,workerData}=require('node:worker_threads'); const a=require(workerData)('example'); global.saved=a.parityWeakClosure({});parentPort.postMessage('ready');\`, {eval:true,workerData:${JSON.stringify(loader)}});
+        const worker = new Worker(\`const {parentPort,workerData}=require('worker_threads'); const a=require(workerData)('example'); global.saved=a.parityWeakClosure({});parentPort.postMessage('ready');\`, {eval:true,workerData:${JSON.stringify(loader)}});
         await new Promise((r,j)=>{worker.once('message',r);worker.once('error',j)});
         await worker.terminate();
       }
@@ -522,17 +537,17 @@ test("weak references collect their target and survive environment termination",
 (process.env.NAPI_RS_FORCE_WASI ? test.skip : test)(
   "terminating an environment cancels a native promise waiter",
   (t) => {
-    const { spawnSync } = require("node:child_process");
+    const { spawnSync } = require("child_process");
     const loader = require.resolve("../../load-addon");
     const result = spawnSync(
       process.execPath,
       [
         "-e",
         `
-    const {Worker} = require('node:worker_threads');
+    const {Worker} = require('worker_threads');
     (async () => {
       for(let i=0;i<5;i++) {
-        const worker = new Worker(\`const {parentPort,workerData}=require('node:worker_threads'); const addon=require(workerData)('example'); addon.parityAwaitPromise(new Promise(()=>{})).catch(()=>{});parentPort.postMessage('ready');\`, {eval:true,workerData:${JSON.stringify(loader)}});
+        const worker = new Worker(\`const {parentPort,workerData}=require('worker_threads'); const addon=require(workerData)('example'); addon.parityAwaitPromise(new Promise(()=>{})).catch(()=>{});parentPort.postMessage('ready');\`, {eval:true,workerData:${JSON.stringify(loader)}});
         await new Promise((r,j)=>{worker.once('message',r);worker.once('error',j)});
         await worker.terminate();
       }
