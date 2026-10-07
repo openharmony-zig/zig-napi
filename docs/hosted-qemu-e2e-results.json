@@ -1,0 +1,632 @@
+{
+  "workflowRunUrl": "https://github.com/openharmony-zig/zig-napi/actions/runs/37561134712",
+  "pullRequestUrl": "https://github.com/openharmony-zig/zig-napi/pull/59",
+  "headRevision": "a03f10ce4ad6fca454fb7bfca6022aec49e7168d",
+  "testedMergeRevision": "5e9a29297166129682da6a40be3cdf8b7f3ef00d",
+  "runner": "GitHub-hosted ubuntu-24.04",
+  "ohos": {
+    "imageRelease": "v20260919",
+    "archiveUrl": "https://github.com/harmony-contrib/ohos-qemu/releases/download/v20260919/openharmony-qemu-x86_64-x86_64_virt-phone.tar.gz",
+    "archiveSha256": "08d35399119ec9b87d564cd8bf024e8a189921f5bacf09da889b7b223848a488",
+    "kvm": {
+      "enabled": true,
+      "present": true
+    },
+    "guest": "Linux localhost 6.6.101 #1 SMP PREEMPT_DYNAMIC Thu Sep 10 18:51:17 UTC 2026 x86_64 Toybox",
+    "qemu": {
+      "QMP": {
+        "version": {
+          "qemu": {
+            "micro": 2,
+            "minor": 2,
+            "major": 8
+          },
+          "package": "Debian 1:8.2.2+ds-0ubuntu1.18"
+        },
+        "capabilities": [
+          "oob"
+        ]
+      }
+    },
+    "suites": {
+      "basic": {
+        "hapSha256": "4f4618c1e0f73a647e1063d9afb856f34fbc39b8f370487d986a90e82c67df79",
+        "manifest": {
+          "runId": "5ace742ad7a14955b6356560ea1e879a",
+          "bundle": "org.harmonycontrib.zignapie2e",
+          "abi": "x86_64",
+          "suite": "basic",
+          "library": "/home/runner/work/zig-napi/zig-napi/.tmp_qemu_e2e/ci/ohos/ohos-basic/x86_64/libhello.so",
+          "groups": [
+            "primitives",
+            "objects-arrays",
+            "binary",
+            "functions-classes",
+            "external",
+            "async",
+            "unions-enums",
+            "errors-tsfn",
+            "parity",
+            "parity-protocols",
+            "parity-lifetimes",
+            "parity-streams"
+          ]
+        },
+        "runs": [
+          {
+            "runId": "5ace742ad7a14955b6356560ea1e879a",
+            "status": "ok",
+            "error": "",
+            "groups": [
+              "primitives",
+              "objects-arrays",
+              "binary",
+              "functions-classes",
+              "external",
+              "async",
+              "unions-enums",
+              "errors-tsfn",
+              "parity",
+              "parity-protocols",
+              "parity-lifetimes",
+              "parity-streams"
+            ],
+            "groupCount": 12
+          },
+          {
+            "runId": "5ace742ad7a14955b6356560ea1e879a",
+            "status": "ok",
+            "error": "",
+            "groups": [
+              "primitives",
+              "objects-arrays",
+              "binary",
+              "functions-classes",
+              "external",
+              "async",
+              "unions-enums",
+              "errors-tsfn",
+              "parity",
+              "parity-protocols",
+              "parity-lifetimes",
+              "parity-streams"
+            ],
+            "groupCount": 12
+          },
+          {
+            "runId": "5ace742ad7a14955b6356560ea1e879a",
+            "status": "ok",
+            "error": "",
+            "groups": [
+              "primitives",
+              "objects-arrays",
+              "binary",
+              "functions-classes",
+              "external",
+              "async",
+              "unions-enums",
+              "errors-tsfn",
+              "parity",
+              "parity-protocols",
+              "parity-lifetimes",
+              "parity-streams"
+            ],
+            "groupCount": 12
+          }
+        ]
+      },
+      "allocator-builtin": {
+        "hapSha256": "98282ae0b31c63b38e51e85f789e9f4cb20f08e6b2e7fe9d246aa8615f038d44",
+        "manifest": {
+          "runId": "a2c250019ffd4282a1d6f3f1453f9cf0",
+          "bundle": "org.harmonycontrib.zignapie2e",
+          "abi": "x86_64",
+          "suite": "allocator-builtin",
+          "library": "/home/runner/work/zig-napi/zig-napi/.tmp_qemu_e2e/ci/ohos/ohos-allocator-builtin/x86_64/libhello.so",
+          "groups": [
+            "allocator-builtin"
+          ]
+        },
+        "runs": [
+          {
+            "runId": "a2c250019ffd4282a1d6f3f1453f9cf0",
+            "status": "ok",
+            "error": "",
+            "groups": [
+              "allocator-builtin"
+            ],
+            "groupCount": 1
+          },
+          {
+            "runId": "a2c250019ffd4282a1d6f3f1453f9cf0",
+            "status": "ok",
+            "error": "",
+            "groups": [
+              "allocator-builtin"
+            ],
+            "groupCount": 1
+          },
+          {
+            "runId": "a2c250019ffd4282a1d6f3f1453f9cf0",
+            "status": "ok",
+            "error": "",
+            "groups": [
+              "allocator-builtin"
+            ],
+            "groupCount": 1
+          }
+        ]
+      },
+      "allocator-custom": {
+        "hapSha256": "c7cba20184d45b8df1ff34227b4296630e3649710ea2e3c7ebf530f4797e3764",
+        "manifest": {
+          "runId": "5e66efb8657243238ddcd95f4ba90ca4",
+          "bundle": "org.harmonycontrib.zignapie2e",
+          "abi": "x86_64",
+          "suite": "allocator-custom",
+          "library": "/home/runner/work/zig-napi/zig-napi/.tmp_qemu_e2e/ci/ohos/ohos-allocator-custom/x86_64/libhello.so",
+          "groups": [
+            "allocator-custom"
+          ]
+        },
+        "runs": [
+          {
+            "runId": "5e66efb8657243238ddcd95f4ba90ca4",
+            "status": "ok",
+            "error": "",
+            "groups": [
+              "allocator-custom"
+            ],
+            "groupCount": 1
+          },
+          {
+            "runId": "5e66efb8657243238ddcd95f4ba90ca4",
+            "status": "ok",
+            "error": "",
+            "groups": [
+              "allocator-custom"
+            ],
+            "groupCount": 1
+          },
+          {
+            "runId": "5e66efb8657243238ddcd95f4ba90ca4",
+            "status": "ok",
+            "error": "",
+            "groups": [
+              "allocator-custom"
+            ],
+            "groupCount": 1
+          }
+        ]
+      },
+      "init": {
+        "hapSha256": "5b00374db9167583192ed70f4f3e15c5b94967923ac4e3f0da010b5aee792813",
+        "manifest": {
+          "runId": "5f872f5180304b52b2eb0eb9aa753264",
+          "bundle": "org.harmonycontrib.zignapie2e",
+          "abi": "x86_64",
+          "suite": "init",
+          "library": "/home/runner/work/zig-napi/zig-napi/.tmp_qemu_e2e/ci/ohos/ohos-init/x86_64/libhello.so",
+          "groups": [
+            "init"
+          ]
+        },
+        "runs": [
+          {
+            "runId": "5f872f5180304b52b2eb0eb9aa753264",
+            "status": "ok",
+            "error": "",
+            "groups": [
+              "init"
+            ],
+            "groupCount": 1
+          },
+          {
+            "runId": "5f872f5180304b52b2eb0eb9aa753264",
+            "status": "ok",
+            "error": "",
+            "groups": [
+              "init"
+            ],
+            "groupCount": 1
+          },
+          {
+            "runId": "5f872f5180304b52b2eb0eb9aa753264",
+            "status": "ok",
+            "error": "",
+            "groups": [
+              "init"
+            ],
+            "groupCount": 1
+          }
+        ]
+      },
+      "memory": {
+        "hapSha256": "70111a2dab1d1b672f27f36ab3151e5adca985765c0f07cabba19dd826c6fc65",
+        "manifest": {
+          "runId": "27b1f7da710e43d582b092220b8b4fc3",
+          "bundle": "org.harmonycontrib.zignapie2e",
+          "abi": "x86_64",
+          "suite": "memory",
+          "library": "/home/runner/work/zig-napi/zig-napi/.tmp_qemu_e2e/ci/ohos/ohos-memory/x86_64/libhello.so",
+          "groups": [
+            "memory-tracker",
+            "memory-sync-binary",
+            "memory-finalizers",
+            "memory-async",
+            "memory-tsfn"
+          ]
+        },
+        "runs": [
+          {
+            "runId": "27b1f7da710e43d582b092220b8b4fc3",
+            "status": "ok",
+            "error": "",
+            "groups": [
+              "memory-tracker",
+              "memory-sync-binary",
+              "memory-finalizers",
+              "memory-async",
+              "memory-tsfn"
+            ],
+            "groupCount": 5
+          },
+          {
+            "runId": "27b1f7da710e43d582b092220b8b4fc3",
+            "status": "ok",
+            "error": "",
+            "groups": [
+              "memory-tracker",
+              "memory-sync-binary",
+              "memory-finalizers",
+              "memory-async",
+              "memory-tsfn"
+            ],
+            "groupCount": 5
+          },
+          {
+            "runId": "27b1f7da710e43d582b092220b8b4fc3",
+            "status": "ok",
+            "error": "",
+            "groups": [
+              "memory-tracker",
+              "memory-sync-binary",
+              "memory-finalizers",
+              "memory-async",
+              "memory-tsfn"
+            ],
+            "groupCount": 5
+          }
+        ]
+      }
+    },
+    "artifactId": 11457306599,
+    "artifactSha256": "2335d06c3bbac71a3f1f9fa59903fbc6ade1f792721de6d7a48ed1ffa9c97549"
+  },
+  "node": {
+    "environment": "Linux zig-napi-node 6.8.0-142-generic #142-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:24:27 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux\n0.16.0\n{\"version\":\"v24.14.0\",\"arch\":\"x64\",\"platform\":\"linux\",\"napi\":\"10\"}\n",
+    "nodeArchiveSha256": "41cd79bb7877c81605a9e68ec4c91547774f46a40c67a17e34d7179ef11729df",
+    "zigArchiveSha256": "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00",
+    "nativeArtifactsSha256": {
+      "async_tasks.linux-x64-gnu.node": "2501550477c6d9ca88cdc557c7a5e020c87bab6fa5b3efe68dc645e26fe4a002",
+      "classes.linux-x64-gnu.node": "8d6af66067069b1e46a74366f6b00199790690a532af452cf16d2f0dc988d49f",
+      "compat_mode.linux-x64-gnu.node": "422b502277aeb4ac1a3002dc7610b49f414de7b43fdf46ccae5670d3e13e16cb",
+      "contracts.linux-x64-gnu.node": "823e67dd011234fdd3bb8830ea130391c5e450a1c95d81bb3a209bfdb24d409c",
+      "conversion.linux-x64-gnu.node": "29ec8b66b32a585e20901ea77552dad5283a39921ce11ac496e2edd3b77cd320",
+      "example.linux-x64-gnu.node": "b79aebfc10ea1301bb379c67b014810014168ee38190fbdbdcf935018a6a45d0"
+    },
+    "testArchiveSha256": "a25c79562b10af88ca93aa4b7aad38ca0f5fc4076498d4cafcfc1028c4a9a999",
+    "runs": [
+      {
+        "runId": "5fe44f3907384724aa7bc9e156a1a3d3",
+        "exitCode": 0,
+        "passed": 277,
+        "skipped": 0
+      },
+      {
+        "runId": "5fe44f3907384724aa7bc9e156a1a3d3",
+        "exitCode": 0,
+        "passed": 277,
+        "skipped": 0
+      },
+      {
+        "runId": "5fe44f3907384724aa7bc9e156a1a3d3",
+        "exitCode": 0,
+        "passed": 277,
+        "skipped": 0
+      }
+    ],
+    "wasmAcceptanceExitCode": 0,
+    "wasmPassed": 10,
+    "wasmSkipped": 0,
+    "artifactId": 11457012311,
+    "artifactSha256": "7eb60743d36beb6eea53c5fe9f54a927a04ced20614ef58b6ff970be56ad9746"
+  },
+  "localArm64ReleaseValidation": {
+    "imageRelease": "v20260919",
+    "archiveSha256": "eda208b8ae5375e42af0f1ad6756d9e3ba57dd6ee9b13c2c7917c46b4ab14710",
+    "accelerator": "hvf",
+    "guest": "Linux localhost 6.6.101 #1 SMP PREEMPT Wed Sep  9 17:34:11 UTC 2026 aarch64 Toybox",
+    "sdkArchiveSha256": "130a438cbcddd46a2a5b09ee9925339cddf4cca99223329b860f96a5c72f338f",
+    "sdkVersion": "OpenHarmony 7.0 public API 26 (26.0.0.38)",
+    "hapBuildHost": "Linux x86_64 container, ArkDown 0.0.2",
+    "signingHost": "Linux x86_64 container, OpenJDK 11, official native code signing and verification",
+    "suites": {
+      "basic": {
+        "manifest": {
+          "runId": "8495f13fa53842568cdee6c511a47918",
+          "bundle": "org.harmonycontrib.zignapie2e",
+          "abi": "arm64-v8a",
+          "suite": "basic",
+          "library": "/Volumes/PSSD/code/ohos-rs/zig-napi/.tmp_qemu_e2e/hosted-validation/public-sdk-ohos-matrix/ohos-basic/arm64-v8a/libhello.so",
+          "groups": [
+            "primitives",
+            "objects-arrays",
+            "binary",
+            "functions-classes",
+            "external",
+            "async",
+            "unions-enums",
+            "errors-tsfn",
+            "parity",
+            "parity-protocols",
+            "parity-lifetimes",
+            "parity-streams"
+          ]
+        },
+        "runs": [
+          {
+            "runId": "8495f13fa53842568cdee6c511a47918",
+            "status": "ok",
+            "error": "",
+            "groups": [
+              "primitives",
+              "objects-arrays",
+              "binary",
+              "functions-classes",
+              "external",
+              "async",
+              "unions-enums",
+              "errors-tsfn",
+              "parity",
+              "parity-protocols",
+              "parity-lifetimes",
+              "parity-streams"
+            ],
+            "groupCount": 12
+          },
+          {
+            "runId": "8495f13fa53842568cdee6c511a47918",
+            "status": "ok",
+            "error": "",
+            "groups": [
+              "primitives",
+              "objects-arrays",
+              "binary",
+              "functions-classes",
+              "external",
+              "async",
+              "unions-enums",
+              "errors-tsfn",
+              "parity",
+              "parity-protocols",
+              "parity-lifetimes",
+              "parity-streams"
+            ],
+            "groupCount": 12
+          },
+          {
+            "runId": "8495f13fa53842568cdee6c511a47918",
+            "status": "ok",
+            "error": "",
+            "groups": [
+              "primitives",
+              "objects-arrays",
+              "binary",
+              "functions-classes",
+              "external",
+              "async",
+              "unions-enums",
+              "errors-tsfn",
+              "parity",
+              "parity-protocols",
+              "parity-lifetimes",
+              "parity-streams"
+            ],
+            "groupCount": 12
+          }
+        ]
+      },
+      "allocator-builtin": {
+        "manifest": {
+          "runId": "0650a96c8f0e4592bd2e6b8dddadaa2d",
+          "bundle": "org.harmonycontrib.zignapie2e",
+          "abi": "arm64-v8a",
+          "suite": "allocator-builtin",
+          "library": "/Volumes/PSSD/code/ohos-rs/zig-napi/.tmp_qemu_e2e/hosted-validation/public-sdk-ohos-matrix/ohos-allocator-builtin/arm64-v8a/libhello.so",
+          "groups": [
+            "allocator-builtin"
+          ]
+        },
+        "runs": [
+          {
+            "runId": "0650a96c8f0e4592bd2e6b8dddadaa2d",
+            "status": "ok",
+            "error": "",
+            "groups": [
+              "allocator-builtin"
+            ],
+            "groupCount": 1
+          },
+          {
+            "runId": "0650a96c8f0e4592bd2e6b8dddadaa2d",
+            "status": "ok",
+            "error": "",
+            "groups": [
+              "allocator-builtin"
+            ],
+            "groupCount": 1
+          },
+          {
+            "runId": "0650a96c8f0e4592bd2e6b8dddadaa2d",
+            "status": "ok",
+            "error": "",
+            "groups": [
+              "allocator-builtin"
+            ],
+            "groupCount": 1
+          }
+        ]
+      },
+      "allocator-custom": {
+        "manifest": {
+          "runId": "dfb489e618944469a1158fcd31cd478f",
+          "bundle": "org.harmonycontrib.zignapie2e",
+          "abi": "arm64-v8a",
+          "suite": "allocator-custom",
+          "library": "/Volumes/PSSD/code/ohos-rs/zig-napi/.tmp_qemu_e2e/hosted-validation/public-sdk-ohos-matrix/ohos-allocator-custom/arm64-v8a/libhello.so",
+          "groups": [
+            "allocator-custom"
+          ]
+        },
+        "runs": [
+          {
+            "runId": "dfb489e618944469a1158fcd31cd478f",
+            "status": "ok",
+            "error": "",
+            "groups": [
+              "allocator-custom"
+            ],
+            "groupCount": 1
+          },
+          {
+            "runId": "dfb489e618944469a1158fcd31cd478f",
+            "status": "ok",
+            "error": "",
+            "groups": [
+              "allocator-custom"
+            ],
+            "groupCount": 1
+          },
+          {
+            "runId": "dfb489e618944469a1158fcd31cd478f",
+            "status": "ok",
+            "error": "",
+            "groups": [
+              "allocator-custom"
+            ],
+            "groupCount": 1
+          }
+        ]
+      },
+      "init": {
+        "manifest": {
+          "runId": "77809ca8e00a4481935ae1c36aa947bc",
+          "bundle": "org.harmonycontrib.zignapie2e",
+          "abi": "arm64-v8a",
+          "suite": "init",
+          "library": "/Volumes/PSSD/code/ohos-rs/zig-napi/.tmp_qemu_e2e/hosted-validation/public-sdk-ohos-matrix/ohos-init/arm64-v8a/libhello.so",
+          "groups": [
+            "init"
+          ]
+        },
+        "runs": [
+          {
+            "runId": "77809ca8e00a4481935ae1c36aa947bc",
+            "status": "ok",
+            "error": "",
+            "groups": [
+              "init"
+            ],
+            "groupCount": 1
+          },
+          {
+            "runId": "77809ca8e00a4481935ae1c36aa947bc",
+            "status": "ok",
+            "error": "",
+            "groups": [
+              "init"
+            ],
+            "groupCount": 1
+          },
+          {
+            "runId": "77809ca8e00a4481935ae1c36aa947bc",
+            "status": "ok",
+            "error": "",
+            "groups": [
+              "init"
+            ],
+            "groupCount": 1
+          }
+        ]
+      },
+      "memory": {
+        "manifest": {
+          "runId": "1f6cdbc52b4348969e0690ce5ba1f766",
+          "bundle": "org.harmonycontrib.zignapie2e",
+          "abi": "arm64-v8a",
+          "suite": "memory",
+          "library": "/Volumes/PSSD/code/ohos-rs/zig-napi/.tmp_qemu_e2e/hosted-validation/public-sdk-ohos-matrix/ohos-memory/arm64-v8a/libhello.so",
+          "groups": [
+            "memory-tracker",
+            "memory-sync-binary",
+            "memory-finalizers",
+            "memory-async",
+            "memory-tsfn"
+          ]
+        },
+        "runs": [
+          {
+            "runId": "1f6cdbc52b4348969e0690ce5ba1f766",
+            "status": "ok",
+            "error": "",
+            "groups": [
+              "memory-tracker",
+              "memory-sync-binary",
+              "memory-finalizers",
+              "memory-async",
+              "memory-tsfn"
+            ],
+            "groupCount": 5
+          },
+          {
+            "runId": "1f6cdbc52b4348969e0690ce5ba1f766",
+            "status": "ok",
+            "error": "",
+            "groups": [
+              "memory-tracker",
+              "memory-sync-binary",
+              "memory-finalizers",
+              "memory-async",
+              "memory-tsfn"
+            ],
+            "groupCount": 5
+          },
+          {
+            "runId": "1f6cdbc52b4348969e0690ce5ba1f766",
+            "status": "ok",
+            "error": "",
+            "groups": [
+              "memory-tracker",
+              "memory-sync-binary",
+              "memory-finalizers",
+              "memory-async",
+              "memory-tsfn"
+            ],
+            "groupCount": 5
+          }
+        ]
+      }
+    }
+  },
+  "checks": {
+    "qemuRunnerFailureTests": 4,
+    "actionlint": "passed",
+    "strictDeclarations": "passed"
+  },
+  "notes": [
+    "Both GitHub-hosted jobs boot their own QEMU guests. OHOS uses the actual release launcher and HAP UIAbility host.",
+    "PR workflows test the GitHub-generated merge revision; artifact metadata records the feature-branch head revision.",
+    "The separate Node version/Windows matrix exposed compatibility issues subsequently fixed in 149abb1 and 892bab7. This record preserves the first hosted QEMU results."
+  ]
+}

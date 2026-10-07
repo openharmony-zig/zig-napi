@@ -59,6 +59,8 @@ The matrix writes command logs and `commands.json` for each phase. Each OHOS sui
 
 `.tmp_qemu_e2e/` is ignored because it contains local products, logs, guest overlays and SSH keys. Preserve `matrix.json`, result JSON and logs as CI artifacts; do not upload the guest's private key or disk image. This pipeline verifies the configured guests; it does not establish runtime support for untested CPU architectures or every historical SDK.
 
+The first GitHub-hosted run and the downloaded ARM64 release regression are recorded in [`hosted-qemu-e2e-results.json`](hosted-qemu-e2e-results.json), including artifact checksums, actual KVM status, suite results and tested revisions.
+
 ## CI
 
 `.github/workflows/ci.yml` runs two independent jobs on GitHub-hosted `ubuntu-24.04` runners:
