@@ -91,6 +91,9 @@ def main():
     guest = run(['shell', 'uname -a'])
     if 'Linux' not in guest or 'Toybox' not in guest:
         raise RuntimeError('HDC target is not an OpenHarmony guest')
+    machine = {'arm64-v8a': 'aarch64', 'armeabi-v7a': 'armv7l', 'x86_64': 'x86_64'}[manifest['abi']]
+    if not re.search(r'\b' + machine + r'\b', guest):
+        raise RuntimeError('OHOS guest architecture does not match the HAP ABI: ' + manifest['abi'])
     installed = run(['install', '-r', str(args.hap.resolve())], timeout=90)
     (output / 'install.log').write_text(installed)
     if not re.search(r'success', installed, re.I) or re.search(r'\[Fail\]|failed', installed, re.I):

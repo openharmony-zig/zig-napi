@@ -4,9 +4,9 @@
 
 ## Runner prerequisites
 
-- Zig 0.16 for Node/WASI and an OHOS-patched Zig 0.16 for `aarch64-linux-ohos`.
-- OHOS NDK, a complete API 26 provider SDK, `arkdown` on PATH, HDC, a running ARM64 OHOS QEMU with a QMP socket and a reachable HDC target.
-- Official OpenHarmony `developtools/hapsigner/dist`, a development device UDID, and a Linux Docker image containing Python 3 and JDK 17. The default image name is `ohos-qemu-build-env:7.0-release`; override `--signer-image` if needed. Linux signing avoids the macOS JDK's rejection of the compiler's ZIP64 HAP.
+- Zig 0.16 for Node/WASI and an OHOS-patched Zig 0.16 for `aarch64-linux-ohos` or `x86_64-linux-ohos`.
+- OHOS NDK, a complete API 26 SDK with native/ETS/toolchains components, `arkdown` on PATH, HDC, a running ARM64 or x86_64 OHOS QEMU with a QMP socket and a reachable HDC target.
+- JDK 11 and official OpenHarmony development signing tools. `scripts/qemu/prepare_signer.py --output .tmp_qemu_e2e/signer` downloads the public test credentials and signer JAR at a pinned source revision and verifies every SHA256. Signing runs directly on Linux; `--signer-image IMAGE` optionally runs the same signer in a Linux Docker image containing Python 3 and JDK 11 when using macOS. JDK 17 rejects the signer's ZIP64 intermediate during native code signing; CI uses JDK 11.
 - A running x86_64 Linux QEMU guest with SSH/cloud-init support. `scripts/qemu/boot_node_guest.py` creates an isolated qcow2 overlay, SSH key and seed ISO; it never writes the base image.
 - The official `node-v24.14.0-linux-x64.tar.xz` archive and corresponding `SHASUMS256.txt`. The runner verifies their SHA256 before installing Node in a unique guest directory. Guest outbound npm access is required.
 - The Node runner also installs the actual Zig 0.16 Linux x64 compiler and stages the Zig build sources for the memory-option validation test. It downloads the pinned [official release](https://ziglang.org/download/index.json) and checks its SHA256; supply `--zig-archive /path/zig-x86_64-linux-0.16.0.tar.xz` to use a local archive. Missing Zig must not turn the QEMU acceptance test into a skip.
@@ -30,6 +30,7 @@ pnpm test:e2e:qemu -- \
   --ndk /absolute/path/ohos-ndk \
   --sdk /absolute/path/provider-sdk/26.0.0 \
   --signer-dist /absolute/path/hapsigner/dist \
+  --signer-image Linux_Python3_JDK11_IMAGE \
   --udid DEVICE_UDID \
   --hdc /absolute/path/hdc --server HDC_SERVER_PORT \
   --target 127.0.0.1:5682 --qmp /absolute/path/ohos-qmp.sock \
@@ -38,11 +39,11 @@ pnpm test:e2e:qemu -- \
   --node-shasums /absolute/path/SHASUMS256.txt --repeat 3
 ```
 
-The output directory must be inside the checkout for Docker signing. `--server` can be omitted if HDC uses its default server. The OHOS guest must allow development HAP installation and have an ordinary unlocked/swipe-lock screen. On launch error 10106102, the runner captures a QMP screenshot, derives the screen dimensions and performs a normal upward swipe before one retry. It never supplies credentials or disables screen security.
+When using `--signer-image`, the output directory must be inside the checkout for the Docker bind mount. `--server` can be omitted if HDC uses its default server. The OHOS guest must allow development HAP installation and have an ordinary unlocked/swipe-lock screen. On launch error 10106102, the runner captures a QMP screenshot, derives the screen dimensions and performs a normal upward swipe before one retry. It never supplies credentials or disables screen security.
 
 ## What must pass
 
-1. Build `basic`, `allocator-builtin`, `allocator-custom`, `init` and `memory` for OHOS ARM64 into isolated output directories. Code-sign the HAP and its native libraries with the official OpenHarmony HAP signer (`-signCode 1`), and verify code-sign, digest and permission signatures. Install each HAP and run it three times. OHOS build/signing runs outside the Node CLI.
+1. Build `basic`, `allocator-builtin`, `allocator-custom`, `init` and `memory` for the OHOS guest ABI (`--ohos-arch arm64|x86_64`, ARM64 by default) into isolated output directories. Code-sign the HAP and its native libraries with the official OpenHarmony HAP signer (`-signCode 1`), and verify code-sign, digest and permission signatures. Install each HAP and run it three times. OHOS build/signing runs outside the Node CLI.
 2. Require a fresh UUID challenge, exact ordered groups, exact group count and `status: ok` from each guest run. Basic has 12 groups; allocator/init each have one; memory has five. Memory includes exact counts of 128 external and 96 class finalizers.
 3. Compile the real generated OHOS declarations and consumer contracts with TypeScript 6, strict checking and `skipLibCheck: false`.
 4. Build both normal WASI flavors and a separate small-memory threaded OOM artifact. Cross-build all six Linux x64 GNU native addons at Node-API 10.
@@ -60,6 +61,27 @@ The matrix writes command logs and `commands.json` for each phase. Each OHOS sui
 
 ## CI
 
-`.github/workflows/ci.yml` requires the `qemu-e2e` job on a self-hosted runner labeled `zig-napi-qemu`. Configure repository variable `QEMU_E2E_ARGUMENTS` as a JSON string array containing the arguments above, excluding `--output` and `--repeat`, which CI supplies. The runner must already expose both guest connections and prerequisites. A missing variable, SDK, device or failing E2E produces a failed job; there is no alternate standalone-runtime fallback. Evidence JSON/logs upload even on failure.
+`.github/workflows/ci.yml` runs two independent jobs on GitHub-hosted `ubuntu-24.04` runners:
 
-The separate Node addon workflow retains its runtime/target matrix and now includes actual WASM crash acceptance and the isolated OOM build. Running the local matrix does not run the hosted CI workflow.
+- `ohos-qemu-e2e` downloads the [harmony-contrib/ohos-qemu v20260919 release](https://github.com/harmony-contrib/ohos-qemu/releases/tag/v20260919), checks the pinned SHA256 of its x86_64 phone image, and invokes the package's own launcher with KVM and QMP. It installs the full OpenHarmony 7.0 `native;ets;toolchains` SDK, OHOS Zig 0.16, ArkDown 0.0.2 and official development signing tools. HDC, AccountMgr user 100/foreground readiness, device UDID, guest architecture and active KVM are required before the five signed HAP suites run three times each.
+- `node-qemu-e2e` verifies and boots an Ubuntu Noble x86_64 cloud image with KVM, waits for SSH/cloud-init, then builds the native Node/WASI products and runs their full QEMU acceptance and three native regression rounds.
+
+Both jobs create their own guests, stop them through QMP on completion or failure, and upload result JSON and logs with `always()`. The OHOS job requires no preconfigured guest, private Docker image, repository variable or self-hosted runner. Missing KVM, SDK, device readiness, an installation/signature failure, skipped acceptance or failed assertion fails the job. SSH private keys, signing credentials and disk images are excluded from artifacts. `workflow_dispatch` allows a manual regression run on a branch.
+
+The same OHOS release can be booted locally on Linux x86_64/KVM:
+
+```sh
+python3 scripts/qemu/boot_ohos_guest.py \
+  --output .tmp_qemu_e2e/ohos-guest --hdc /absolute/path/sdk/toolchains/hdc
+python3 scripts/qemu/prepare_signer.py --output .tmp_qemu_e2e/signer
+python3 scripts/qemu/run_matrix.py --product ohos --repeat 3 \
+  --output .tmp_qemu_e2e/ohos \
+  --ohos-guest .tmp_qemu_e2e/ohos-guest/guest.json \
+  --ohos-zig /absolute/path/patched-zig --ndk /absolute/path/sdk \
+  --sdk /absolute/path/sdk --signer-dist .tmp_qemu_e2e/signer
+python3 scripts/qemu/stop_guest.py --guest .tmp_qemu_e2e/ohos-guest/guest.json
+```
+
+For an Apple Silicon development machine, add `--arch arm64 --accel hvf` to the boot command. `--archive FILE` accepts a local release archive but still requires its pinned checksum. `--server PORT` can select an existing HDC server on machines that already run other guests. The generated `guest.json` supplies the live device connection, UDID and architecture to `--ohos-guest`.
+
+The default `--product both` retains the combined local matrix; `--product node` needs only the Node guest/archive arguments. The separate Node addon workflow retains its runtime/target matrix, actual WASM crash acceptance and isolated OOM build. Running the local matrix does not run the hosted CI workflow.

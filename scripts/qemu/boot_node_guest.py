@@ -15,6 +15,7 @@ def main():
     parser.add_argument('--image', type=Path, required=True, help='Immutable x86_64 cloud-init qcow2 base')
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--ssh-port', type=int, default=22226)
+    parser.add_argument('--accel', choices=['tcg', 'kvm'], default='tcg')
     args = parser.parse_args()
     root = args.output.resolve()
     root.mkdir(parents=True, exist_ok=True)
@@ -36,7 +37,7 @@ def main():
         subprocess.run([tool, '-output', str(iso), '-volid', 'cidata', '-joliet', '-rock', str(seed)], check=True)
     image = root / 'disk.qcow2'
     subprocess.run(['qemu-img', 'create', '-f', 'qcow2', '-F', 'qcow2', '-b', str(args.image.resolve()), str(image), '24G'], check=True)
-    command = ['qemu-system-x86_64', '-M', 'q35', '-accel', 'tcg', '-cpu', 'max', '-smp', '4', '-m', '4096', '-drive', 'file=' + str(image) + ',if=virtio,format=qcow2', '-drive', 'file=' + str(iso) + ',media=cdrom,readonly=on', '-netdev', f'user,id=net0,hostfwd=tcp:127.0.0.1:{args.ssh_port}-:22', '-device', 'virtio-net-pci,netdev=net0', '-display', 'none', '-serial', 'file:' + str(root / 'serial.log'), '-qmp', 'unix:' + str(root / 'qmp.sock') + ',server=on,wait=off', '-pidfile', str(root / 'qemu.pid'), '-daemonize']
+    command = ['qemu-system-x86_64', '-M', 'q35', '-accel', args.accel, '-cpu', 'max', '-smp', '4', '-m', '4096', '-drive', 'file=' + str(image) + ',if=virtio,format=qcow2', '-drive', 'file=' + str(iso) + ',media=cdrom,readonly=on', '-netdev', f'user,id=net0,hostfwd=tcp:127.0.0.1:{args.ssh_port}-:22', '-device', 'virtio-net-pci,netdev=net0', '-display', 'none', '-serial', 'file:' + str(root / 'serial.log'), '-qmp', 'unix:' + str(root / 'qmp.sock') + ',server=on,wait=off', '-pidfile', str(root / 'qemu.pid'), '-daemonize']
     subprocess.run(command, check=True)
     digest = hashlib.sha256()
     with args.image.open('rb') as file:
