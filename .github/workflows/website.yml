@@ -9,6 +9,14 @@ on:
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - ".github/workflows/website.yml"
+  pull_request:
+    branches: [ main ]
+    paths:
+      - "website/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/website.yml"
   workflow_dispatch:
 
 permissions:
@@ -70,12 +78,14 @@ jobs:
         run: pnpm run website:test:browser
 
       - name: Upload GitHub Pages artifact
+        if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@v4
         with:
           path: website/dist
 
   deploy:
     name: Deploy website
+    if: github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest
     environment:

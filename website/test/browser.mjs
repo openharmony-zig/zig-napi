@@ -1412,6 +1412,8 @@ async function main() {
       // Ids published before the migration contain literal percent sequences
       // and underscores; clicking the emitted link has to land on them.
       const probes = [
+        { id: "build-openharmony", fragment: "#arkvm-host-test-mode" },
+        { id: "build-openharmony", fragment: "#qemu-runtime-regression", direct: true },
         { id: "classes-ownership", fragment: "#calls%2C-receivers-and-factories" },
         { id: "module-registration", fragment: "#node_api_module" },
         { id: "errors-results", fragment: "#jserror%2C-jstypeerror%2C-jsrangeerror" },
@@ -1421,9 +1423,13 @@ async function main() {
         const route = routesForTopic(probe.id).route;
         const { page } = await openPage(context, origin, route, DESKTOP);
         try {
-          const link = page.locator(`a[href="${probe.fragment}"]`).first();
-          assert.equal(await link.count(), 1, `no link with href ${probe.fragment} on ${route}`);
-          await link.click();
+          if (probe.direct) {
+            await page.goto(`${origin}${base}${route}${probe.fragment}`, { waitUntil: "load" });
+          } else {
+            const link = page.locator(`a[href="${probe.fragment}"]`).first();
+            assert.equal(await link.count(), 1, `no link with href ${probe.fragment} on ${route}`);
+            await link.click();
+          }
           await page.waitForFunction(() => document.querySelector(":target") !== null, undefined, {
             timeout: 5000,
           });

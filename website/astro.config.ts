@@ -30,7 +30,15 @@ export default defineConfig({
       // The published documents are copied verbatim: keep straight quotes,
       // apostrophes, and dashes as they are written in the Markdown sources.
       features: { smartPunctuation: false },
-      hastPlugins: [markdownDocs({ base, docIds: apiDocs.map((doc) => doc.id) })],
+      hastPlugins: [
+        markdownDocs({
+          base,
+          docIds: apiDocs.map((doc) => doc.id),
+          headingRenames: {
+            "build-openharmony": { "qemu-runtime-regression": "arkvm-host-test-mode" },
+          },
+        }),
+      ],
     }),
     // Highlighting happens during the build; no highlighter ships to the browser.
     shikiConfig: { theme: kamiCodeTheme },

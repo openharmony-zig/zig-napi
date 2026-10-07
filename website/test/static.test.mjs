@@ -1473,6 +1473,21 @@ describe("published documentation contract", () => {
     };
   });
 
+  it("keeps the old and current QEMU fragments on the same renamed heading", () => {
+    const { route } = routesForTopic("build-openharmony");
+    const root = parseHtml(readFileSync(resolveDistFile(distDir, route), "utf8"));
+    const heading = elements(root).find(
+      (element) => attr(element, "id") === "arkvm-host-test-mode",
+    );
+    assert.ok(heading, "the published fragment must still have a target");
+    assert.equal(heading.tag, "h2", "the published target must keep its heading position");
+    assert.equal(collapseWhitespace(pageText(heading)), "QEMU Runtime Regression");
+    const aliases = elements(heading).filter(
+      (element) => attr(element, "id") === "qemu-runtime-regression",
+    );
+    assert.equal(aliases.length, 1, "the current fragment must target this same heading");
+  });
+
   it("resolves every heading the current sources publish", () => {
     // The other direction, for new headings: whatever the canonical Markdown
     // says today — appended sections included — must be reachable at its own
