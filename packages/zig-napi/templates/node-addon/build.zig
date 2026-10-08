@@ -24,6 +24,7 @@ pub fn build(b: *std.Build) !void {
     _ = addon;
 
     const dts = try napi_build.generateTypeDefinition(b, .{
+        .node_addon = true,
         .root_source_file = b.path("src/lib.zig"),
         .output = b.path("index.d.ts"),
         .napi_module = napi,

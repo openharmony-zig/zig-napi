@@ -175,7 +175,7 @@ fn nodePlatform(target: std.Target) []const u8 {
     return switch (target.os.tag) {
         .macos => "darwin",
         .windows => "win32",
-        .linux => "linux",
+        .linux => if (target.abi.isAndroid()) "android" else "linux",
         .freebsd => "freebsd",
         .ios => "ios",
         else => @tagName(target.os.tag),
@@ -188,6 +188,8 @@ fn nodeArch(target: std.Target) []const u8 {
         .x86_64 => "x64",
         .x86 => "ia32",
         .arm => "arm",
+        .loongarch64 => "loong64",
+        .powerpc64le => "ppc64",
         else => @tagName(target.cpu.arch),
     };
 }
@@ -201,6 +203,8 @@ fn nodeAbi(target: std.Target) ?[]const u8 {
             else => @tagName(target.abi),
         },
         .linux => switch (target.abi) {
+            .android => null,
+            .androideabi => "eabi",
             .gnu => "gnu",
             .musl => "musl",
             .none => null,
@@ -867,6 +871,15 @@ fn arkvmHostAddonBuild(build: *std.Build, option: NativeAddonBuildOptionsWithMod
     return compile;
 }
 
+var cached_strip_options: std.AutoHashMapUnmanaged(*std.Build, ?bool) = .empty;
+var cached_dts_options: std.AutoHashMapUnmanaged(*std.Build, ?bool) = .empty;
+
+fn cachedBoolOption(cache: *std.AutoHashMapUnmanaged(*std.Build, ?bool), build: *std.Build, name: []const u8, description: []const u8) ?bool {
+    const entry = cache.getOrPut(build.allocator, build) catch @panic("out of memory");
+    if (!entry.found_existing) entry.value_ptr.* = build.option(bool, name, description);
+    return entry.value_ptr.*;
+}
+
 pub fn nodeAddonBuild(build: *std.Build, option: NodeAddonBuildOptionsWithModule) !NodeAddonBuildResult {
     const addon_build_options = createAddonBuildOptions(build, .{
         .node_addon = true,
@@ -877,6 +890,9 @@ pub fn nodeAddonBuild(build: *std.Build, option: NodeAddonBuildOptionsWithModule
 
     var nodeOption = cloneLibraryOptionsInternal(build, option, target);
     nodeOption.linkage = .dynamic;
+    if (cachedBoolOption(&cached_strip_options, build, "strip", "Strip debug information from the addon")) |strip| {
+        nodeOption.root_module.strip = strip;
+    }
 
     const wasi_flavor = wasiFlavor(target.result);
     const compile = if (is_wasi) compile: {
@@ -953,6 +969,7 @@ pub const TypeDefinitionBuildOptions = struct {
     output: std.Build.LazyPath,
     napi_module: *std.Build.Module,
     node_api: NodeApiOptions = .{},
+    node_addon: bool = false,
     // Optional text injected after the generated banner comments.
     header: ?[]const u8 = null,
     options: ?*std.Build.Step.Options = null,
@@ -963,6 +980,7 @@ pub fn generateTypeDefinition(build: *std.Build, option: TypeDefinitionBuildOpti
 
     const tsgen_build_options = createAddonBuildOptions(build, .{
         .napi_tsgen = true,
+        .node_addon = option.node_addon,
         .node_api = option.node_api,
     });
 
@@ -974,7 +992,9 @@ pub fn generateTypeDefinition(build: *std.Build, option: TypeDefinitionBuildOpti
     });
     const tsgen_build_options_module = tsgen_build_options.createModule();
     tsgen_napi_sys.addImport("build_options", tsgen_build_options_module);
-    tsgen_napi_sys.addImport("ohos", createOhosBindings(build, option.napi_module.owner.path("src/sys/ohos/native_api.h"), build.graph.host, .debug, option.node_api));
+    if (!option.node_addon) {
+        tsgen_napi_sys.addImport("ohos", createOhosBindings(build, option.napi_module.owner.path("src/sys/ohos/native_api.h"), build.graph.host, .debug, option.node_api));
+    }
     tsgen_napi.addImport("napi-sys", tsgen_napi_sys);
     tsgen_napi.addImport("build_options", tsgen_build_options_module);
     tsgen_napi.addIncludePath(option.napi_module.owner.path("src/sys/ohos"));
@@ -1001,6 +1021,7 @@ pub fn generateTypeDefinition(build: *std.Build, option: TypeDefinitionBuildOpti
         },
     });
     const addon_build_options = option.options orelse createAddonBuildOptions(build, .{
+        .node_addon = option.node_addon,
         .node_api = option.node_api,
     });
     addon_root.addImport("build_options", addon_build_options.createModule());
@@ -1024,6 +1045,9 @@ pub fn generateTypeDefinition(build: *std.Build, option: TypeDefinitionBuildOpti
     generator.root_module.addImport("napi", tsgen_napi);
 
     const run = build.addRunArtifact(generator);
+    if (!(cachedBoolOption(&cached_dts_options, build, "dts-cache", "Cache generated TypeScript declarations") orelse true)) {
+        run.has_side_effects = true;
+    }
     run.addFileArg(option.output);
     run.addFileArg(option.root_source_file);
     run.addArg(option.header orelse "");
