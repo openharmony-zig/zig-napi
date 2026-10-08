@@ -1,10 +1,14 @@
 const std = @import("std");
 
 fn getEnvVarOptional(build: *std.Build, name: []const u8) ?[]const u8 {
+    // Zig 0.17 caches build configuration. SDK/archive overrides must be
+    // observed again on the next invocation, including previously unset ones.
+    build.graph.poisonCache();
     return build.graph.environ_map.get(name);
 }
 
 fn pathExists(build: *std.Build, path: []const u8) bool {
+    build.graph.poisonCache();
     std.Io.Dir.cwd().access(build.graph.io, path, .{}) catch return false;
     return true;
 }
@@ -163,7 +167,7 @@ pub const NodeApiOptions = struct {
     experimental: bool = false,
 
     fn effectiveVersion(self: NodeApiOptions) i32 {
-        return if (self.experimental) @intFromEnum(NapiVersion.experimental) else @intFromEnum(self.version);
+        return if (self.experimental) @backingInt(NapiVersion.experimental) else @backingInt(self.version);
     }
 };
 
@@ -171,7 +175,7 @@ fn nodePlatform(target: std.Target) []const u8 {
     return switch (target.os.tag) {
         .macos => "darwin",
         .windows => "win32",
-        .linux => "linux",
+        .linux => if (target.abi.isAndroid()) "android" else "linux",
         .freebsd => "freebsd",
         .ios => "ios",
         else => @tagName(target.os.tag),
@@ -184,6 +188,8 @@ fn nodeArch(target: std.Target) []const u8 {
         .x86_64 => "x64",
         .x86 => "ia32",
         .arm => "arm",
+        .loongarch64 => "loong64",
+        .powerpc64le => "ppc64",
         else => @tagName(target.cpu.arch),
     };
 }
@@ -197,6 +203,8 @@ fn nodeAbi(target: std.Target) ?[]const u8 {
             else => @tagName(target.abi),
         },
         .linux => switch (target.abi) {
+            .android => null,
+            .androideabi => "eabi",
             .gnu => "gnu",
             .musl => "musl",
             .none => null,
@@ -212,7 +220,7 @@ fn isWasiNodeAddonTarget(target: std.Target) bool {
 
 /// WASI addons are built in two threading flavors.
 ///
-/// Zig 0.16 only knows the `wasm32-wasi` triple — `zig build -Dtarget=wasm32-wasip1`
+/// Zig 0.17 only knows the `wasm32-wasi` triple — `zig build -Dtarget=wasm32-wasip1`
 /// fails with `unknown OS: 'wasip1'` — so both napi-rs flavors are passed as
 /// `-Dtarget=wasm32-wasi` and the threaded one adds
 /// `-Dcpu=baseline+atomics+bulk_memory+mutable_globals`. The `atomics` feature is
@@ -242,7 +250,7 @@ const emnapi_wasi_archive_dir = "wasm32-wasip1";
 /// thread-safe function API as host imports, which the `@emnapi/core` plugins
 /// implement. The C threaded composition (`libemnapi-napi-rs-mt.a`) instead
 /// calls wasi-libc pthreads and `__wasilibc_futex_wait_atomic_wait`, and Zig
-/// 0.16 ships wasi thread stubs (`pthread_create` returns `EAGAIN`) with no
+/// 0.17 ships wasi thread stubs (`pthread_create` returns `EAGAIN`) with no
 /// futex symbol, so linking it would fail or silently break every uv thread
 /// pool queue. Threaded addons therefore link the same archive and get real
 /// parallelism from the JavaScript worker pool (`asyncWorkPoolSize > 0`),
@@ -337,6 +345,7 @@ fn joinPath(build: *std.Build, parts: []const []const u8) []const u8 {
 }
 
 fn readFileIfExists(build: *std.Build, path: []const u8) ?[]const u8 {
+    build.graph.poisonCache();
     return std.Io.Dir.cwd().readFileAlloc(build.graph.io, path, build.allocator, .limited(64 * 1024)) catch null;
 }
 
@@ -371,7 +380,7 @@ fn readEmnapiVersion(build: *std.Build, package_dir: []const u8) ?[]const u8 {
 /// build inside this repository's test addon are covered by the same walk.
 fn emnapiLibDirCandidates(build: *std.Build) []const []const u8 {
     var dirs = std.array_list.Managed([]const u8).init(build.allocator);
-    var current: ?[]const u8 = build.build_root.path orelse ".";
+    var current: ?[]const u8 = build.root.toString(build.allocator) catch @panic("OOM");
     while (current) |dir| {
         dirs.append(joinPath(build, &.{ dir, "node_modules", "emnapi", "lib" })) catch @panic("out of memory");
         current = std.fs.path.dirname(dir);
@@ -484,7 +493,7 @@ fn resolveWasiEmnapiArchive(
         writer.print(
             "No node_modules/emnapi was found from {s} upwards; install the emnapi runtime " ++
                 "next to the addon project.\n",
-            .{build.build_root.path orelse "."},
+            .{build.root.toString(build.allocator) catch @panic("OOM")},
         ) catch @panic("out of memory");
     }
     writer.print(
@@ -493,7 +502,7 @@ fn resolveWasiEmnapiArchive(
             "Or point the build at an existing archive directory:\n" ++
             "  zig build -Demnapi-link-dir=<dir> [-Demnapi-archive={s}]\n" ++
             "The full C threaded archive ({s}) needs wasi-libc pthreads and is only " ++
-            "linkable by toolchains that provide them (not Zig 0.16).\n",
+            "linkable by toolchains that provide them (not Zig 0.17).\n",
         .{
             emnapi_min_version_string,
             emnapi_min_version_string,
@@ -718,10 +727,13 @@ fn addConfiguredNapiImport(
     napi_module: ?*std.Build.Module,
     build_options_module: *std.Build.Module,
     comptime node_addon: bool,
+    node_api: NodeApiOptions,
 ) void {
     root_module.addImport("build_options", build_options_module);
-    if (napi_module) |module| {
-        root_module.addImport("napi", createConfiguredNapiModule(build, module, build_options_module, node_addon));
+    // Legacy callers supply napi through root_module_options.imports. Those
+    // bindings must also be translated for each addon target, not the host.
+    if (napi_module orelse root_module.import_table.get("napi")) |module| {
+        root_module.addImport("napi", createConfiguredNapiModule(build, module, build_options_module, node_addon, root_module.resolved_target.?, root_module.optimize orelse .debug, node_api));
     }
 }
 
@@ -783,6 +795,9 @@ fn createConfiguredNapiModule(
     napi_module: *std.Build.Module,
     build_options_module: *std.Build.Module,
     comptime node_addon: bool,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    node_api: NodeApiOptions,
 ) *std.Build.Module {
     const package = napi_module.owner;
     const header_path = package.path("src/sys/ohos");
@@ -800,9 +815,29 @@ fn createConfiguredNapiModule(
     if (!node_addon) {
         napi.addIncludePath(header_path);
         napi_sys.addIncludePath(header_path);
+        napi_sys.addImport("ohos", createOhosBindings(build, package.path("src/sys/ohos/native_api.h"), target, optimize, node_api));
     }
 
     return napi;
+}
+
+/// Translate the bundled OHOS headers for the module's target and N-API
+/// configuration. Zig 0.17 requires C translation to be a build step.
+pub fn createOhosBindings(
+    build: *std.Build,
+    header: std.Build.LazyPath,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    node_api: NodeApiOptions,
+) *std.Build.Module {
+    const bindings = build.addTranslateC(.{
+        .root_source_file = header,
+        .target = target,
+        .optimize = optimize,
+    });
+    bindings.defineCMacro("NAPI_VERSION", build.fmt("{d}", .{node_api.effectiveVersion()}));
+    if (node_api.experimental) bindings.defineCMacro("NAPI_EXPERIMENTAL", "1");
+    return bindings.createModule();
 }
 
 fn arkvmHostAddonBuild(build: *std.Build, option: NativeAddonBuildOptionsWithModule) *std.Build.Step.Compile {
@@ -822,7 +857,7 @@ fn arkvmHostAddonBuild(build: *std.Build, option: NativeAddonBuildOptionsWithMod
         .node_api = option.node_api,
     });
     const build_options_module = addon_build_options.createModule();
-    addConfiguredNapiImport(build, compile.root_module, option.napi_module, build_options_module, false);
+    addConfiguredNapiImport(build, compile.root_module, option.napi_module, build_options_module, false, option.node_api);
 
     const installStep = build.addInstallArtifact(compile, .{
         .dest_dir = .{
@@ -836,6 +871,15 @@ fn arkvmHostAddonBuild(build: *std.Build, option: NativeAddonBuildOptionsWithMod
     return compile;
 }
 
+var cached_strip_options: std.AutoHashMapUnmanaged(*std.Build, ?bool) = .empty;
+var cached_dts_options: std.AutoHashMapUnmanaged(*std.Build, ?bool) = .empty;
+
+fn cachedBoolOption(cache: *std.AutoHashMapUnmanaged(*std.Build, ?bool), build: *std.Build, name: []const u8, description: []const u8) ?bool {
+    const entry = cache.getOrPut(build.allocator, build) catch @panic("out of memory");
+    if (!entry.found_existing) entry.value_ptr.* = build.option(bool, name, description);
+    return entry.value_ptr.*;
+}
+
 pub fn nodeAddonBuild(build: *std.Build, option: NodeAddonBuildOptionsWithModule) !NodeAddonBuildResult {
     const addon_build_options = createAddonBuildOptions(build, .{
         .node_addon = true,
@@ -846,6 +890,9 @@ pub fn nodeAddonBuild(build: *std.Build, option: NodeAddonBuildOptionsWithModule
 
     var nodeOption = cloneLibraryOptionsInternal(build, option, target);
     nodeOption.linkage = .dynamic;
+    if (cachedBoolOption(&cached_strip_options, build, "strip", "Strip debug information from the addon")) |strip| {
+        nodeOption.root_module.strip = strip;
+    }
 
     const wasi_flavor = wasiFlavor(target.result);
     const compile = if (is_wasi) compile: {
@@ -874,7 +921,7 @@ pub fn nodeAddonBuild(build: *std.Build, option: NodeAddonBuildOptionsWithModule
         break :compile wasm;
     } else build.addLibrary(nodeOption);
     const build_options_module = addon_build_options.createModule();
-    addConfiguredNapiImport(build, compile.root_module, option.napi_module, build_options_module, true);
+    addConfiguredNapiImport(build, compile.root_module, option.napi_module, build_options_module, true, option.node_api);
     compile.linker_allow_shlib_undefined = true;
     if (target.result.os.tag != .windows) compile.root_module.link_libc = true;
     if (is_wasi) {
@@ -922,6 +969,7 @@ pub const TypeDefinitionBuildOptions = struct {
     output: std.Build.LazyPath,
     napi_module: *std.Build.Module,
     node_api: NodeApiOptions = .{},
+    node_addon: bool = false,
     // Optional text injected after the generated banner comments.
     header: ?[]const u8 = null,
     options: ?*std.Build.Step.Options = null,
@@ -932,6 +980,7 @@ pub fn generateTypeDefinition(build: *std.Build, option: TypeDefinitionBuildOpti
 
     const tsgen_build_options = createAddonBuildOptions(build, .{
         .napi_tsgen = true,
+        .node_addon = option.node_addon,
         .node_api = option.node_api,
     });
 
@@ -943,6 +992,9 @@ pub fn generateTypeDefinition(build: *std.Build, option: TypeDefinitionBuildOpti
     });
     const tsgen_build_options_module = tsgen_build_options.createModule();
     tsgen_napi_sys.addImport("build_options", tsgen_build_options_module);
+    if (!option.node_addon) {
+        tsgen_napi_sys.addImport("ohos", createOhosBindings(build, option.napi_module.owner.path("src/sys/ohos/native_api.h"), build.graph.host, .debug, option.node_api));
+    }
     tsgen_napi.addImport("napi-sys", tsgen_napi_sys);
     tsgen_napi.addImport("build_options", tsgen_build_options_module);
     tsgen_napi.addIncludePath(option.napi_module.owner.path("src/sys/ohos"));
@@ -969,6 +1021,7 @@ pub fn generateTypeDefinition(build: *std.Build, option: TypeDefinitionBuildOpti
         },
     });
     const addon_build_options = option.options orelse createAddonBuildOptions(build, .{
+        .node_addon = option.node_addon,
         .node_api = option.node_api,
     });
     addon_root.addImport("build_options", addon_build_options.createModule());
@@ -992,6 +1045,9 @@ pub fn generateTypeDefinition(build: *std.Build, option: TypeDefinitionBuildOpti
     generator.root_module.addImport("napi", tsgen_napi);
 
     const run = build.addRunArtifact(generator);
+    if (!(cachedBoolOption(&cached_dts_options, build, "dts-cache", "Cache generated TypeScript declarations") orelse true)) {
+        run.has_side_effects = true;
+    }
     run.addFileArg(option.output);
     run.addFileArg(option.root_source_file);
     run.addArg(option.header orelse "");
@@ -1037,7 +1093,7 @@ pub fn nativeAddonBuild(build: *std.Build, option: NativeAddonBuildOptionsWithMo
 
             const arm64Option = cloneLibraryOptions(build, option, target);
             arm64 = build.addLibrary(arm64Option);
-            addConfiguredNapiImport(build, arm64.?.root_module, option.napi_module, build_options_module, false);
+            addConfiguredNapiImport(build, arm64.?.root_module, option.napi_module, build_options_module, false, option.node_api);
             try linkNapi(build, arm64.?, target.query);
 
             const arm64DistDir: []const u8 = build.dupePath("arm64-v8a");
@@ -1054,7 +1110,7 @@ pub fn nativeAddonBuild(build: *std.Build, option: NativeAddonBuildOptionsWithMo
             const target = build.resolveTargetQuery(targets[1]);
             const armOption = cloneLibraryOptions(build, option, target);
             arm = build.addLibrary(armOption);
-            addConfiguredNapiImport(build, arm.?.root_module, option.napi_module, build_options_module, false);
+            addConfiguredNapiImport(build, arm.?.root_module, option.napi_module, build_options_module, false, option.node_api);
             try linkNapi(build, arm.?, target.query);
 
             const armDistDir: []const u8 = build.dupePath("armeabi-v7a");
@@ -1073,7 +1129,7 @@ pub fn nativeAddonBuild(build: *std.Build, option: NativeAddonBuildOptionsWithMo
             // TODO: https://github.com/ziglang/zig/issues/25335
             x64Option.use_llvm = true;
             x64 = build.addLibrary(x64Option);
-            addConfiguredNapiImport(build, x64.?.root_module, option.napi_module, build_options_module, false);
+            addConfiguredNapiImport(build, x64.?.root_module, option.napi_module, build_options_module, false, option.node_api);
             try linkNapi(build, x64.?, target.query);
 
             const x64DistDir: []const u8 = build.dupePath("x86_64");

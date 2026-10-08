@@ -192,14 +192,20 @@ test("class constructor and factory allocation failures roll back borrowed input
     `const assert=require('assert');
     const collect=async()=>{for(let i=0;i<5;i++){global.gc();await new Promise(r=>setImmediate(r));}};
     (async()=>{await collect();const before=a.activeBytes();
-      for(let cycle=0;cycle<20;cycle++)for(let i=0;i<5;i++){
-        a.setAllocationFailure(i);try{new a.BorrowedClass('abc');}catch{}finally{a.useAlternateAllocator(false);}
-        a.setAllocationFailure(i);try{a.BorrowedClass.make('abc');}catch{}finally{a.useAlternateAllocator(false);}
+      for(const create of [()=>new a.BorrowedClass('abc'),()=>a.BorrowedClass.make('abc')]){
+        let failures=0,successes=0;
+        for(let cycle=0;cycle<20;cycle++)for(let i=0;i<5;i++){
+          a.setAllocationFailure(i);
+          try{create();successes++;}catch{failures++;}finally{a.useAlternateAllocator(false);}
+        }
+        assert(failures>0,'allocation failures must be injected');
+        assert(successes>0,'the allocation budget must also allow successful construction');
       }
       await collect();assert.strictEqual(a.activeBytes(),before);
     })().catch(e=>{console.error(e);process.exitCode=1});`,
     ["--expose-gc"],
   );
+  t.is(result.error, undefined, result.error && result.error.message);
   t.is(result.signal, null, result.stderr);
   t.is(result.status, 0, result.stderr);
 });

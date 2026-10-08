@@ -15,7 +15,10 @@ module.exports = function renameProject(cwd, flags) {
   const packagePath = owned(flags.packageJsonPath || "package.json");
   const pkg = JSON.parse(fs.readFileSync(packagePath, "utf8"));
   const configPath = flags.configPath ? owned(flags.configPath) : undefined;
-  const config = configPath ? JSON.parse(fs.readFileSync(configPath, "utf8")) : pkg.napi || {};
+  const config = {
+    ...pkg.napi,
+    ...(configPath ? JSON.parse(fs.readFileSync(configPath, "utf8")) : {}),
+  };
   const oldBinary = config.binaryName;
   if (
     typeof oldBinary !== "string" ||
@@ -70,12 +73,18 @@ module.exports = function renameProject(cwd, flags) {
       );
     if (Array.isArray(metadata.files)) metadata.files = metadata.files.map(renameFile);
   };
-  pkg.name = packageName;
+  pkg.name = flags.name ?? pkg.name;
   renameMetadata(pkg);
   config.binaryName = binary;
   config.packageName = packageName;
   if (flags.description !== undefined) pkg.description = flags.description;
   if (flags.author !== undefined) pkg.author = flags.author;
+  if (flags.repository !== undefined) {
+    pkg.repository =
+      pkg.repository && typeof pkg.repository === "object"
+        ? { ...pkg.repository, url: flags.repository }
+        : flags.repository;
+  }
   if (configPath) json(configPath, config);
   else pkg.napi = config;
   if (pkg.optionalDependencies)
@@ -145,7 +154,7 @@ module.exports = function renameProject(cwd, flags) {
         if (binary === oldBinary || !entry.name.startsWith(oldBinary + ".")) continue;
         const suffix = entry.name.slice(oldBinary.length);
         if (
-          !/^\.(?:(?:[cm]?js)|d\.[cm]?ts|(?:wasi|wasip1)(?:[-.].*)?\.(?:cjs|js|cts|ts)|(?:linux|darwin|win32|freebsd|android|wasm32)-.*\.(?:node|wasm))$/.test(
+          !/^\.(?:(?:[cm]?js)|node|d\.[cm]?ts|(?:wasi|wasip1)(?:[-.].*)?\.(?:cjs|js|cts|ts)|(?:linux|darwin|win32|freebsd|android|wasm32)-.*\.(?:node|wasm))$/.test(
             suffix,
           )
         )
@@ -157,6 +166,29 @@ module.exports = function renameProject(cwd, flags) {
       }
     };
     walk(cwd);
+  }
+  const manifestPath = flags.manifestPath || "build.zig.zon";
+  if (binary !== oldBinary && (flags.manifestPath || fs.existsSync(path.join(cwd, manifestPath)))) {
+    const manifest = owned(manifestPath);
+    if (!manifest.endsWith(".zig.zon"))
+      throw new Error("--manifest-path for Zig rename must name a build.zig.zon manifest");
+    const identifier = binary.replaceAll("-", "_");
+    stage(
+      manifest,
+      text(manifest)
+        .replace(/(\.name\s*=\s*)\.[A-Za-z_][A-Za-z0-9_]*/, `$1.${identifier}`)
+        .replace(/(\.fingerprint\s*=\s*)0x[0-9a-f]+/i, (_match, prefix) => prefix + "0x0"),
+    );
+  }
+  const workflowPath = path.join(cwd, ".github", "workflows", "CI.yml");
+  if (binary !== oldBinary && fs.existsSync(workflowPath)) {
+    stage(
+      workflowPath,
+      text(workflowPath).replace(
+        /^(  APP_NAME:).*/m,
+        (_match, prefix) => prefix + " " + JSON.stringify(binary),
+      ),
+    );
   }
   json(packagePath, pkg);
   if (flags.dryRun) {

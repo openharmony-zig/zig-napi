@@ -33,7 +33,7 @@ jobs:
       - name: Setup Zig
         uses: mlugg/setup-zig@v2
         with:
-          version: 0.16.0
+          version: 0.17.0
           cache-key: node-${{ matrix.node }}
 
       - name: Verify Zig
@@ -93,7 +93,7 @@ jobs:
       - name: Setup Zig
         uses: mlugg/setup-zig@v2
         with:
-          version: 0.16.0
+          version: 0.17.0
           cache-key: node-wasm
 
       - name: Setup Node.js
@@ -165,8 +165,8 @@ jobs:
       # ReleaseFast has neither. Build both and run the same acceptance.
       - name: Build optimized WASI artifacts (ReleaseSafe and ReleaseFast)
         run: |
-          for mode in ReleaseSafe ReleaseFast; do
-            dir="zig-out/opt-$(echo "$mode" | tr 'A-Z' 'a-z' | sed 's/releasesafe/release-safe/;s/releasefast/release-fast/')"
+          for mode in safe fast; do
+            dir="zig-out/opt-release-$mode"
             mkdir -p "$dir"
             cd node-test
             zig build -Doptimize="$mode" -Dtarget=wasm32-wasi -Dcpu=baseline+atomics+bulk_memory+mutable_globals --summary all
@@ -220,7 +220,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: mlugg/setup-zig@v2
         with:
-          version: 0.16.0
+          version: 0.17.0
       - uses: actions/setup-node@v4
         with:
           node-version: '22'

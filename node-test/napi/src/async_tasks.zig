@@ -281,7 +281,7 @@ pub fn asyncPendingExceptionCompletion() napi.AsyncWithEvents(napi.ObjectRef, Sl
 /// Thread local message storage, the same shape as the conversion layer's
 /// rotating error slots: each thread sees its own copy, so an error created on
 /// the task thread is only readable there.
-threadlocal var task_message: [64]u8 = [_]u8{'?'} ** 64;
+threadlocal var task_message: [64]u8 = @splat('?');
 
 fn failingRunner(_: i32) !i32 {
     const text = std.fmt.bufPrint(&task_message, "background failure {d}", .{@as(u32, 7)}) catch "background failure";
@@ -342,7 +342,7 @@ pub fn rejectedPromiseStatus(env: napi.Env) !napi.Promise {
     var writer = promise;
     try writer.Reject(napi.Error.withReason("status probe"));
     var alias = promise;
-    status_after_reject = @intFromEnum(alias.status());
+    status_after_reject = @backingInt(alias.status());
     return promise;
 }
 
@@ -357,7 +357,7 @@ pub fn resolvedPromiseStatus(env: napi.Env) !napi.Promise {
     var writer = promise;
     try writer.Resolve(@as(i32, 3));
     var alias = promise;
-    status_after_resolve = @intFromEnum(alias.status());
+    status_after_resolve = @backingInt(alias.status());
     return promise;
 }
 

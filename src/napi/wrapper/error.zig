@@ -97,7 +97,7 @@ const message_slot_count = 8;
 const message_slot_len = 256;
 threadlocal var message_slots: [message_slot_count][message_slot_len]u8 = undefined;
 threadlocal var message_slot_index: usize = 0;
-threadlocal var message_slot_pins: [message_slot_count]u16 = .{0} ** message_slot_count;
+threadlocal var message_slot_pins: [message_slot_count]u16 = @splat(0);
 
 pub fn formatMessage(comptime fmt: []const u8, args: anytype) []const u8 {
     const index = takeMessageSlot() orelse return "Native conversion error (nested error storage exhausted)";

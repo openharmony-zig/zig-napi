@@ -71,8 +71,8 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
         @compileError("Class() does not support tuple type");
     }
 
-    const fields = type_info.@"struct".fields;
-    const decls = type_info.@"struct".decls;
+    const fields = type_info.@"struct";
+    const decls = type_info.@"struct".decl_names;
 
     const class_name = comptime helper.shortTypeName(T);
     const has_custom_deinit = @hasDecl(T, "deinit");
@@ -117,7 +117,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
             /// `owned_fields[i]` records that the *current* value of field `i`
             /// was produced by a conversion performed by this wrapper. Only
             /// those values may be released when a setter replaces them.
-            owned_fields: [fields.len]bool,
+            owned_fields: [fields.field_names.len]bool,
             /// Converted `init`/factory inputs. See `retainBorrowedInputs`.
             borrowed_inputs: ?KeepAlive,
 
@@ -129,7 +129,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                     // Never expose or finalize this value before construction.
                     // Failed field construction only releases its initialized prefix.
                     .value = undefined,
-                    .owned_fields = [_]bool{false} ** fields.len,
+                    .owned_fields = @splat(false),
                     .borrowed_inputs = null,
                 };
                 // Registration is what makes `unwrapInstance` a provenance
@@ -152,9 +152,9 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                     // allowed to clear or release everything it owns.
                     deinitValue(T, self.value, allocator);
                 } else {
-                    inline for (fields, 0..) |field, i| {
-                        if (self.owned_fields[i] or comptime fieldOwnsItself(field.type)) {
-                            deinitValue(field.type, @field(self.value, field.name), allocator);
+                    inline for (fields.field_names, fields.field_types, 0..) |field_name, field_type, i| {
+                        if (self.owned_fields[i] or comptime fieldOwnsItself(field_type)) {
+                            deinitValue(field_type, @field(self.value, field_name), allocator);
                         }
                     }
                 }
@@ -339,14 +339,14 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                     {
                         break :blk false;
                     }
-                    inline for (structure.fields) |field| {
-                        if (comptime typeCarriesNativeMemory(field.type)) break :blk true;
+                    inline for (structure.field_types) |field_type| {
+                        if (comptime typeCarriesNativeMemory(field_type)) break :blk true;
                     }
                     break :blk false;
                 },
                 .@"union" => |union_info| {
-                    inline for (union_info.fields) |field| {
-                        if (comptime typeCarriesNativeMemory(field.type)) return true;
+                    inline for (union_info.field_types) |field_type| {
+                        if (comptime typeCarriesNativeMemory(field_type)) return true;
                     }
                     return false;
                 },
@@ -395,8 +395,8 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
             return struct {
                 fn destroy(raw: *anyopaque, allocator: std.mem.Allocator) void {
                     const typed: *V = @ptrCast(@alignCast(raw));
-                    inline for (@typeInfo(V).@"struct".fields) |field| {
-                        deinitValue(field.type, @field(typed.*, field.name), allocator);
+                    inline for (@typeInfo(V).@"struct".field_names, @typeInfo(V).@"struct".field_types) |field_name, field_type| {
+                        deinitValue(field_type, @field(typed.*, field_name), allocator);
                     }
                     allocator.destroy(typed);
                 }
@@ -434,7 +434,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
         /// failure path so that a rejected argument list does not leak the
         /// arguments that were converted before the failure.
         fn releaseConvertedArgs(comptime ArgsTuple: type, args: *ArgsTuple, initialized: usize, allocator: std.mem.Allocator) void {
-            inline for (0..@typeInfo(ArgsTuple).@"struct".fields.len) |i| {
+            inline for (0..@typeInfo(ArgsTuple).@"struct".field_names.len) |i| {
                 if (i < initialized) {
                     deinitValue(@TypeOf(args[i]), args[i], allocator);
                 }
@@ -443,9 +443,9 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
 
         fn constructorArgCount() usize {
             if (HasInit and @hasDecl(T, "init")) {
-                return @typeInfo(@TypeOf(T.init)).@"fn".params.len;
+                return @typeInfo(@TypeOf(T.init)).@"fn".param_types.len;
             }
-            return if (HasInit) fields.len else 0;
+            return if (HasInit) fields.field_names.len else 0;
         }
 
         // ------------------------------------------------------------------
@@ -576,9 +576,9 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
             if (comptime has_custom_deinit) {
                 deinitValue(T, value, allocator);
             } else {
-                inline for (fields) |field| {
-                    if (comptime fieldOwnsItself(field.type)) {
-                        deinitValue(field.type, @field(value, field.name), allocator);
+                inline for (fields.field_names, fields.field_types) |field_name, field_type| {
+                    if (comptime fieldOwnsItself(field_type)) {
+                        deinitValue(field_type, @field(value, field_name), allocator);
                     }
                 }
             }
@@ -644,7 +644,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
         fn buildWithInit(env: napi.napi_env, args: []const napi.napi_value, instance: *InstanceData) bool {
             const init_fn = T.init;
             const init_type = @TypeOf(init_fn);
-            const init_params = @typeInfo(init_type).@"fn".params;
+            const init_params = @typeInfo(init_type).@"fn".param_types;
             const allocator = instance.allocator;
             const ArgsTuple = std.meta.ArgsTuple(init_type);
 
@@ -661,7 +661,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
             var initialized: usize = 0;
 
             inline for (init_params, 0..) |param, i| {
-                tuple_args[i] = Napi.from_napi_value_auto_with_allocator(env, args[i], param.type.?, allocator) catch |err| {
+                tuple_args[i] = Napi.from_napi_value_auto_with_allocator(env, args[i], param.?, allocator) catch |err| {
                     // Unwind the created resources *before* the argument
                     // cleanup: an undo handle may live inside memory the cleanup
                     // frees. Committing is what suppresses the rollback.
@@ -723,8 +723,8 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
             defer conversion.end();
 
             instance.value = undefined;
-            inline for (fields, 0..) |field, i| {
-                const converted = Napi.from_napi_value_auto_with_allocator(env, args[i], field.type, instance.allocator) catch |err| {
+            inline for (fields.field_names, fields.field_types, 0..) |field_name, field_type, i| {
+                const converted = Napi.from_napi_value_auto_with_allocator(env, args[i], field_type, instance.allocator) catch |err| {
                     // Resources created by the conversions are released first,
                     // then the native copies that were already installed.
                     conversion.rollbackUncommitted();
@@ -732,7 +732,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                     reportConversionFailure(env, err);
                     return false;
                 };
-                @field(instance.value, field.name) = converted;
+                @field(instance.value, field_name) = converted;
                 instance.owned_fields[i] = true;
             }
 
@@ -743,9 +743,9 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
         }
 
         fn rollbackFields(instance: *InstanceData, initialized: usize) void {
-            inline for (fields, 0..) |field, i| {
+            inline for (fields.field_names, fields.field_types, 0..) |field_name, field_type, i| {
                 if (i < initialized and instance.owned_fields[i]) {
-                    deinitValue(field.type, @field(instance.value, field.name), instance.allocator);
+                    deinitValue(field_type, @field(instance.value, field_name), instance.allocator);
                     instance.owned_fields[i] = false;
                 }
             }
@@ -884,7 +884,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                     const factory_fn = @field(T, factory_name);
                     const factory_fn_type = @TypeOf(factory_fn);
                     const factory_fn_info = @typeInfo(factory_fn_type);
-                    const params = factory_fn_info.@"fn".params;
+                    const params = factory_fn_info.@"fn".param_types;
 
                     var args_raw: [params.len]napi.napi_value = undefined;
                     const callback = readCallInfo(params.len, env, callback_info, &args_raw) orelse return null;
@@ -921,7 +921,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                         var initialized: usize = 0;
 
                         inline for (params, 0..) |param, i| {
-                            tuple_args[i] = Napi.from_napi_value_auto_with_allocator(env, args_raw[i], param.type.?, allocator) catch |err| {
+                            tuple_args[i] = Napi.from_napi_value_auto_with_allocator(env, args_raw[i], param.?, allocator) catch |err| {
                                 conversion.rollbackUncommitted();
                                 releaseConvertedArgs(ArgsTuple, &tuple_args, initialized, allocator);
                                 reportConversionFailure(env, err);
@@ -1007,7 +1007,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
         fn countConstDecls() usize {
             var count: usize = 0;
             for (decls) |decl| {
-                if (comptime isConstDecl(decl.name)) {
+                if (comptime isConstDecl(decl)) {
                     count += 1;
                 }
             }
@@ -1018,15 +1018,15 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
         /// type: `self: *T` (mutable receiver) or `self: T` (value receiver, a
         /// copy of the native state). Everything else is a static method, and a
         /// static method never touches `this`.
-        fn isInstanceMethod(comptime params: []const std.builtin.Type.Fn.Param) bool {
+        fn isInstanceMethod(comptime params: []const ?type) bool {
             if (params.len == 0) return false;
-            const self_type = params[0].type orelse return false;
+            const self_type = params[0] orelse return false;
             if (self_type == T) return true;
             const self_info = @typeInfo(self_type);
             if (self_info != .pointer) return false;
             if (self_info.pointer.size != .one) return false;
             if (self_info.pointer.child != T) return false;
-            if (self_info.pointer.is_const) {
+            if (self_info.pointer.attrs.@"const") {
                 // The declaration generator classifies `*const T` as a static
                 // method, so accepting it here would produce a runtime that
                 // disagrees with the generated `.d.ts`.
@@ -1048,15 +1048,15 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
             const context = try createContext(env);
 
             // Count instance properties and methods
-            comptime var property_count: usize = fields.len;
+            comptime var property_count: usize = fields.field_names.len;
 
             // Count methods
             inline for (decls) |decl| {
-                const method_config = comptime Metadata.get(T, decl.name);
+                const method_config = comptime Metadata.get(T, decl);
                 if (comptime method_config.skip) continue;
-                const decl_type = @TypeOf(@field(T, decl.name));
+                const decl_type = @TypeOf(@field(T, decl));
                 if (@typeInfo(decl_type) == .@"fn") {
-                    const fn_name = decl.name;
+                    const fn_name = decl;
                     if (comptime !std.mem.eql(u8, fn_name, "init") and
                         !std.mem.eql(u8, fn_name, "deinit"))
                     {
@@ -1073,17 +1073,17 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
             var prop_idx: usize = 0;
 
             // Process instance fields
-            inline for (fields, 0..) |field, field_index| {
-                const field_config = comptime Metadata.get(T, field.name);
+            inline for (fields.field_names, fields.field_types, 0..) |field_name, field_type, field_index| {
+                const field_config = comptime Metadata.get(T, field_name);
                 if (comptime field_config.skip) continue;
                 const FieldAccessor = struct {
                     fn getter(getter_env: napi.napi_env, info: napi.napi_callback_info) callconv(.c) napi.napi_value {
                         var args_raw: [0]napi.napi_value = undefined;
                         const callback = readCallInfo(0, getter_env, info, &args_raw) orelse return null;
 
-                        const instance = expectInstance(getter_env, callback.this_obj, class_name ++ "." ++ field.name) orelse return null;
-                        const field_value = @field(instance.value, field.name);
-                        return Napi.to_napi_value_auto(getter_env, field_value, field.name) catch |err| {
+                        const instance = expectInstance(getter_env, callback.this_obj, class_name ++ "." ++ field_name) orelse return null;
+                        const field_value = @field(instance.value, field_name);
+                        return Napi.to_napi_value_auto(getter_env, field_value, field_name) catch |err| {
                             return throwAnyAndNull(getter_env, err);
                         };
                     }
@@ -1092,7 +1092,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                         var args_raw: [1]napi.napi_value = undefined;
                         const callback = readCallInfo(1, setter_env, info, &args_raw) orelse return null;
 
-                        const instance = expectInstance(setter_env, callback.this_obj, class_name ++ "." ++ field.name) orelse return null;
+                        const instance = expectInstance(setter_env, callback.this_obj, class_name ++ "." ++ field_name) orelse return null;
                         if (callback.argc == 0) return null;
 
                         // The new value is converted first. A failed conversion
@@ -1106,11 +1106,11 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                         // it); on every other branch the field is overwritten
                         // without touching the old contents, so a field a user
                         // `init` never initialized cannot be read here.
-                        if (comptime replacementNeedsOwner(has_custom_deinit, field.type)) {
+                        if (comptime replacementNeedsOwner(has_custom_deinit, field_type)) {
                             // A self owning field type is an explicit owner
                             // contract and may replace itself; anything else
                             // that the type's `deinit` owns cannot.
-                            if (comptime !fieldOwnsItself(field.type)) {
+                            if (comptime !fieldOwnsItself(field_type)) {
                                 if (!instance.owned_fields[field_index]) {
                                     // The type owns this field through
                                     // `deinit` and the wrapper cannot know who
@@ -1120,7 +1120,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                                     // memory.
                                     throwTypeError(
                                         setter_env,
-                                        class_name ++ "." ++ field.name ++ " is owned by " ++ @typeName(T) ++ ".deinit: replace it through a method of the type or declare the field as napi.Owned(...)",
+                                        class_name ++ "." ++ field_name ++ " is owned by " ++ @typeName(T) ++ ".deinit: replace it through a method of the type or declare the field as napi.Owned(...)",
                                     );
                                     return null;
                                 }
@@ -1134,7 +1134,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                         conversion.start(instance.allocator);
                         defer conversion.end();
 
-                        const new_value = Napi.from_napi_value_auto_with_allocator(setter_env, args_raw[0], field.type, instance.allocator) catch |err| {
+                        const new_value = Napi.from_napi_value_auto_with_allocator(setter_env, args_raw[0], field_type, instance.allocator) catch |err| {
                             conversion.rollbackUncommitted();
                             reportConversionFailure(setter_env, err);
                             return null;
@@ -1144,18 +1144,18 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                         // installed.
                         conversion.commit();
 
-                        if (instance.owned_fields[field_index] or comptime fieldOwnsItself(field.type)) {
+                        if (instance.owned_fields[field_index] or comptime fieldOwnsItself(field_type)) {
                             // The wrapper installed the current value, or the
                             // field type is explicitly self owning: both are an
                             // owner contract that lets the replaced value be
                             // released.
-                            const previous = @field(instance.value, field.name);
-                            @field(instance.value, field.name) = new_value;
-                            deinitValue(field.type, previous, instance.allocator);
+                            const previous = @field(instance.value, field_name);
+                            @field(instance.value, field_name) = new_value;
+                            deinitValue(field_type, previous, instance.allocator);
                         } else {
                             // Borrowed or plain data: nothing to release. The
                             // wrapper now owns the value it just installed.
-                            @field(instance.value, field.name) = new_value;
+                            @field(instance.value, field_name) = new_value;
                         }
                         instance.owned_fields[field_index] = true;
                         return null;
@@ -1163,7 +1163,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                 };
 
                 properties[prop_idx] = napi.napi_property_descriptor{
-                    .utf8name = Metadata.name(T, field.name).ptr,
+                    .utf8name = Metadata.name(T, field_name).ptr,
                     .name = null,
                     .method = null,
                     .getter = FieldAccessor.getter,
@@ -1178,16 +1178,16 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
             // Process const declarations as static value properties
             // Following napi-rs pattern: use value field with static attribute
             inline for (decls) |decl| {
-                if (comptime Metadata.get(T, decl.name).skip) continue;
-                if (comptime isConstDecl(decl.name)) {
-                    const const_value = @field(T, decl.name);
+                if (comptime Metadata.get(T, decl).skip) continue;
+                if (comptime isConstDecl(decl)) {
+                    const const_value = @field(T, decl);
 
                     // The value is materialized per environment (and per
                     // definition) so that no handle leaks across environments.
-                    const static_value = try Napi.to_napi_value_auto(env, const_value, decl.name);
+                    const static_value = try Napi.to_napi_value_auto(env, const_value, decl);
 
                     properties[prop_idx] = napi.napi_property_descriptor{
-                        .utf8name = Metadata.name(T, decl.name).ptr,
+                        .utf8name = Metadata.name(T, decl).ptr,
                         .name = null,
                         .method = null,
                         .getter = null,
@@ -1202,17 +1202,17 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
 
             // Process methods
             inline for (decls) |decl| {
-                const method_config = comptime Metadata.get(T, decl.name);
+                const method_config = comptime Metadata.get(T, decl);
                 if (comptime method_config.skip) continue;
-                const decl_type = @TypeOf(@field(T, decl.name));
+                const decl_type = @TypeOf(@field(T, decl));
                 if (@typeInfo(decl_type) == .@"fn") {
-                    const fn_name = decl.name;
+                    const fn_name = decl;
                     if (comptime !std.mem.eql(u8, fn_name, "init") and
                         !std.mem.eql(u8, fn_name, "deinit"))
                     {
                         const method = @field(T, fn_name);
                         const method_info = @typeInfo(@TypeOf(method));
-                        const params = method_info.@"fn".params;
+                        const params = method_info.@"fn".param_types;
 
                         const is_instance_method = comptime isInstanceMethod(params);
                         const method_args_offset: usize = if (is_instance_method) 1 else 0;
@@ -1240,7 +1240,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                         } else {
                             const MethodWrapper = struct {
                                 fn cleanupArgs(args: *std.meta.ArgsTuple(@TypeOf(method)), initialized: usize, allocator: std.mem.Allocator) void {
-                                    inline for (0..method_info.@"fn".params.len - method_args_offset) |k| {
+                                    inline for (0..method_info.@"fn".param_types.len - method_args_offset) |k| {
                                         if (k < initialized) {
                                             deinitValue(@TypeOf(args[method_args_offset + k]), args[method_args_offset + k], allocator);
                                         }
@@ -1274,7 +1274,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                                     // constructor itself.
                                     if (comptime is_instance_method) {
                                         const instance = expectInstance(method_env, callback.this_obj, class_name ++ "." ++ fn_name) orelse return null;
-                                        const self_type = method_info.@"fn".params[0].type.?;
+                                        const self_type = method_info.@"fn".param_types[0].?;
                                         if (self_type == T) {
                                             // Value receiver: the method works on a
                                             // copy of the native state.
@@ -1290,7 +1290,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
 
                                     // Convert and pass the JavaScript arguments.
                                     inline for (0..method_arg_count) |k| {
-                                        const param_type = method_info.@"fn".params[method_args_offset + k].type.?;
+                                        const param_type = method_info.@"fn".param_types[method_args_offset + k].?;
                                         tuple_args[method_args_offset + k] = Napi.from_napi_value_auto_with_allocator(method_env, args_raw[k], param_type, allocator) catch |err| {
                                             reportConversionFailure(method_env, err);
                                             return null;

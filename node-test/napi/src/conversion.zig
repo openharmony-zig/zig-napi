@@ -117,7 +117,7 @@ pub const SmallEnum = enum(u8) {
 };
 
 pub fn enumRoundtrip(value: SmallEnum) u8 {
-    return @intFromEnum(value);
+    return @backingInt(value);
 }
 
 pub const StatusEnum = enum {
@@ -234,7 +234,7 @@ const PairArgs = struct { u32, u32 };
 const PairTsfn = napi.ThreadSafeFunction(PairArgs, void, true, 0);
 
 /// Error-first TSFN without argument slots.
-const NoArgsTsfn = napi.ThreadSafeFunction(std.meta.Tuple(&.{}), void, true, 0);
+const NoArgsTsfn = napi.ThreadSafeFunction(@Tuple(&.{}), void, true, 0);
 
 /// TSFN whose callback does not receive an error slot, with a bounded queue.
 const PlainArgs = struct { u32 };

@@ -97,10 +97,10 @@ The default archive is `libemnapi-basic-napi-rs.a` from
 `emnapi/lib/wasm32-wasip1/`; a threaded build also looks in
 `wasm32-wasip1-threads/` and `wasm32-wasip1-threads-wasi-sdk-34/`. The full C
 composition (`libemnapi-napi-rs-mt.a`) calls wasi-libc pthreads and a futex
-symbol Zig 0.16 does not provide, so it is only reachable through an explicit
+symbol Zig 0.17 does not provide, so it is only reachable through an explicit
 `emnapi_archive`.
 
-The project builds with Zig 0.16. That toolchain accepts the `wasm32-wasi`
+The project builds with Zig 0.17. That toolchain accepts the `wasm32-wasi`
 triple and does not know the napi-rs spelling, so `-Dtarget=wasm32-wasip1` fails
 with `unknown OS: 'wasip1'`; the CLI maps both target names onto `wasm32-wasi`
 for that reason. The scaffold declares Node.js 20.17 or newer.
@@ -116,7 +116,7 @@ zig-napi new my-addon --no-interactive --no-enable-default-targets \
 # build one flavor; everything after `--` goes to `zig build`
 zig-napi build --cwd my-addon --target wasm32-wasip1-threads -- --summary all
 
-# a release build is -Doptimize=ReleaseFast
+# a release build is -Doptimize=fast
 zig-napi build --cwd my-addon --target wasm32-wasip1 --release
 
 # run the addon's own `zig build` (template projects emit index.d.ts from it)
@@ -524,7 +524,7 @@ threaded one, and a Zig build must not leave `pthread_*` or
 
 This is **not** the implementation napi-rs uses for its Rust WASI addons. That
 one links emnapi's full C composition and runs async work on the uv/libuv thread
-pool over real wasi pthreads; Zig 0.16 cannot build a multithreaded wasm module
+pool over real wasi pthreads; Zig 0.17 cannot build a multithreaded wasm module
 (wasi pthreads are stubs), so the threaded flavor gets its parallelism from
 JavaScript workers and there is no libuv- or Tokio-shaped async API to expect.
 

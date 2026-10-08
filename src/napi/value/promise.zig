@@ -67,23 +67,23 @@ pub const PromiseValue = struct {
 const Capability = struct {
     allocator: std.mem.Allocator,
     deferred: napi.napi_deferred,
-    outcome: std.atomic.Value(u8) = std.atomic.Value(u8).init(@intFromEnum(Outcome.pending)),
+    outcome: std.atomic.Value(u8) = std.atomic.Value(u8).init(@backingInt(Outcome.pending)),
 
     fn claim(self: *Capability) bool {
         return self.outcome.cmpxchgStrong(
-            @intFromEnum(Outcome.pending),
-            @intFromEnum(Outcome.claimed),
+            @backingInt(Outcome.pending),
+            @backingInt(Outcome.claimed),
             .acq_rel,
             .acquire,
         ) == null;
     }
 
     fn releaseClaim(self: *Capability) void {
-        self.outcome.store(@intFromEnum(Outcome.pending), .release);
+        self.outcome.store(@backingInt(Outcome.pending), .release);
     }
 
     fn mark(self: *Capability, outcome: Outcome) void {
-        self.outcome.store(@intFromEnum(outcome), .release);
+        self.outcome.store(@backingInt(outcome), .release);
     }
 };
 
@@ -193,7 +193,7 @@ pub const Promise = struct {
     }
 
     fn outcomeOf(_: Self, capability: *Capability) Outcome {
-        return @enumFromInt(capability.outcome.load(.acquire));
+        return @fromBackingInt(@intCast(capability.outcome.load(.acquire)));
     }
 
     /// Size of the native settlement state a created promise keeps alive until

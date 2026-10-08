@@ -367,7 +367,7 @@ pub const WasmOperationNode = struct {
     /// "this node was registered" marker: `retireWasmOperation` is a no-op
     /// without it.
     release_reference: ?*const fn (?*anyopaque) void = null,
-    state: std.atomic.Value(u8) = std.atomic.Value(u8).init(@intFromEnum(WasmNodeState.linked)),
+    state: std.atomic.Value(u8) = std.atomic.Value(u8).init(@backingInt(WasmNodeState.linked)),
 };
 
 fn registerWasmOperation(node: *WasmOperationNode, context: *anyopaque, settle_for_cleanup: *const fn (?*anyopaque) void, release_reference: *const fn (?*anyopaque) void) void {
@@ -387,8 +387,8 @@ fn registerWasmOperation(node: *WasmOperationNode, context: *anyopaque, settle_f
 /// State transition under the registry lock; true when it was applied here.
 fn claimWasmNodeLocked(node: *WasmOperationNode, from: WasmNodeState, to: WasmNodeState) bool {
     const previous = node.state.load(.acquire);
-    if (previous != @intFromEnum(from)) return false;
-    node.state.store(@intFromEnum(to), .release);
+    if (previous != @backingInt(from)) return false;
+    node.state.store(@backingInt(to), .release);
     return true;
 }
 
@@ -462,7 +462,7 @@ fn wasmEnvCleanupPrepare() callconv(.c) void {
         const next = node.next;
         node.next = null;
         if (node.settle_for_cleanup) |settle| settle(node.context);
-        node.state.store(@intFromEnum(WasmNodeState.retired), .release);
+        node.state.store(@backingInt(WasmNodeState.retired), .release);
         if (node.release_reference) |release| release(node.context);
         current = next;
     }
@@ -562,9 +562,17 @@ fn effectiveRuntime(runtime: RuntimeModel) EffectiveRuntime {
     return switch (resolveRequestedRuntime(runtime)) {
         .single => .single,
         .thread => .thread,
-        .event => if (std.Io.Evented == void) .thread else .single,
+        // Evented backends need their own lifecycle and Node event-loop
+        // integration. Their availability alone must not make tasks run on
+        // the JavaScript thread; keep using the shared threaded runtime.
+        .event => .thread,
         .serial, .threaded, .evented => unreachable,
     };
+}
+
+test "event runtime keeps the asynchronous threaded fallback" {
+    try std.testing.expectEqual(EffectiveRuntime.thread, effectiveRuntime(.event));
+    try std.testing.expectEqual(EffectiveRuntime.thread, effectiveRuntime(.evented));
 }
 
 fn singleIo() std.Io {
@@ -905,20 +913,20 @@ fn validateTaskRunSignature(comptime Input: type, comptime Result: type, comptim
         @compileError("Async task runner must be a function");
     }
 
-    const params = info.@"fn".params;
+    const params = info.@"fn".param_types;
     if (params.len != 1 and params.len != 2) {
         @compileError("Async task runner must accept (input) or (AsyncContext(Event), input)");
     }
 
     if (params.len == 1) {
-        if (params[0].type.? != Input) {
+        if (params[0].? != Input) {
             @compileError("Async task runner input type mismatch");
         }
     } else {
-        if (params[0].type.? != AsyncContext(Event)) {
+        if (params[0].? != AsyncContext(Event)) {
             @compileError("Async task runner context type must be napi.AsyncContext(Event)");
         }
-        if (params[1].type.? != Input) {
+        if (params[1].? != Input) {
             @compileError("Async task runner input type mismatch");
         }
     }
@@ -1241,7 +1249,7 @@ fn AsyncTaskOperation(
         wasm_node: WasmOperationNode = .{},
         state_mutex: std.Io.Mutex = .init,
         state_cond: std.Io.Condition = .init,
-        state: std.atomic.Value(u8) = std.atomic.Value(u8).init(@intFromEnum(AsyncState.created)),
+        state: std.atomic.Value(u8) = std.atomic.Value(u8).init(@backingInt(AsyncState.created)),
         /// The task body returned.
         ///
         /// An atomic, not a mutex-guarded bool: the JavaScript thread (the
@@ -1343,11 +1351,11 @@ fn AsyncTaskOperation(
         const queue_limit = max_inflight_events;
 
         fn setState(self: *Self, new_state: AsyncState) void {
-            self.state.store(@intFromEnum(new_state), .release);
+            self.state.store(@backingInt(new_state), .release);
         }
 
         fn getState(self: *const Self) AsyncState {
-            return @enumFromInt(self.state.load(.acquire));
+            return @fromBackingInt(@intCast(self.state.load(.acquire)));
         }
 
         /// Take a reference: the caller must pair it with `dropOwner`.
@@ -1914,7 +1922,7 @@ fn AsyncTaskOperation(
         }
 
         fn execute(self: *Self, context: Context) !void {
-            if (run_info.params.len == 1) {
+            if (run_info.param_types.len == 1) {
                 if (@typeInfo(run_info.return_type.?) == .error_union) {
                     if (Result == void) {
                         try run_fn(self.input);
@@ -2791,7 +2799,7 @@ fn AsyncTaskOperation(
             // that was never registered - refused before it started - is the
             // only other shape that reaches this point).
             if (comptime use_wasm_env_cleanup) {
-                std.debug.assert(self.wasm_node.state.load(.acquire) == @intFromEnum(WasmNodeState.retired) or
+                std.debug.assert(self.wasm_node.state.load(.acquire) == @backingInt(WasmNodeState.retired) or
                     self.wasm_node.release_reference == null);
             }
 

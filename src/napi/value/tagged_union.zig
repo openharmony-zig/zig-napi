@@ -28,13 +28,13 @@ pub fn TaggedUnion(comptime T: type, comptime tag: [:0]const u8, comptime payloa
             if (status != napi.napi_ok) return Error.failStatus(status);
             const name = try Napi.from_napi_value_auto_with_allocator(env, tag_raw, []u8, allocator);
             defer allocator.free(name);
-            inline for (@typeInfo(T).@"union".fields) |field| {
-                if (std.mem.eql(u8, name, field.name)) {
+            inline for (@typeInfo(T).@"union".field_names, @typeInfo(T).@"union".field_types) |field_name, field_type| {
+                if (std.mem.eql(u8, name, field_name)) {
                     var payload_raw: napi.napi_value = null;
                     status = napi.napi_get_named_property(env, raw, payload.ptr, &payload_raw);
                     if (status != napi.napi_ok) return Error.failStatus(status);
-                    const converted = try Napi.from_napi_value_auto_with_allocator(env, payload_raw, field.type, allocator);
-                    return .{ .value = @unionInit(T, field.name, converted) };
+                    const converted = try Napi.from_napi_value_auto_with_allocator(env, payload_raw, field_type, allocator);
+                    return .{ .value = @unionInit(T, field_name, converted) };
                 }
             }
             return Error.failTypeError("Unknown union discriminant '{s}'", .{name});

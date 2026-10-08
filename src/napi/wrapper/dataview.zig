@@ -254,7 +254,7 @@ pub const DataView = struct {
             @compileError("readFloat only supports floating-point types");
         }
 
-        const Bits = std.meta.Int(.unsigned, @bitSizeOf(T));
+        const Bits = @Int(.unsigned, @bitSizeOf(T));
         const bits = try self.readInt(Bits, byte_offset, little_endian);
         return @bitCast(bits);
     }
@@ -265,7 +265,7 @@ pub const DataView = struct {
             @compileError("writeFloat only supports floating-point types");
         }
 
-        const Bits = std.meta.Int(.unsigned, @bitSizeOf(T));
+        const Bits = @Int(.unsigned, @bitSizeOf(T));
         try self.writeInt(Bits, byte_offset, @bitCast(value), little_endian);
     }
 

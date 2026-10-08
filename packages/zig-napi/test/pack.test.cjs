@@ -47,6 +47,38 @@ test(
       assert.ok(fs.existsSync(path.join(installed, "lib", "cli.cjs")));
       assert.ok(fs.existsSync(path.join(installed, "licenses", "NAPI-RS-LICENSE")));
       assert.doesNotMatch(run(process.execPath, [cli, "build", "--help"], tooling), /ohos-sign/);
+      // Check every selectable platform's file identity against napi-rs using
+      // Zig's resolved targets, without needing to execute foreign binaries.
+      const allTargets = JSON.parse(
+        run(
+          process.execPath,
+          [cli, "new", "planned", "--no-interactive", "--enable-all-targets", "--dry-run"],
+          tooling,
+        ),
+      ).targets;
+      const targetCheck = path.join(scratch, "target-check");
+      fs.mkdirSync(targetCheck);
+      fs.copyFileSync(
+        path.join(installed, "zig/src/build/napi-build.zig"),
+        path.join(targetCheck, "helper.zig"),
+      );
+      const { parseTriple } = require("@napi-rs/cli");
+      const { zigTarget } = require("../lib/targets.cjs");
+      const checks = allTargets
+        .filter((target) => !target.startsWith("universal-"))
+        .map((target) => {
+          const wasm = target.startsWith("wasm32-");
+          const triple = wasm ? "wasm32-wasi" : zigTarget(target);
+          const features = target.endsWith("-threads")
+            ? "query.cpu_features_add = std.Target.wasm.featureSet(&.{.atomics});"
+            : "";
+          return `{ var query = try std.Target.Query.parse(.{ .arch_os_abi = ${JSON.stringify(triple)} }); ${features} _ = &query; const label = napi.nodePlatformArchAbi(b, b.resolveTargetQuery(query)); if (!std.mem.eql(u8, label, ${JSON.stringify(parseTriple(target).platformArchABI)})) return error.PlatformMismatch; }`;
+        });
+      fs.writeFileSync(
+        path.join(targetCheck, "build.zig"),
+        `const std = @import("std"); const napi = @import("helper.zig"); pub fn build(b: *std.Build) !void { ${checks.join("\n")} }`,
+      );
+      run("zig", ["build"], targetCheck);
       const project = path.join(scratch, "addon with spaces");
       run(
         process.execPath,
@@ -64,6 +96,19 @@ test(
         ],
         tooling,
       );
+      const platformDirs = fs.readdirSync(path.join(project, "npm")).sort();
+      assert.deepEqual(platformDirs, [hostAbi, "wasm32-wasi"].sort());
+      for (const platform of platformDirs) {
+        const manifest = JSON.parse(
+          fs.readFileSync(path.join(project, "npm", platform, "package.json"), "utf8"),
+        );
+        assert.equal(manifest.name, `test-addon-${platform}`);
+        assert.equal(manifest.version, "0.1.0");
+        assert.equal(
+          manifest.main,
+          platform === "wasm32-wasi" ? "test_addon.wasi.cjs" : `test_addon.${hostAbi}.node`,
+        );
+      }
       const zon = fs.readFileSync(path.join(project, "build.zig.zon"), "utf8");
       const sourcePath = zon.match(/\.path = "([^"]+)"/)[1];
       assert.equal(
@@ -76,7 +121,7 @@ test(
         require("../package.json").version,
       );
       assert.equal(generated.devDependencies["zig-napi"], undefined);
-      run(process.execPath, [cli, "build", "--cwd", project], tooling);
+      run(process.execPath, [cli, "build", "--platform", "--cwd", project], tooling);
       const outputDir = path.join(project, "zig-out", "node");
       const addon = fs.readdirSync(outputDir).find((name) => name.endsWith(".node"));
       assert.ok(addon);
@@ -89,15 +134,70 @@ test(
       generated.devDependencies["@ohos-rs/zig-cli"] = `file:${installed}`;
       fs.writeFileSync(path.join(project, "package.json"), JSON.stringify(generated, null, 2));
       run("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund"], project);
+      // Exercise the generated build-and-test workflow with its declared runner.
+      run("npm", ["test"], project);
+      // Compiler options and relocated output must work with a real addon,
+      // including a binding nested below its native artifact.
       run(
         process.execPath,
-        [cli, "build", "--cwd", project, "--target", "wasm32-wasip1-threads"],
+        [
+          cli,
+          "build",
+          "--cwd",
+          project,
+          "--platform",
+          "-t",
+          hostTarget,
+          "--target-dir",
+          "other prefix",
+          "-o",
+          "native dist",
+          "--js",
+          "nested/loader.cjs",
+          "--dts",
+          "types/api.d.ts",
+          "--dts-header",
+          "// parity header\n",
+          "--no-dts-cache",
+          "--strip",
+        ],
+        tooling,
+      );
+      run(
+        process.execPath,
+        [
+          "-e",
+          "const a=require('./native dist/nested/loader.cjs');if(a.add(2,3)!==5)process.exit(1)",
+        ],
+        project,
+      );
+      assert.match(
+        fs.readFileSync(path.join(project, "native dist/types/api.d.ts"), "utf8"),
+        /^\/\/ parity header\n/,
+      );
+      run(
+        process.execPath,
+        [cli, "build", "--cwd", project, "--no-platform", "-o", "plain dist"],
+        tooling,
+      );
+      run(
+        process.execPath,
+        ["-e", "const a=require('./plain dist/test_addon.node');if(a.add(2,3)!==5)process.exit(1)"],
+        project,
+      );
+      run(
+        process.execPath,
+        [cli, "build", "--platform", "--cwd", project, "--target", "wasm32-wasip1-threads"],
         tooling,
       );
       const wasiLoad = `const a=require('./test_addon.wasi.cjs');if(a.add(2,3)!==5)process.exit(1);`;
       run(process.execPath, ["-e", wasiLoad], project);
       // Real ESM imports use the native platform loader and expose provenance.
-      run(process.execPath, [cli, "build", "--cwd", project, "--esm"], tooling);
+      run(
+        process.execPath,
+        [cli, "build", "--platform", "--cwd", project, "--esm", "--js-binding", "index.mjs"],
+        tooling,
+      );
       run(
         process.execPath,
         [
@@ -144,7 +244,7 @@ test(
         ],
         project,
       );
-      run(process.execPath, [cli, "build", "--cwd", project, "--commonjs"], tooling);
+      run(process.execPath, [cli, "build", "--platform", "--cwd", project, "--commonjs"], tooling);
       run(
         process.execPath,
         [
@@ -183,7 +283,7 @@ test(
         fs.writeFileSync(path.join(project, "package.json"), JSON.stringify(pkg, null, 2));
         run(
           process.execPath,
-          [cli, "build", "--cwd", project, "--target", "x86_64-macos"],
+          [cli, "build", "--platform", "--cwd", project, "--target", "x86_64-macos"],
           tooling,
         );
         run(process.execPath, [cli, "universalize", "--cwd", project], tooling);
@@ -203,7 +303,7 @@ test(
       if (fs.existsSync(fat)) fs.unlinkSync(fat);
       run(
         process.execPath,
-        [cli, "build", "--cwd", project, "--target", "x86_64-linux-gnu"],
+        [cli, "build", "--platform", "--cwd", project, "--target", "x86_64-linux-gnu"],
         tooling,
       );
       const elf = path.join(project, "renamed_addon.linux-x64-gnu.node");
@@ -212,7 +312,7 @@ test(
       const sourceBefore = fs.readFileSync(sourcePathZig, "utf8");
       const watcher = spawn(
         process.execPath,
-        [cli, "build", "--cwd", project, "--watch", "--commonjs"],
+        [cli, "build", "--platform", "--cwd", project, "--watch", "--commonjs"],
         { cwd: tooling, stdio: ["ignore", "pipe", "pipe"] },
       );
       let logs = "";

@@ -31,6 +31,8 @@ b.getInstallStep().dependOn(&dts.step);
 
 Use the same `.node_api` options for runtime builds and declaration generation. This matters when the exported API uses version-gated wrappers such as `ThreadSafeFunction`, `Async`, `BigInt`, or BigInt typed arrays.
 
+For Node.js/WASI addons, also set `.node_addon = true` on `generateTypeDefinition`. This selects the Node bindings during reflection, including when the selected Node-API version is below 8. The default remains `false` for OHOS builds. CLI-generated projects set this automatically. `zig-napi build --no-dts-cache` forces the generator to run again; direct Zig builds can use `-Ddts-cache=false`.
+
 `TypeDefinitionBuildOptions` accepts:
 
 | Field              | Use                                                                              |
@@ -39,6 +41,7 @@ Use the same `.node_api` options for runtime builds and declaration generation. 
 | `output`           | Destination `.d.ts` path.                                                        |
 | `napi_module`      | `zig-napi` module used to create the configured reflection imports.              |
 | `node_api`         | Node-API version and experimental mode used by version-gated wrappers.           |
+| `node_addon`       | Select Node.js/WASI bindings during reflection; defaults to `false` for OHOS.     |
 | `header`           | Optional text inserted after the generated banner comments.                      |
 | `options`          | Optional extra `std.Build.Step.Options` module for addon-specific build options. |
 

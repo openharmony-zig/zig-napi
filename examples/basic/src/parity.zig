@@ -326,7 +326,7 @@ pub fn paritySharedThread(env: napi.Env, object: napi.Object) !napi.Object {
 }
 
 pub fn parityFeatureVersion() u32 {
-    return @intCast(@intFromEnum(napi.selectedNapiVersion()));
+    return @intCast(@backingInt(napi.selectedNapiVersion()));
 }
 pub fn parityExternalLatin1(env: napi.Env, value: napi.String) !napi.String.ExternalResult {
     const bytes = try value.copyLatin1();

@@ -30,18 +30,18 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
         pub fn New(env: Env, comptime function_name: []const u8, value: anytype) !Self {
             const value_type = @TypeOf(value);
             const infos = @typeInfo(value_type);
-            const params = infos.@"fn".params;
+            const params = infos.@"fn".param_types;
 
             if (infos != .@"fn") {
                 @compileError("Function.New only support function type, Unsupported type: " ++ @typeName(value_type));
             }
 
             const FnImpl = struct {
-                const has_env = params.len > 0 and params[0].type.? == Env;
+                const has_env = params.len > 0 and params[0].? == Env;
                 const env_index = if (has_env) 1 else 0;
                 const this_count = blk: {
                     var count: usize = 0;
-                    for (params) |param| if (helper.isThis(param.type.?)) {
+                    for (params) |param| if (helper.isThis(param.?)) {
                         count += 1;
                     };
                     break :blk count;
@@ -53,7 +53,7 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                             continue;
                         }
                         if (i < initialized) {
-                            Napi.deinit_napi_value_with_allocator(param.type.?, args[i], allocator);
+                            Napi.deinit_napi_value_with_allocator(param.?, args[i], allocator);
                         }
                     }
                 }
@@ -220,16 +220,16 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                         NapiError.clearLastError();
                         const converted = Napi.from_napi_value_auto_with_allocator(
                             inner_env,
-                            if (comptime helper.isThis(param_index.type.?)) receiver else args_raw[positional],
-                            param_index.type.?,
+                            if (comptime helper.isThis(param_index.?)) receiver else args_raw[positional],
+                            param_index.?,
                             frame_allocator,
                         ) catch |err| {
                             return throwAnyAndUndefined(inner_env, err);
                         };
                         napi_params[i] = converted;
                         initialized_params = i + 1;
-                        if (comptime !helper.isThis(param_index.type.?)) positional += 1;
-                        if (comptime helper.isAbortSignal(param_index.type.?)) {
+                        if (comptime !helper.isThis(param_index.?)) positional += 1;
+                        if (comptime helper.isAbortSignal(param_index.?)) {
                             abort_signal = napi_params[i];
                         }
                     }
@@ -282,7 +282,7 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                     const frame = NapiError.ErrorFrame.save();
                     NapiError.clearLastError();
                     defer frame.restore();
-                    const count = if (ArgsInfos == .@"struct" and ArgsInfos.@"struct".is_tuple) ArgsInfos.@"struct".fields.len else if (ArgsInfos == .@"struct" and ArgsInfos.@"struct".fields.len == 0) 0 else 1;
+                    const count = if (ArgsInfos == .@"struct" and ArgsInfos.@"struct".is_tuple) ArgsInfos.@"struct".field_names.len else if (ArgsInfos == .@"struct" and ArgsInfos.@"struct".field_names.len == 0) 0 else 1;
                     var argv: [count]napi.napi_value = undefined;
                     var argc: usize = count;
                     var data: ?*anyopaque = null;
@@ -313,8 +313,8 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                     if (comptime count == 0) {
                         args = .{};
                     } else if (comptime ArgsInfos == .@"struct" and ArgsInfos.@"struct".is_tuple) {
-                        inline for (ArgsInfos.@"struct".fields, 0..) |field, i| {
-                            args[i] = Napi.from_napi_value_auto_with_allocator(inner_env, argv[i], field.type, allocator) catch {
+                        inline for (ArgsInfos.@"struct".field_types, 0..) |field_type, i| {
+                            args[i] = Napi.from_napi_value_auto_with_allocator(inner_env, argv[i], field_type, allocator) catch {
                                 NapiError.throwCurrent(Env.from_raw(inner_env));
                                 return null;
                             };
@@ -399,17 +399,17 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
 
         fn invoke(self: Self, receiver: anytype, args: Args, comptime construct: bool) !napi.napi_value {
             const isTuple = ArgsInfos == .@"struct" and ArgsInfos.@"struct".is_tuple;
-            const isEmptyStruct = ArgsInfos == .@"struct" and ArgsInfos.@"struct".fields.len == 0;
+            const isEmptyStruct = ArgsInfos == .@"struct" and ArgsInfos.@"struct".field_names.len == 0;
 
-            const args_len = if (isEmptyStruct) 0 else if (isTuple) ArgsInfos.@"struct".fields.len else 1;
+            const args_len = if (isEmptyStruct) 0 else if (isTuple) ArgsInfos.@"struct".field_names.len else 1;
 
             var args_raw: [args_len]napi.napi_value = undefined;
 
             if (isEmptyStruct) {
                 // No arguments.
             } else if (isTuple) {
-                inline for (ArgsInfos.@"struct".fields, 0..) |arg, i| {
-                    args_raw[i] = try Napi.to_napi_value_auto(self.env, @field(args, arg.name), null);
+                inline for (ArgsInfos.@"struct".field_names, 0..) |arg_name, i| {
+                    args_raw[i] = try Napi.to_napi_value_auto(self.env, @field(args, arg_name), null);
                 }
             } else {
                 args_raw[0] = try Napi.to_napi_value_auto(self.env, args, null);

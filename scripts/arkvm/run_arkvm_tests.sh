@@ -127,12 +127,12 @@ rm -rf "${WORK_ROOT}"
 mkdir -p "${WORK_ROOT}"
 
 if [[ -n "${ARKVM_TEST_SUITE:-}" ]]; then
-  run_case "${ARKVM_EXAMPLE_DIR:-examples/basic}" "${ARKVM_TEST_SUITE}" "${ARKVM_RESULT_PREFIX:-__ZIG_NAPI_TEST_RESULT__}" "${ARKVM_ENTRY_POINT:-${ARKVM_TEST_SUITE%.*}}" "${ARKVM_BUILD_ARGS:--Darkvm-test=true -Doptimize=ReleaseSafe}" "${ARKVM_ADDON_SUBDIR:-arkvm-host}"
+  run_case "${ARKVM_EXAMPLE_DIR:-examples/basic}" "${ARKVM_TEST_SUITE}" "${ARKVM_RESULT_PREFIX:-__ZIG_NAPI_TEST_RESULT__}" "${ARKVM_ENTRY_POINT:-${ARKVM_TEST_SUITE%.*}}" "${ARKVM_BUILD_ARGS:--Darkvm-test=true -Doptimize=safe}" "${ARKVM_ADDON_SUBDIR:-arkvm-host}"
 else
-  run_case "examples/basic" "test/basic.ts" "__ZIG_NAPI_TEST_RESULT__" "test/basic" "-Darkvm-test=true -Doptimize=ReleaseSafe" "arkvm-host"
-  run_case "examples/init" "test/init.ts" "__ZIG_NAPI_INIT_TEST_RESULT__" "test/init" "-Darkvm-test=true -Doptimize=ReleaseSafe" "arkvm-host"
-  run_case "examples/allocator-custom" "test/allocator-custom.ts" "__ZIG_NAPI_ALLOCATOR_CUSTOM_RESULT__" "test/allocator-custom" "-Darkvm-test=true -Doptimize=ReleaseSafe" "arkvm-host"
-  run_case "examples/allocator-builtin" "test/allocator-builtin.ts" "__ZIG_NAPI_ALLOCATOR_BUILTIN_RESULT__" "test/allocator-builtin" "-Darkvm-test=true -Doptimize=ReleaseSafe" "arkvm-host"
+  run_case "examples/basic" "test/basic.ts" "__ZIG_NAPI_TEST_RESULT__" "test/basic" "-Darkvm-test=true -Doptimize=safe" "arkvm-host"
+  run_case "examples/init" "test/init.ts" "__ZIG_NAPI_INIT_TEST_RESULT__" "test/init" "-Darkvm-test=true -Doptimize=safe" "arkvm-host"
+  run_case "examples/allocator-custom" "test/allocator-custom.ts" "__ZIG_NAPI_ALLOCATOR_CUSTOM_RESULT__" "test/allocator-custom" "-Darkvm-test=true -Doptimize=safe" "arkvm-host"
+  run_case "examples/allocator-builtin" "test/allocator-builtin.ts" "__ZIG_NAPI_ALLOCATOR_BUILTIN_RESULT__" "test/allocator-builtin" "-Darkvm-test=true -Doptimize=safe" "arkvm-host"
 fi
 
 [[ "${KEEP_WORKDIR}" == "1" ]] || rm -rf "${WORK_ROOT}"

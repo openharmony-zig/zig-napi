@@ -71,7 +71,7 @@ zig-napi build --target wasm32-wasip1-threads
 zig-napi build --target wasm32-wasip1
 ```
 
-Zig 0.16 only knows the `wasm32-wasi` triple (`-Dtarget=wasm32-wasip1` fails with
+Zig 0.17 only knows the `wasm32-wasi` triple (`-Dtarget=wasm32-wasip1` fails with
 `unknown OS: 'wasip1'`), so the CLI passes `-Dtarget=wasm32-wasi` for both and
 adds `-Dcpu=baseline+atomics+bulk_memory+mutable_globals` for the threaded one.
 The `atomics` CPU feature is the only flavor signal, and it is what
@@ -144,7 +144,7 @@ Both flavors link `libemnapi-basic-napi-rs.a`, which leaves
 
 This is **not** the same implementation napi-rs uses for its Rust WASI addons,
 which link emnapi's full C composition and run async work on the uv/libuv thread
-pool over real wasi pthreads. Zig 0.16 cannot build a multithreaded wasm module
+pool over real wasi pthreads. Zig 0.17 cannot build a multithreaded wasm module
 (wasi pthreads are stubs there), so that archive is not linked here; do not
 expect libuv- or Tokio-shaped async APIs from a zig-napi WASI addon.
 

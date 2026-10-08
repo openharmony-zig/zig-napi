@@ -104,8 +104,8 @@ const Header = packed struct(u64) {
     }
 
     const safety = switch (builtin.mode) {
-        .Debug, .ReleaseSafe => true,
-        .ReleaseFast, .ReleaseSmall => false,
+        .debug, .safe => true,
+        .fast, .small => false,
     };
     const max_addr_bits = switch (safety) {
         true => 48, // Ensures space for Canary bits.
@@ -300,13 +300,13 @@ fn usableSizeRaw(opt_old_base: ?[*]align(alignment_bytes) u8) usize {
 /// `null`.
 fn nomem() ?[*]align(alignment_bytes) u8 {
     @branchHint(.cold);
-    std.c._errno().* = @intFromEnum(E.NOMEM);
+    std.c._errno().* = @backingInt(E.NOMEM);
     return null;
 }
 
 fn invalid() ?[*]align(alignment_bytes) u8 {
     @branchHint(.cold);
-    std.c._errno().* = @intFromEnum(E.INVAL);
+    std.c._errno().* = @backingInt(E.INVAL);
     return null;
 }
 
@@ -390,14 +390,14 @@ export fn posix_memalign(result: *?[*]align(alignment_bytes) u8, alloc_alignment
     // POSIX: the alignment must be a power of two multiple of `sizeof(void*)`,
     // and on failure the caller's pointer must be left alone; the error is the
     // return value, so errno is not touched.
-    if (alloc_alignment < @sizeOf(*anyopaque)) return @intFromEnum(E.INVAL);
-    const requested = representableAlignment(alloc_alignment) orelse return @intFromEnum(E.INVAL);
+    if (alloc_alignment < @sizeOf(*anyopaque)) return @backingInt(E.INVAL);
+    const requested = representableAlignment(alloc_alignment) orelse return @backingInt(E.INVAL);
     const allocated = blk: {
         lockAcquire();
         defer lockRelease();
         break :blk allocAlignedRaw(requested, n);
     };
-    if (allocated == null) return @intFromEnum(E.NOMEM);
+    if (allocated == null) return @backingInt(E.NOMEM);
     result.* = allocated;
     return 0;
 }

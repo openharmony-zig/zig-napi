@@ -10,7 +10,7 @@ Run it with host ArkVM tools:
 ARK_HOST_TOOLS_DIR=/path/to/arkvm/host/tools scripts/arkvm/run_arkvm_benchmarks.sh
 ```
 
-The zig-napi side is built with Zig and defaults to `-Doptimize=ReleaseFast`.
+The zig-napi side is built with Zig and defaults to `-Doptimize=fast`.
 The native N-API side is built from `benchmark/native-c/napi_benchmark.c` with
 an external C compiler, defaulting to `CC` or `cc`. The standalone native C
 build script rejects `zig` as the compiler.
@@ -32,7 +32,7 @@ Environment:
 - Date: 2026-05-18
 - Runner: local Docker `ubuntu:latest` on `linux/amd64`
 - Runtime: ArkVM host tools from local `arkvm_static_linux_x64.tar.gz`
-- Zig addon: `zig build -Darkvm-test=true -Doptimize=ReleaseFast`
+- Zig addon: `zig build -Darkvm-test=true -Doptimize=fast`
 - Native addon: C source compiled in Docker with `gcc`
 
 | module          | api content            | iterations | native C N-API avg (us) | zig-napi avg (us) | diff (us) |  ratio |

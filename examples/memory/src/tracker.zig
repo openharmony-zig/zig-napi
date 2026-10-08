@@ -14,7 +14,7 @@ var previous_allocator: ?std.mem.Allocator = null;
 /// Query under the same lock as alloc/free: finalizers and task owners may
 /// release memory from a different thread while JavaScript waits for cleanup.
 pub fn leak_tracker_live_bytes() usize {
-    std.Io.Threaded.mutexLock(&debug_allocator.mutex);
+    std.Io.Threaded.mutexLockUncancelable(&debug_allocator.mutex);
     defer std.Io.Threaded.mutexUnlock(&debug_allocator.mutex);
     return debug_allocator.total_requested_bytes;
 }
@@ -37,7 +37,7 @@ pub fn leak_tracker_finish() bool {
 
     // Detection must not destroy the allocator on failure. ArkVM may release
     // Promise capabilities only during a later GC or environment shutdown.
-    std.Io.Threaded.mutexLock(&debug_allocator.mutex);
+    std.Io.Threaded.mutexLockUncancelable(&debug_allocator.mutex);
     const leaks = debug_allocator.detectLeaks();
     std.Io.Threaded.mutexUnlock(&debug_allocator.mutex);
     if (leaks != 0) return false;

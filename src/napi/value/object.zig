@@ -50,18 +50,18 @@ pub const Object = struct {
                 var initialized: usize = 0;
                 errdefer Napi.cleanupStructPrefix(T, &result, initialized, allocator);
 
-                inline for (infos.@"struct".fields, 0..) |field, i| {
-                    if (comptime Metadata.get(T, field.name).skip) {
-                        if (comptime field.defaultValue()) |default| @field(result, field.name) = default else @compileError("Skipped input fields require a default value: " ++ field.name);
+                inline for (infos.@"struct".field_types, infos.@"struct".field_attrs, infos.@"struct".field_names, 0..) |field_type, field_attrs, field_name, i| {
+                    if (comptime Metadata.get(T, field_name).skip) {
+                        if (comptime field_attrs.defaultValue(field_type)) |default| @field(result, field_name) = default else @compileError("Skipped input fields require a default value: " ++ field_name);
                         initialized = i + 1;
                         continue;
                     }
                     var element: napi.napi_value = undefined;
-                    const status = napi.napi_get_named_property(env, raw, Metadata.name(T, field.name).ptr, &element);
+                    const status = napi.napi_get_named_property(env, raw, Metadata.name(T, field_name).ptr, &element);
                     if (status != napi.napi_ok) {
                         return NapiError.failStatus(status);
                     }
-                    @field(result, field.name) = try Napi.from_napi_value_auto_with_allocator(env, element, field.type, allocator);
+                    @field(result, field_name) = try Napi.from_napi_value_auto_with_allocator(env, element, field_type, allocator);
                     initialized = i + 1;
                 }
                 return result;
@@ -95,16 +95,16 @@ pub const Object = struct {
 
         var self = try Object.Create(env);
 
-        const obj_fields = obj_infos.@"struct".fields;
+        const obj_fields = obj_infos.@"struct";
 
-        inline for (obj_fields) |field| {
-            const config = comptime Metadata.get(obj_type, field.name);
+        inline for (obj_fields.field_names, obj_fields.field_types) |field_name, field_type| {
+            const config = comptime Metadata.get(obj_type, field_name);
             if (comptime config.skip) continue;
-            const n_value = if (comptime config.nullable and @typeInfo(field.type) == .optional)
-                if (@field(obj, field.name) == null) (try Null.create(env)).raw else try Napi.to_napi_value_auto(env.raw, @field(obj, field.name), field.name)
+            const n_value = if (comptime config.nullable and @typeInfo(field_type) == .optional)
+                if (@field(obj, field_name) == null) (try Null.create(env)).raw else try Napi.to_napi_value_auto(env.raw, @field(obj, field_name), field_name)
             else
-                try Napi.to_napi_value_auto(env.raw, @field(obj, field.name), field.name);
-            try self.DefineProperty(Metadata.name(obj_type, field.name), n_value, config.attributes orelse if (config.readonly) napi.napi_enumerable | napi.napi_configurable else napi.napi_default_jsproperty);
+                try Napi.to_napi_value_auto(env.raw, @field(obj, field_name), field_name);
+            try self.DefineProperty(Metadata.name(obj_type, field_name), n_value, config.attributes orelse if (config.readonly) napi.napi_enumerable | napi.napi_configurable else napi.napi_default_jsproperty);
         }
 
         return self;

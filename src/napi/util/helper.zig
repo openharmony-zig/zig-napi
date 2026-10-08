@@ -74,8 +74,8 @@ pub fn isNapiFunction(comptime T: type) bool {
     if (info != .@"struct") {
         return false;
     }
-    inline for (info.@"struct".fields) |field| {
-        if (std.mem.eql(u8, field.name, "inner_fn")) {
+    inline for (info.@"struct".field_names) |field_name| {
+        if (std.mem.eql(u8, field_name, "inner_fn")) {
             return true;
         }
     }
@@ -87,8 +87,8 @@ pub fn isThreadSafeFunction(comptime T: type) bool {
     if (info != .@"struct") {
         return false;
     }
-    inline for (info.@"struct".fields) |field| {
-        if (std.mem.eql(u8, field.name, "tsfn_raw")) {
+    inline for (info.@"struct".field_names) |field_name| {
+        if (std.mem.eql(u8, field_name, "tsfn_raw")) {
             return true;
         }
     }
@@ -209,8 +209,8 @@ pub fn isArrayList(comptime T: type) bool {
     if (info != .@"struct") {
         return false;
     }
-    inline for (info.@"struct".fields) |field| {
-        if (std.mem.eql(u8, field.name, "items")) {
+    inline for (info.@"struct".field_names) |field_name| {
+        if (std.mem.eql(u8, field_name, "items")) {
             return true;
         }
     }
@@ -223,9 +223,9 @@ pub fn getArrayListElementType(comptime T: type) type {
         @compileError("Expected struct type for ArrayList");
     }
 
-    for (info.@"struct".fields) |field| {
-        if (std.mem.eql(u8, field.name, "items")) {
-            const items_type_info = @typeInfo(field.type);
+    for (info.@"struct".field_names, info.@"struct".field_types) |field_name, field_type| {
+        if (std.mem.eql(u8, field_name, "items")) {
+            const items_type_info = @typeInfo(field_type);
             if (items_type_info == .pointer and items_type_info.pointer.size == .slice) {
                 return items_type_info.pointer.child;
             }
@@ -442,23 +442,23 @@ pub fn collectFunctionArgs(comptime functions: anytype) type {
         @compileError("Expected function type for collectFunctionArgs");
     }
 
-    if (infos.@"fn".params.len == 0) {
+    if (infos.@"fn".param_types.len == 0) {
         return void;
     }
 
-    if (infos.@"fn".params.len == 1) {
-        return infos.@"fn".params[0].type.?;
+    if (infos.@"fn".param_types.len == 1) {
+        return infos.@"fn".param_types[0].?;
     }
 
-    const args_len = infos.@"fn".params.len;
+    const args_len = infos.@"fn".param_types.len;
 
     var field_types: [args_len]type = undefined;
 
     inline for (0..args_len) |i| {
-        field_types[i] = infos.@"fn".params[i].type.?;
+        field_types[i] = infos.@"fn".param_types[i].?;
     }
 
-    return std.meta.Tuple(&field_types);
+    return @Tuple(&field_types);
 }
 
 pub fn shortTypeName(comptime T: type) []const u8 {

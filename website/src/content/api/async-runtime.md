@@ -18,7 +18,7 @@ Runtime values:
 | ------------------------------------ | -------------------------------------------------------------------------------- |
 | `.single`                            | Run on the single-threaded IO runtime.                                           |
 | `.thread`                            | Run on the shared threaded IO runtime.                                           |
-| `.event`                             | Use evented IO when available, otherwise fall back through the runtime resolver. |
+| `.event`                             | Use the shared threaded runtime; evented IO integration is not implemented. |
 | `.serial` / `.threaded` / `.evented` | Backward-compatible spellings.                                                   |
 
 `resolveRequestedRuntime(runtime)` normalizes the backward-compatible spellings.
@@ -261,7 +261,7 @@ depends on the target the addon was built for:
 | --------- | --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | `.single` | body runs on the calling thread through the single-threaded IO runtime; the exported call returns after it finished | same                                                                                                | same                                                                                                        |
 | `.thread` | body runs on the addon's IO runtime threads; the completion returns through a thread-safe function    | body runs on the emnapi JavaScript worker pool, in parallel, over one shared linear memory           | the same descriptor is executed by the `@emnapi/core` plugin on the JavaScript thread: no worker, no parallelism |
-| `.event`  | evented IO when the target provides it, otherwise the threaded runtime                                | same resolution                                                                                      | same resolution                                                                                             |
+| `.event`  | the shared threaded runtime (evented IO integration is not implemented)                                | same resolution                                                                                      | same resolution                                                                                             |
 
 The single-threaded WASI flavor is the one that changes observable behavior, and
 it changes it in one direction: the producer is the host's own thread.

@@ -14,7 +14,7 @@ pub fn hello() []const u8 {
 }
 
 pub fn requestedNapiVersion() i32 {
-    return @intFromEnum(napi.selectedNapiVersion());
+    return @backingInt(napi.selectedNapiVersion());
 }
 
 fn fibonacci(n: u32) u32 {
