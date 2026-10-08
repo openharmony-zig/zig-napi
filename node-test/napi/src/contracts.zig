@@ -2,7 +2,46 @@ const std = @import("std");
 const napi = @import("napi");
 var counter = @import("counting").CountingAllocator.init(napi.safePageAllocator());
 var alternate_counter = @import("counting").CountingAllocator.init(napi.safePageAllocator());
-var failing_allocator = std.testing.FailingAllocator.init(counter.allocator(), .{});
+var failing_allocator = FailureInjector{ .backing = counter.allocator() };
+
+// These fixtures only need deterministic allocation failures and byte counts.
+// std.testing.FailingAllocator captures a stack trace on every reset's first
+// failure, making repeated OOM tests depend on the host's unwinding performance.
+const FailureInjector = struct {
+    backing: std.mem.Allocator,
+    remaining: usize = std.math.maxInt(usize),
+
+    fn allocator(self: *@This()) std.mem.Allocator {
+        return .{
+            .ptr = self,
+            .vtable = &.{ .alloc = alloc, .resize = resize, .remap = remap, .free = free },
+        };
+    }
+
+    fn alloc(ctx: *anyopaque, len: usize, alignment: std.mem.Alignment, ret_addr: usize) ?[*]u8 {
+        const self: *@This() = @ptrCast(@alignCast(ctx));
+        if (self.remaining == 0) return null;
+        const ptr = self.backing.rawAlloc(len, alignment, ret_addr) orelse return null;
+        self.remaining -= 1;
+        return ptr;
+    }
+
+    fn resize(ctx: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, ret_addr: usize) bool {
+        const self: *@This() = @ptrCast(@alignCast(ctx));
+        return self.backing.rawResize(memory, alignment, new_len, ret_addr);
+    }
+
+    fn remap(ctx: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
+        const self: *@This() = @ptrCast(@alignCast(ctx));
+        return self.backing.rawRemap(memory, alignment, new_len, ret_addr);
+    }
+
+    fn free(ctx: *anyopaque, memory: []u8, alignment: std.mem.Alignment, ret_addr: usize) void {
+        const self: *@This() = @ptrCast(@alignCast(ctx));
+        self.backing.rawFree(memory, alignment, ret_addr);
+    }
+};
+
 pub const napi_allocator = counter.allocator();
 pub const readFile = @import("example_async").read_file_async;
 pub const readSummary = @import("example_async").read_file_summary_async;
@@ -20,7 +59,7 @@ pub fn alternateBytes() isize {
     return alternate_counter.stats().active_bytes;
 }
 pub fn setAllocationFailure(index: usize) void {
-    failing_allocator = std.testing.FailingAllocator.init(counter.allocator(), .{ .fail_index = index });
+    failing_allocator = .{ .backing = counter.allocator(), .remaining = index };
     napi.setOperationAllocator(failing_allocator.allocator());
 }
 /// An opaque foreign-addon payload need not point to a readable allocation.
