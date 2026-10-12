@@ -661,6 +661,14 @@ pub fn tsfnBuilderBlockingQueueProbe(env: napi.Env, callback: napi.NapiValue) !v
     try tsfn.Ok(.{2}, .Blocking);
 }
 
+pub fn closeIterator(iterator: napi.Iterator(i32)) !void {
+    try iterator.close();
+}
+
+pub fn closeAsyncIterator(iterator: napi.AsyncIterator(i32)) !napi.PromiseValue {
+    return iterator.close();
+}
+
 comptime {
     napi.NODE_API_MODULE("conversion", @This());
 }

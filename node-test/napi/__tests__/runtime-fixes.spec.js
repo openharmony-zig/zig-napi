@@ -97,6 +97,33 @@ nativeOnlyTest("bare export conversion errors fail addon loading", (t) => {
   t.regex(error.message, /OutOfMemory/);
 });
 
+test("Iterator.close calls own and inherited return methods and allows their absence", (t) => {
+  const calls = [];
+  const prototype = { return() { calls.push(this.marker); return { done: true }; } };
+  for (const inherited of [false, true]) {
+    const iterator = inherited ? Object.create(prototype) : { return: prototype.return };
+    iterator.next = () => ({ done: true });
+    iterator.marker = inherited ? "inherited" : "own";
+    t.is(bindings.closeIterator(iterator), undefined);
+  }
+  t.deepEqual(calls, ["own", "inherited"]);
+  t.is(bindings.closeIterator({ next: () => ({ done: true }) }), undefined);
+});
+
+test("AsyncIterator.close calls own and inherited return methods and allows their absence", async (t) => {
+  const calls = [];
+  const prototype = { return() { calls.push(this.marker); return Promise.resolve({ done: true, value: 7 }); } };
+  for (const inherited of [false, true]) {
+    const iterator = inherited ? Object.create(prototype) : { return: prototype.return };
+    iterator.next = async () => ({ done: true });
+    iterator.marker = inherited ? "inherited" : "own";
+    t.deepEqual(await bindings.closeAsyncIterator(iterator), { done: true, value: 7 });
+  }
+  t.deepEqual(calls, ["own", "inherited"]);
+  const result = await bindings.closeAsyncIterator({ next: async () => ({ done: true }) });
+  t.true(result.done);
+});
+
 nativeOnlyTest("a full bounded Blocking TSFN call on the JS thread reports WouldDeadlock", (t) => {
   const result = isolated(`
     const errors = [];
