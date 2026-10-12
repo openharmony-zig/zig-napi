@@ -150,6 +150,14 @@ test("ordinary arrays and typed arrays reject fractional integer inputs alike", 
   t.is(bindings.sumIntegerSlice(new Float64Array([1, 2])), 3);
 });
 
+test("pagination objects retain items and total in both conversion directions", (t) => {
+  t.deepEqual(bindings.page(), { items: [1, 2, 3], total: 10 });
+  t.deepEqual(bindings.roundtripPage({ items: [4, 5], total: 20 }), { items: [4, 5], total: 20 });
+  t.deepEqual(bindings.roundtripPage({ items: [], total: 0 }), { items: [], total: 0 });
+  t.deepEqual(bindings.roundtripArrayList([1, 2, 3]), [1, 2, 3]);
+  t.deepEqual(bindings.roundtripArrayList(new Uint32Array([4, 5])), [4, 5]);
+});
+
 nativeOnlyTest("a full bounded Blocking TSFN call on the JS thread reports WouldDeadlock", (t) => {
   const result = isolated(`
     const errors = [];

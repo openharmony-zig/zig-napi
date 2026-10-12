@@ -209,15 +209,18 @@ pub fn isArrayList(comptime T: type) bool {
     if (info != .@"struct") {
         return false;
     }
-    inline for (info.@"struct".field_names) |field_name| {
-        if (std.mem.eql(u8, field_name, "items")) {
-            return true;
-        }
+    inline for (info.@"struct".field_names, info.@"struct".field_types) |field_name, field_type| {
+        if (comptime !std.mem.eql(u8, field_name, "items")) continue;
+        const items_info = @typeInfo(field_type);
+        if (items_info != .pointer or items_info.pointer.size != .slice) return false;
+        const child = items_info.pointer.child;
+        return T == std.ArrayList(child) or T == std.array_list.Aligned(child, std.mem.Alignment.fromByteUnitsOptional(items_info.pointer.attrs.@"align"));
     }
     return false;
 }
 
 pub fn getArrayListElementType(comptime T: type) type {
+    if (!isArrayList(T)) @compileError("Expected ArrayList type: " ++ @typeName(T));
     const info = @typeInfo(T);
     if (info != .@"struct") {
         @compileError("Expected struct type for ArrayList");
@@ -233,6 +236,24 @@ pub fn getArrayListElementType(comptime T: type) type {
     }
 
     @compileError("Could not extract element type from ArrayList: " ++ @typeName(T));
+}
+
+test "ArrayList detection accepts only standard unmanaged lists" {
+    const Page = struct { items: []const u32, total: u32 };
+    const Lookalike = struct {
+        items: []u32,
+        capacity: usize,
+        pub const empty: @This() = .{ .items = &.{}, .capacity = 0 };
+    };
+    const Aligned = std.array_list.Aligned(u32, .@"16");
+    try std.testing.expect(!isArrayList(Page));
+    try std.testing.expect(!isArrayList(Lookalike));
+    try std.testing.expect(!isArrayList(struct { items: u32 }));
+    try std.testing.expect(!isArrayList(std.array_list.Managed(u32)));
+    try std.testing.expect(isArrayList(std.ArrayList(u32)));
+    try std.testing.expect(isArrayList(Aligned));
+    try std.testing.expect(getArrayListElementType(std.ArrayList(u32)) == u32);
+    try std.testing.expect(getArrayListElementType(Aligned) == u32);
 }
 
 // ---------------------------------------------------------------------------

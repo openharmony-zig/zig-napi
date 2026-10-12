@@ -692,6 +692,20 @@ pub fn sumIntegerSlice(values: []const i32) i32 {
     return total;
 }
 
+pub const Page = struct { items: []const u32, total: u32 };
+
+pub fn page() Page {
+    return .{ .items = &.{ 1, 2, 3 }, .total = 10 };
+}
+
+pub fn roundtripPage(value: Page) Page {
+    return value;
+}
+
+pub fn roundtripArrayList(value: std.ArrayList(u32)) std.ArrayList(u32) {
+    return value;
+}
+
 comptime {
     napi.NODE_API_MODULE("conversion", @This());
 }
