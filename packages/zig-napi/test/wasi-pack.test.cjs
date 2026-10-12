@@ -102,7 +102,7 @@ function extractPackedCli() {
     "the pack must bundle the Zig sources",
   );
   // An installed package resolves its own dependencies from its own
-  // `node_modules`, so link the CLI package's install (which has the 3.9.1
+  // `node_modules`, so link the CLI package's install (which has the 3.10.7
   // @napi-rs/cli this package depends on) rather than the workspace root.
   const cliDependencies = path.join(packageDir, "node_modules");
   assert.ok(

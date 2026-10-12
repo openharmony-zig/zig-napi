@@ -1543,6 +1543,11 @@ test("the threaded browser loader instantiates asynchronously with a reuse pool"
   const result = runBrowserProbe(
     project,
     `
+const workerPoolSize = 8;
+Object.defineProperty(globalThis, "navigator", {
+  value: { hardwareConcurrency: workerPoolSize },
+  configurable: true,
+});
 const module = await import("./probe_addon.wasi-browser.js");
 const stub = globalThis.__wasiStub;
 const options = stub.instantiations[0];
@@ -1555,6 +1560,7 @@ process.stdout.write(JSON.stringify({
   defaultAdd: module.default.add(2, 3),
   shared: stub.overwrittenImports.env.memory.buffer instanceof SharedArrayBuffer,
   asyncWorkPoolSize: options.asyncWorkPoolSize,
+  workerPoolSize,
   reuseWorker: options.reuseWorker,
   plugins: options.plugins.map((plugin) => plugin.name),
   asyncInstantiation: stub.usedAsyncInstantiation === true,
@@ -1576,7 +1582,7 @@ process.stdout.write(JSON.stringify({
   );
   assert.equal(
     parsed.reuseWorker.size,
-    parsed.asyncWorkPoolSize + (parsed.reuseWorker.size - parsed.asyncWorkPoolSize),
+    parsed.asyncWorkPoolSize + parsed.workerPoolSize,
   );
   assert.ok(parsed.reuseWorker.size >= 6, `pool size ${parsed.reuseWorker.size}`);
   assert.deepEqual(parsed.plugins, ["emnapi-async-work", "emnapi-tsfn"]);
