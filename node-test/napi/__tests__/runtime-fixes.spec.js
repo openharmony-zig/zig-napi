@@ -81,6 +81,22 @@ nativeOnlyTest("repeated static constant conversion failures release their class
   t.deepEqual(output.after, output.baseline);
 });
 
+nativeOnlyTest("module initialization errors fail addon loading", (t) => {
+  const error = t.throws(() => loadAddon("init_failure"));
+  t.regex(error.message, /InitFailed/);
+});
+
+nativeOnlyTest("module initialization preserves an existing JavaScript exception", (t) => {
+  const error = t.throws(() => loadAddon("init_pending_exception"));
+  t.regex(error.message, /original init exception/);
+  t.notRegex(error.message, /InitFailed/);
+});
+
+nativeOnlyTest("bare export conversion errors fail addon loading", (t) => {
+  const error = t.throws(() => loadAddon("export_failure"));
+  t.regex(error.message, /OutOfMemory/);
+});
+
 nativeOnlyTest("a full bounded Blocking TSFN call on the JS thread reports WouldDeadlock", (t) => {
   const result = isolated(`
     const errors = [];

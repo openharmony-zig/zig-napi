@@ -138,4 +138,8 @@ pub fn build(b: *std.Build) !void {
         target,
         optimize,
     );
+
+    try addNodeAddon(b, napi, "init_failure", "napi/src/init_failure.zig", target, optimize);
+    try addNodeAddon(b, napi, "init_pending_exception", "napi/src/init_pending_exception.zig", target, optimize);
+    try addNodeAddon(b, napi, "export_failure", "napi/src/export_failure.zig", target, optimize);
 }
