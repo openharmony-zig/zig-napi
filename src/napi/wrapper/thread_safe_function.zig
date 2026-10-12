@@ -170,11 +170,53 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
         aborted: bool,
         failed: bool = false,
         queue: ?*QueueState = null,
+        completions: ?*Completion = null,
         freed: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
         comptime thread_safe_function_call_variant: bool = ThreadSafeFunctionCalleeHandled,
         comptime max_queue_size: usize = MaxQueueSize,
 
         const Self = @This();
+        const Completion = struct {
+            promise: @import("../value/promise.zig").Promise,
+            allocator: std.mem.Allocator,
+            owner: ?*Self = null,
+            previous: ?*Completion = null,
+            next: ?*Completion = null,
+
+            fn attach(state: *@This(), owner: *Self) void {
+                state.owner = owner;
+                state.next = owner.completions;
+                if (state.next) |next| next.previous = state;
+                owner.completions = state;
+            }
+            fn detach(state: *@This()) void {
+                const owner = state.owner orelse return;
+                if (state.previous) |previous| previous.next = state.next else owner.completions = state.next;
+                if (state.next) |next| next.previous = state.previous;
+                state.owner = null;
+                state.previous = null;
+                state.next = null;
+            }
+            fn complete(env: Env, result: JsCallResult(Return), context: ?*anyopaque) void {
+                if (env.raw == null) return;
+                const state: *@This() = @ptrCast(@alignCast(context.?));
+                if (state.owner == null) return;
+                switch (result) {
+                    .ok => |value| state.promise.Resolve(value) catch |err| {
+                        state.promise.Reject(NapiError.mapAnyError(err)) catch {};
+                    },
+                    .thrown => |value| state.promise.rejectRaw(value.raw) catch {},
+                    .failure => |err| state.promise.Reject(err) catch {},
+                    .closed => state.promise.Reject(NapiError.Error.withReason("ThreadSafeFunction closed")) catch {},
+                }
+                state.detach();
+            }
+            fn destroy(context: ?*anyopaque) void {
+                const state: *@This() = @ptrCast(@alignCast(context.?));
+                state.detach();
+                state.allocator.destroy(state);
+            }
+        };
 
         /// Fallback handle returned when the underlying thread-safe function
         /// could not be created. All operations report the stored error instead
@@ -234,10 +276,14 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
         }
         pub fn tryFrom_rawWithOptions(env: napi.napi_env, raw: napi.napi_value, config: Options) !*Self {
             const ThreadSafe = struct {
-                fn finalize(_: napi.napi_env, data: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
+                fn finalize(inner_env: napi.napi_env, data: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
                     const raw_data = data orelse return;
                     const self: *Self = @ptrCast(@alignCast(raw_data));
                     self.closed = true;
+                    while (self.completions) |state| {
+                        if (inner_env != null) state.promise.Reject(NapiError.Error.withReason("ThreadSafeFunction closed")) catch {};
+                        state.detach();
+                    }
                     self.deinit();
                 }
 
@@ -416,6 +462,7 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
             // The failure handle is a process-wide singleton.
             if (self.failed) return;
             if (self.freed.swap(true, .acq_rel)) return;
+            while (self.completions) |state| state.detach();
             if (self.queue) |queue| {
                 queue.closed.store(true, .release);
                 queue.wake();
@@ -638,26 +685,6 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
         /// a Promise: resolving the deferred adopts it, including its rejection.
         pub fn CallAsync(self: *const Self, args: Args, mode: ThreadSafeFunctionMode) !@import("../value/promise.zig").Promise {
             const Promise = @import("../value/promise.zig").Promise;
-            const Completion = struct {
-                promise: Promise,
-                allocator: std.mem.Allocator,
-                fn complete(env: Env, result: JsCallResult(Return), context: ?*anyopaque) void {
-                    if (env.raw == null) return;
-                    const state: *@This() = @ptrCast(@alignCast(context.?));
-                    switch (result) {
-                        .ok => |value| state.promise.Resolve(value) catch |err| {
-                            state.promise.Reject(NapiError.mapAnyError(err)) catch {};
-                        },
-                        .thrown => |value| state.promise.rejectRaw(value.raw) catch {},
-                        .failure => |err| state.promise.Reject(err) catch {},
-                        .closed => state.promise.Reject(NapiError.Error.withReason("ThreadSafeFunction closed")) catch {},
-                    }
-                }
-                fn destroy(context: ?*anyopaque) void {
-                    const state: *@This() = @ptrCast(@alignCast(context.?));
-                    state.allocator.destroy(state);
-                }
-            };
             if (self.failed or self.tsfn_raw == null) {
                 ownership.deinitValue(Args, args, self.payloadAllocator());
                 return self.notCreatedError();
@@ -672,6 +699,7 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
                 return err;
             };
             state.* = .{ .promise = promise, .allocator = self.allocator };
+            state.attach(@constCast(self));
             self.CallWithReturnValue(args, mode, state, Completion.complete, Completion.destroy) catch |err| {
                 promise.Reject(NapiError.mapAnyError(err)) catch {};
                 // Once a Promise exists, expose its rejection to the caller.

@@ -627,6 +627,27 @@ pub fn concatUtf16(env: napi.Env, input: []const u16) !napi.String {
     return try napi.String.createUtf16(env, input);
 }
 
+pub fn tsfnCallAsyncThenAbort(tsfn: *PlainTsfn) !napi.Promise {
+    const promise = try tsfn.CallAsync(.{1}, .NonBlocking);
+    try tsfn.abort();
+    return promise;
+}
+
+pub fn tsfnCallAsyncBatchThenAbort(tsfn: *PlainTsfn) ![3]napi.Promise {
+    var promises: [3]napi.Promise = undefined;
+    for (&promises, 0..) |*promise, index| promise.* = try tsfn.CallAsync(.{@intCast(index)}, .NonBlocking);
+    try tsfn.abort();
+    return promises;
+}
+
+pub fn tsfnCallAsyncQueueFailure(tsfn: *LimitedTsfn) ![2]napi.Promise {
+    defer tsfn.release(.Release) catch {};
+    return .{
+        try tsfn.CallAsync(.{1}, .NonBlocking),
+        try tsfn.CallAsync(.{2}, .NonBlocking),
+    };
+}
+
 comptime {
     napi.NODE_API_MODULE("conversion", @This());
 }
