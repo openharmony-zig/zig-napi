@@ -75,6 +75,7 @@ pub fn NativePromise(comptime T: type) type {
             fn dispose(_: napi.napi_env, _: napi.napi_value, context: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
                 const self: *@This() = @ptrCast(@alignCast(context.?));
                 if (self.outcome.load(.acquire) == 0) self.reject(Errors.Error.withCodeAndMessage("ERR_NAPI_PROMISE_CLOSED", "Native promise observer was closed"));
+                self.release();
             }
             fn finalize(_: napi.napi_env, data: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
                 const self: *@This() = @ptrCast(@alignCast(data.?));
@@ -172,7 +173,8 @@ pub fn NativePromise(comptime T: type) type {
         pub fn Close(self: Self) void {
             const state = self.state;
             if (state.native_owners.fetchSub(1, .acq_rel) == 1 and !state.released.swap(true, .acq_rel)) {
-                _ = napi.napi_call_threadsafe_function(state.dispatcher, null, napi.napi_tsfn_nonblocking);
+                state.acquire();
+                if (napi.napi_call_threadsafe_function(state.dispatcher, null, napi.napi_tsfn_nonblocking) != napi.napi_ok) state.release();
                 _ = napi.napi_release_threadsafe_function(state.dispatcher, napi.napi_tsfn_release);
             }
             state.release();
@@ -210,4 +212,33 @@ pub fn NativePromise(comptime T: type) type {
             self.Close();
         }
     };
+}
+
+test "NativePromise queued disposal survives finalization before the null-env drain" {
+    const mock = @import("../../test_dispatcher.zig");
+    const Promise = NativePromise(u32);
+    const state = try std.testing.allocator.create(Promise.State);
+    state.* = .{ .allocator = std.testing.allocator, .env = mock.env, .thread = 0, .hook = true };
+    state.acquire();
+    var dispatcher = mock.Dispatcher{ .context = state, .finalize = Promise.State.finalize, .dispose = Promise.State.dispose };
+    state.dispatcher = dispatcher.raw();
+    (Promise{ .state = state }).Close();
+    try std.testing.expectEqual(@as(usize, 2), state.owners.load(.acquire));
+    try std.testing.expectEqual(@as(usize, 1), dispatcher.calls);
+    try std.testing.expectEqual(@as(usize, 1), dispatcher.releases);
+    dispatcher.finish();
+}
+
+test "NativePromise failed disposal enqueue releases the queue reference" {
+    const mock = @import("../../test_dispatcher.zig");
+    const Promise = NativePromise(u32);
+    const state = try std.testing.allocator.create(Promise.State);
+    state.* = .{ .allocator = std.testing.allocator, .env = mock.env, .thread = 0, .outcome = .init(1) };
+    state.acquire();
+    var dispatcher = mock.Dispatcher{ .context = state, .finalize = Promise.State.finalize, .dispose = Promise.State.dispose, .status = napi.napi_closing };
+    state.dispatcher = dispatcher.raw();
+    (Promise{ .state = state }).Close();
+    try std.testing.expectEqual(@as(usize, 1), state.owners.load(.acquire));
+    try std.testing.expect(!dispatcher.queued);
+    dispatcher.finish();
 }

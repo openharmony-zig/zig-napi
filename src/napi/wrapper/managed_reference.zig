@@ -54,6 +54,7 @@ pub fn ManagedReference(comptime T: type, comptime strong: bool) type {
             fn dispose(_: napi.napi_env, _: napi.napi_value, context: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
                 const owner: *@This() = @ptrCast(@alignCast(context.?));
                 owner.deleteReference(true);
+                owner.dropLifetime();
             }
         };
         pub fn New(env: Env, value: T) !Self {
@@ -93,6 +94,7 @@ pub fn ManagedReference(comptime T: type, comptime strong: bool) type {
             if (self.owner.closed.load(.acquire)) return error.EnvironmentClosed;
             var current = self.owner.owners.load(.monotonic);
             while (true) {
+                if (current == 0) return error.EnvironmentClosed;
                 const next = try std.math.add(usize, current, 1);
                 current = self.owner.owners.cmpxchgWeak(current, next, .monotonic, .monotonic) orelse return self;
             }
@@ -112,7 +114,8 @@ pub fn ManagedReference(comptime T: type, comptime strong: bool) type {
             const owner = self.owner;
             if (owner.owners.fetchSub(1, .acq_rel) != 1) return;
             if (!owner.released.swap(true, .acq_rel)) {
-                _ = napi.napi_call_threadsafe_function(owner.dispatcher, null, napi.napi_tsfn_nonblocking);
+                _ = owner.lifetime.fetchAdd(1, .monotonic);
+                if (napi.napi_call_threadsafe_function(owner.dispatcher, null, napi.napi_tsfn_nonblocking) != napi.napi_ok) owner.dropLifetime();
                 _ = napi.napi_release_threadsafe_function(owner.dispatcher, napi.napi_tsfn_release);
             }
             owner.dropLifetime();
@@ -140,4 +143,38 @@ pub fn ManagedReference(comptime T: type, comptime strong: bool) type {
             self.Close();
         }
     };
+}
+
+test "ManagedReference queued disposal survives finalization before the null-env drain" {
+    const mock = @import("../../test_dispatcher.zig");
+    const Reference = ManagedReference(@import("../value/object.zig").Object, true);
+    const owner = try std.testing.allocator.create(Reference.Owner);
+    owner.* = .{ .allocator = std.testing.allocator, .env = mock.env, .reference = @ptrFromInt(1), .thread = 0 };
+    var dispatcher = mock.Dispatcher{ .context = owner, .finalize = Reference.Owner.finalize, .dispose = Reference.Owner.dispose };
+    owner.dispatcher = dispatcher.raw();
+    const deleted = mock.deleted_references;
+    const removed = mock.removed_hooks;
+    const reference = Reference{ .owner = owner };
+    reference.Close();
+    try std.testing.expectEqual(@as(usize, 2), owner.lifetime.load(.acquire));
+    try std.testing.expectError(error.EnvironmentClosed, reference.Clone());
+    try std.testing.expectEqual(@as(usize, 0), owner.owners.load(.acquire));
+    try std.testing.expectEqual(@as(usize, 1), dispatcher.calls);
+    try std.testing.expectEqual(@as(usize, 1), dispatcher.releases);
+    dispatcher.finish();
+    try std.testing.expectEqual(deleted + 1, mock.deleted_references);
+    try std.testing.expectEqual(removed + 1, mock.removed_hooks);
+}
+
+test "ManagedReference failed disposal enqueue releases the queue reference" {
+    const mock = @import("../../test_dispatcher.zig");
+    const Reference = ManagedReference(@import("../value/object.zig").Object, true);
+    const owner = try std.testing.allocator.create(Reference.Owner);
+    owner.* = .{ .allocator = std.testing.allocator, .env = mock.env, .reference = @ptrFromInt(1), .thread = 0 };
+    var dispatcher = mock.Dispatcher{ .context = owner, .finalize = Reference.Owner.finalize, .dispose = Reference.Owner.dispose, .status = napi.napi_closing };
+    owner.dispatcher = dispatcher.raw();
+    (Reference{ .owner = owner }).Close();
+    try std.testing.expectEqual(@as(usize, 1), owner.lifetime.load(.acquire));
+    try std.testing.expect(!dispatcher.queued);
+    dispatcher.finish();
 }
