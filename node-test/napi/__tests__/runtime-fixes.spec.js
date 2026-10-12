@@ -51,6 +51,36 @@ nativeOnlyTest("a synchronous CallAsync enqueue failure detaches only its comple
   t.deepEqual(delivered, [1]);
 });
 
+nativeOnlyTest("repeated class definition failures release their cleanup context", (t) => {
+  const result = isolated(`
+    const baseline = [b.activeBytes(), b.activeAllocations()];
+    for (let index = 0; index < 100; index += 1) {
+      try { b.defineDuplicateClass(); throw new Error("class definition succeeded"); }
+      catch (error) { if (!(error instanceof TypeError) || !/Duplicate class property name/.test(error.message)) throw error; }
+    }
+    console.log(JSON.stringify({ baseline, after: [b.activeBytes(), b.activeAllocations()] }));
+  `, "classes");
+  t.is(result.signal, null, result.stderr);
+  t.is(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout.trim());
+  t.deepEqual(output.after, output.baseline);
+});
+
+nativeOnlyTest("repeated static constant conversion failures release their class cleanup context", (t) => {
+  const result = isolated(`
+    const baseline = [b.activeBytes(), b.activeAllocations()];
+    for (let index = 0; index < 100; index += 1) {
+      try { b.defineFailingStaticClass(); throw new Error("class definition succeeded"); }
+      catch (error) { if (!(error instanceof Error) || !/OutOfMemory/.test(error.message)) throw error; }
+    }
+    console.log(JSON.stringify({ baseline, after: [b.activeBytes(), b.activeAllocations()] }));
+  `, "classes");
+  t.is(result.signal, null, result.stderr);
+  t.is(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout.trim());
+  t.deepEqual(output.after, output.baseline);
+});
+
 nativeOnlyTest("a full bounded Blocking TSFN call on the JS thread reports WouldDeadlock", (t) => {
   const result = isolated(`
     const errors = [];

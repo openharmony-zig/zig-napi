@@ -214,17 +214,6 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
             };
             try ContextRegistry.add(context);
 
-            // A failure to register the deterministic release path has to be
-            // reported: silently continuing would leak the context until the
-            // constructor is collected.
-            if (comptime options.selectedNapiVersion().isAtLeast(.v3)) {
-                const status = napi.napi_add_env_cleanup_hook(env, contextCleanupHook, context);
-                if (status != napi.napi_ok) {
-                    ContextRegistry.remove(context);
-                    return NapiError.failStatus(status);
-                }
-            }
-
             return context;
         }
 
@@ -1046,6 +1035,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
 
         fn define_class(env: napi.napi_env) !napi.napi_value {
             const context = try createContext(env);
+            errdefer releaseContext(context);
 
             // Count instance properties and methods
             comptime var property_count: usize = fields.field_names.len;
@@ -1337,7 +1327,6 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                 while (other < prop_idx) {
                     if (std.mem.eql(u8, std.mem.span(properties[descriptor_index].utf8name), std.mem.span(properties[other].utf8name))) {
                         if (properties[descriptor_index].method != null or properties[other].method != null or properties[descriptor_index].value != null or properties[other].value != null or (properties[descriptor_index].getter != null and properties[other].getter != null) or (properties[descriptor_index].setter != null and properties[other].setter != null)) {
-                            releaseContext(context);
                             return NapiError.failTypeError("Duplicate class property name", .{});
                         }
                         properties[descriptor_index].getter = properties[descriptor_index].getter orelse properties[other].getter;
@@ -1351,7 +1340,6 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
             var constructor: napi.napi_value = undefined;
             const define_status = napi.napi_define_class(env, class_name.ptr, class_name.len, constructor_callback, context, prop_idx, &properties, &constructor);
             if (define_status != napi.napi_ok) {
-                releaseContext(context);
                 return NapiError.failStatus(define_status);
             }
 
@@ -1361,7 +1349,6 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
             var new_constructor_ref: napi.napi_ref = undefined;
             const ref_status = napi.napi_create_reference(env, constructor, 0, &new_constructor_ref);
             if (ref_status != napi.napi_ok) {
-                releaseContext(context);
                 return NapiError.failStatus(ref_status);
             }
             context.constructor_ref = new_constructor_ref;
@@ -1369,10 +1356,14 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
             // Environments without cleanup hooks release the context from the
             // constructor finalizer instead (see `ClassContext`). Only one of
             // the two mechanisms is ever active, so a context is released once.
-            if (comptime !options.selectedNapiVersion().isAtLeast(.v3)) {
+            if (comptime options.selectedNapiVersion().isAtLeast(.v3)) {
+                const status = napi.napi_add_env_cleanup_hook(env, contextCleanupHook, context);
+                if (status != napi.napi_ok) {
+                    return NapiError.failStatus(status);
+                }
+            } else {
                 const wrap_status = napi.napi_wrap(env, constructor, context, contextFinalizer, null, null);
                 if (wrap_status != napi.napi_ok) {
-                    releaseContext(context);
                     return NapiError.failStatus(wrap_status);
                 }
             }
