@@ -519,6 +519,23 @@ function appendWasiThreadsBuildFlags(args, target, passthrough) {
   }
 }
 
+function resolveCompileFlavors(target, passthrough) {
+  let passthroughTarget;
+  let cpu;
+  for (const [index, argument] of passthrough.entries()) {
+    if (argument.startsWith("-Dtarget=")) passthroughTarget = argument.slice("-Dtarget=".length);
+    else if (argument === "-Dtarget") passthroughTarget = passthrough[index + 1];
+    else if (argument.startsWith("-Dcpu=")) cpu = argument.slice("-Dcpu=".length);
+    else if (argument === "-Dcpu") cpu = passthrough[index + 1];
+  }
+  if (passthroughTarget === "wasm32-wasi") {
+    const threads = cpu?.split("+").includes("atomics") ?? isWasiThreadsTargetName(target);
+    return [getWasiFlavor(threads ? "wasm32-wasip1-threads" : "wasm32-wasip1")];
+  }
+  const flavor = getWasiFlavor(passthroughTarget ?? target);
+  return flavor ? [flavor] : [];
+}
+
 /**
  * Flavors a run must generate loaders for: the flavor of an explicit
  * `--target`, otherwise every WASI flavor the project configures (threaded
@@ -962,6 +979,7 @@ async function commandBuild(flags, passthrough = []) {
   const cwd = path.resolve(process.cwd(), flags.cwd || ".");
   const config = await readZigNapiConfig(cwd, flags);
   const flavors = resolveConfiguredFlavors(config, flags);
+  const compileFlavors = resolveCompileFlavors(flags.target, passthrough);
   resolveWasmConfig(config);
   if (config.packageJson.zigNapi?.managedZigDependency) {
     scaffold.resolveDependency(cwd, resolveZigNapiPath(cwd), config.packageJson);
@@ -977,14 +995,14 @@ async function commandBuild(flags, passthrough = []) {
       `-Dtarget=${isWasiTargetName(flags.target) ? "wasm32-wasi" : zigTarget(flags.target)}`,
     );
   appendWasiThreadsBuildFlags(args, flags.target, passthrough);
-  appendWasiMemoryBuildFlags(args, config, flavors);
+  appendWasiMemoryBuildFlags(args, config, compileFlavors);
   args.push(...passthrough);
-  const emnapiEnv = flavors.length > 0 ? resolveWasiEmnapiEnv(cwd) : undefined;
+  const emnapiEnv = compileFlavors.length > 0 ? resolveWasiEmnapiEnv(cwd) : undefined;
   if (flags.verbose) console.log(`zig ${args.map((arg) => JSON.stringify(arg)).join(" ")}`);
   const built = run("zig", args, {
     cwd,
     env: emnapiEnv ? { ...process.env, ...emnapiEnv } : process.env,
-    failureHint: wasiMemoryFailureHint(config, flavors),
+    failureHint: wasiMemoryFailureHint(config, compileFlavors),
     keepAlive: flags.watch,
   });
   if (!built) return;

@@ -7,7 +7,7 @@ const { test } = require("node:test");
 const api = require("@napi-rs/cli");
 const cli = path.resolve(__dirname, "../bin/zig-napi.js");
 
-function fixture(t) {
+function fixture(t, napi = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "zig-napi-parity-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   fs.writeFileSync(
@@ -15,7 +15,7 @@ function fixture(t) {
     JSON.stringify({
       name: "parity",
       version: "1.2.3",
-      napi: { binaryName: "addon", targets: ["aarch64-apple-darwin"] },
+      napi: { binaryName: "addon", targets: ["aarch64-apple-darwin"], ...napi },
     }),
   );
   return dir;
@@ -57,6 +57,17 @@ cp.spawnSync = function(command, args, opts) {
 `,
   );
   return file;
+}
+
+function writeEmnapiPackages(dir, names) {
+  for (const name of names) {
+    const directory = path.join(dir, "node_modules", name);
+    fs.mkdirSync(directory, { recursive: true });
+    fs.writeFileSync(
+      path.join(directory, "package.json"),
+      JSON.stringify({ name, version: "2.0.0-alpha.5" }),
+    );
+  }
 }
 
 test("all upstream command options have an adapter or an explicit Cargo/OHOS boundary", (t) => {
@@ -302,6 +313,87 @@ test("build options affect native artifacts, declarations, output paths and pipe
     fs.readFileSync(path.join(dir, "plain/index.d.ts"), "utf8"),
     /auto-generated|__napiBindingTarget/,
   );
+});
+
+test("mixed targets build natively with a partial emnapi install and no WASI flags", (t) => {
+  for (const targetArgs of [
+    ["--target", "aarch64-apple-darwin"],
+    [],
+    ["--", "-Dtarget=aarch64-macos"],
+  ]) {
+    const dir = fixture(t, {
+      targets: ["aarch64-apple-darwin", "wasm32-wasip1-threads", "wasm32-wasip1"],
+      wasm: { initialMemory: 1024, threadlessInitialMemory: 128, maximumMemory: 2048 },
+    });
+    const preload = fakeZig(dir);
+    writeEmnapiPackages(dir, ["emnapi"]);
+    const installedOutput = path.join(dir, "zig-out", "node");
+    fs.mkdirSync(installedOutput, { recursive: true });
+    for (const platform of ["wasm32-wasi", "wasm32-wasip1"]) {
+      fs.writeFileSync(path.join(installedOutput, `addon.${platform}.wasm`), "wasm");
+    }
+
+    const result = invoke(["build", "--platform", ...targetArgs], dir, preload);
+    success(result);
+    assert.doesNotMatch(result.stderr, /emnapi/);
+    const args = JSON.parse(fs.readFileSync(path.join(dir, "zig.log"), "utf8").trim());
+    assert.ok(!args.some((arg) => arg.startsWith("-Dwasi-")), args.join(" "));
+    for (const platform of ["wasm32-wasi", "wasm32-wasip1"]) {
+      assert.equal(fs.readFileSync(path.join(dir, `addon.${platform}.wasm`), "utf8"), "wasm");
+    }
+    assert.ok(fs.existsSync(path.join(dir, "addon.wasi.cjs")));
+    assert.ok(fs.existsSync(path.join(dir, "addon.wasip1.cjs")));
+    const binding = fs.readFileSync(path.join(dir, "index.js"), "utf8");
+    assert.match(binding, /parity-wasm32-wasi/);
+    assert.match(binding, /parity-wasm32-wasip1/);
+  }
+});
+
+test("WASI compile flavors follow explicit targets and passthrough atomics", (t) => {
+  const cases = [
+    { args: ["--target", "wasm32-wasip1-threads"], initialMemory: 1024 },
+    { args: ["--target", "wasm32-wasip1"], initialMemory: 128 },
+    { args: ["--", "-Dtarget=wasm32-wasi"], initialMemory: 128 },
+    { args: ["--", "-Dtarget=wasm32-wasi", "-Dcpu=baseline"], initialMemory: 128 },
+    {
+      args: ["--", "-Dtarget=wasm32-wasi", "-Dcpu=baseline+atomics+bulk_memory+mutable_globals"],
+      initialMemory: 1024,
+    },
+    {
+      args: ["--", "-Dtarget", "wasm32-wasi", "-Dcpu", "baseline+atomics"],
+      initialMemory: 1024,
+    },
+    {
+      args: ["--target", "wasm32-wasip1-threads", "--", "-Dtarget=wasm32-wasi"],
+      initialMemory: 1024,
+    },
+    {
+      args: ["--", "-Dtarget=wasm32-wasi", "-Dcpu=baseline+atomics", "-Dcpu=baseline"],
+      initialMemory: 128,
+    },
+    {
+      args: ["--target", "aarch64-apple-darwin", "--", "-Dtarget=wasm32-wasi", "-Dcpu=baseline"],
+      initialMemory: 128,
+    },
+  ];
+  for (const { args: targetArgs, initialMemory } of cases) {
+    const dir = fixture(t, {
+      targets: ["aarch64-apple-darwin", "wasm32-wasip1-threads", "wasm32-wasip1"],
+      wasm: { initialMemory: 1024, threadlessInitialMemory: 128, maximumMemory: 2048 },
+    });
+    const preload = fakeZig(dir);
+    writeEmnapiPackages(dir, ["emnapi"]);
+    const partial = invoke(["build", "--platform", ...targetArgs], dir, preload);
+    assert.notEqual(partial.status, 0, targetArgs.join(" "));
+    assert.match(partial.stderr, /WASI builds need.*missing @emnapi\/core, @emnapi\/runtime/);
+    assert.equal(fs.existsSync(path.join(dir, "zig.log")), false);
+
+    writeEmnapiPackages(dir, ["@emnapi/core", "@emnapi/runtime"]);
+    success(invoke(["build", "--platform", ...targetArgs], dir, preload));
+    const args = JSON.parse(fs.readFileSync(path.join(dir, "zig.log"), "utf8").trim());
+    assert.ok(args.includes(`-Dwasi-initial-memory-pages=${initialMemory}`), args.join(" "));
+    assert.ok(args.includes("-Dwasi-max-memory-pages=2048"), args.join(" "));
+  }
 });
 
 test("cached declarations can change enum and header options without losing exports", (t) => {
