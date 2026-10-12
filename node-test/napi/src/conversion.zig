@@ -648,6 +648,19 @@ pub fn tsfnCallAsyncQueueFailure(tsfn: *LimitedTsfn) ![2]napi.Promise {
     };
 }
 
+pub fn tsfnBlockingQueueProbe(tsfn: *LimitedTsfn) !void {
+    defer tsfn.release(.Release) catch {};
+    try tsfn.Ok(.{1}, .Blocking);
+    try tsfn.Ok(.{2}, .Blocking);
+}
+
+pub fn tsfnBuilderBlockingQueueProbe(env: napi.Env, callback: napi.NapiValue) !void {
+    const tsfn = try PlainTsfn.builder(env, callback).maxQueueSize(1).build();
+    defer tsfn.release(.Release) catch {};
+    try tsfn.Ok(.{1}, .Blocking);
+    try tsfn.Ok(.{2}, .Blocking);
+}
+
 comptime {
     napi.NODE_API_MODULE("conversion", @This());
 }

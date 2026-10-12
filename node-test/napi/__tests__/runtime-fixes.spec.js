@@ -1,4 +1,6 @@
 const test = require("ava");
+const path = require("path");
+const { spawnSync } = require("child_process");
 const loadAddon = require("../../load-addon");
 const bindings = loadAddon("conversion");
 const isWasi = process.env.NAPI_RS_FORCE_WASI === "true" || process.env.NAPI_RS_FORCE_WASI === "error";
@@ -16,6 +18,14 @@ async function within(promise, ms = 2000) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+function isolated(script, addon = "conversion") {
+  const loaderPath = path.join(__dirname, "..", "..", "load-addon.js");
+  return spawnSync(process.execPath, ["-e", `const b = require(${JSON.stringify(loaderPath)})(${JSON.stringify(addon)}); ${script}`], {
+    encoding: "utf8",
+    timeout: 4000,
+  });
 }
 
 nativeOnlyTest("CallAsync rejects when its TSFN is aborted before dispatch", async (t) => {
@@ -39,4 +49,21 @@ nativeOnlyTest("a synchronous CallAsync enqueue failure detaches only its comple
   t.notRegex(error.message, /already.*settled/i);
   t.is(await within(accepted), undefined);
   t.deepEqual(delivered, [1]);
+});
+
+nativeOnlyTest("a full bounded Blocking TSFN call on the JS thread reports WouldDeadlock", (t) => {
+  const result = isolated(`
+    const errors = [];
+    for (const invoke of [b.tsfnBlockingQueueProbe, b.tsfnBuilderBlockingQueueProbe]) {
+      try { invoke(() => {}); throw new Error("full queue accepted a call"); }
+      catch (error) { errors.push({ code: error.code, message: error.message }); }
+    }
+    console.log(JSON.stringify(errors));
+  `);
+  t.is(result.signal, null, result.stderr);
+  t.is(result.status, 0, result.stderr);
+  t.deepEqual(JSON.parse(result.stdout.trim()), [
+    { code: "WouldDeadlock", message: "ThreadSafeFunction queue cannot accept this call" },
+    { code: "WouldDeadlock", message: "ThreadSafeFunction queue cannot accept this call" },
+  ]);
 });

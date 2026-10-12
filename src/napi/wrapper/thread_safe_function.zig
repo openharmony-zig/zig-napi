@@ -170,6 +170,8 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
         aborted: bool,
         failed: bool = false,
         queue: ?*QueueState = null,
+        thread: std.Thread.Id = 0,
+        queue_limit: usize = MaxQueueSize,
         completions: ?*Completion = null,
         freed: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
         comptime thread_safe_function_call_variant: bool = ThreadSafeFunctionCalleeHandled,
@@ -392,6 +394,8 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
                 .tsfn_raw = null,
                 .closed = false,
                 .aborted = false,
+                .thread = if (@import("builtin").cpu.arch.isWasm()) 0 else std.Thread.getCurrentId(),
+                .queue_limit = config.max_queue_size,
             };
 
             if (comptime options.isOhosAddon()) {
@@ -545,10 +549,18 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
                 };
                 data.reserved = true;
             }
-            const status = napi.napi_call_threadsafe_function(self.tsfn_raw, @ptrCast(data), mode.to_raw());
+            const prevent_deadlock = if (comptime !options.isOhosAddon() and !@import("builtin").cpu.arch.isWasm())
+                mode == .Blocking and self.queue_limit != 0 and self.thread == std.Thread.getCurrentId()
+            else
+                false;
+            const status = napi.napi_call_threadsafe_function(self.tsfn_raw, @ptrCast(data), if (prevent_deadlock) napi.napi_tsfn_nonblocking else mode.to_raw());
             if (status != napi.napi_ok) {
                 // The item never entered the queue: release it here.
                 freeCallData(data.allocator, data);
+                if (prevent_deadlock and status == napi.napi_queue_full) {
+                    NapiError.last_error = NapiError.Error.withCodeAndMessage("WouldDeadlock", "ThreadSafeFunction queue cannot accept this call");
+                    return error.WouldDeadlock;
+                }
                 return NapiError.failStatus(status);
             }
         }
