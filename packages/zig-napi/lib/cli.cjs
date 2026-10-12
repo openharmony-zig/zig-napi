@@ -1483,6 +1483,9 @@ async function main() {
       if (command === "build" || command === "package") return "--verbose";
     }
     const match = arg.match(/^--([a-z-]+)=(true|false)$/);
+    if (match && match[2] === "false" && (match[1] === "js" || match[1] === "js-binding")) {
+      return `--no-${match[1]}`;
+    }
     return match && booleans.has(match[1])
       ? `--${match[2] === "false" ? "no-" : ""}${match[1]}`
       : arg;

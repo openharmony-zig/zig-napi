@@ -396,6 +396,26 @@ test("WASI compile flavors follow explicit targets and passthrough atomics", (t)
   }
 });
 
+test("JS binding false values disable output while true values remain filenames", (t) => {
+  for (const option of ["js", "js-binding"]) {
+    for (const value of ["false", "true"]) {
+      const dir = fixture(t),
+        preload = fakeZig(dir);
+      fs.writeFileSync(
+        path.join(dir, "index.d.ts"),
+        "export declare function add(a: number, b: number): number;\n",
+      );
+      success(invoke(["build", "--platform", `--${option}=${value}`], dir, preload));
+      assert.equal(fs.existsSync(path.join(dir, "index.js")), false);
+      assert.equal(fs.existsSync(path.join(dir, "false")), false);
+      assert.equal(fs.existsSync(path.join(dir, "true")), value === "true");
+      assert.ok(
+        fs.existsSync(path.join(dir, `addon.${require("../lib/targets.cjs").platformId()}.node`)),
+      );
+    }
+  }
+});
+
 test("cached declarations can change enum and header options without losing exports", (t) => {
   const dir = fixture(t),
     preload = fakeZig(dir);
