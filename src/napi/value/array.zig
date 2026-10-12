@@ -216,6 +216,9 @@ pub const Array = struct {
                         );
                     }
                     const truncated = @trunc(float_value);
+                    if (truncated != float_value) {
+                        return NapiError.failTypeError("Expected an integer for {s}, got {d}", .{ helper.shortTypeName(Dst), float_value });
+                    }
                     // 2^63 is exactly representable as f64; compare exclusively so
                     // that the conversion to i64 below can never overflow.
                     if (truncated < -9223372036854775808.0 or truncated >= 9223372036854775808.0) {

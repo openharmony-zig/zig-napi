@@ -414,11 +414,7 @@ pub const Napi = struct {
                             NapiError.failRangeError("Value {d} is out of range for {s}", .{ number, helper.shortTypeName(T) });
                     }
 
-                    var wide: i64 = 0;
-                    const read_status = napi.napi_get_value_int64(env, raw, &wide);
-                    if (read_status != napi.napi_ok) {
-                        return NapiError.failStatus(read_status);
-                    }
+                    const wide: i64 = @intFromFloat(number);
                     return std.math.cast(T, wide) orelse
                         NapiError.failRangeError("Value {d} is out of range for {s}", .{ number, helper.shortTypeName(T) });
                 }
@@ -448,16 +444,8 @@ pub const Napi = struct {
                         NapiError.failRangeError("Value {d} is out of range for {s}", .{ number, helper.shortTypeName(T) });
                 }
 
-                // N-API has no `napi_get_value_uint64`; the signed 64 bit getter is
-                // exact for the validated range [0, 2^63).
-                var wide: i64 = 0;
-                const read_status = napi.napi_get_value_int64(env, raw, &wide);
-                if (read_status != napi.napi_ok) {
-                    return NapiError.failStatus(read_status);
-                }
-                if (wide < 0) {
-                    return NapiError.failRangeError("Value {d} is out of range for {s}", .{ number, helper.shortTypeName(T) });
-                }
+                // The validated double fits in the unsigned 64 bit interval.
+                const wide: u64 = @intFromFloat(number);
                 return std.math.cast(T, wide) orelse
                     NapiError.failRangeError("Value {d} is out of range for {s}", .{ number, helper.shortTypeName(T) });
             },

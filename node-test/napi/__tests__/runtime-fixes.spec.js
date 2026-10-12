@@ -129,6 +129,27 @@ test("exported functions use their public metadata names", (t) => {
   t.is(bindings.publicFunction.name, "publicFunction");
 });
 
+test("64 bit Number inputs preserve the validated integer value", (t) => {
+  t.is(bindings.unsignedAsBigInt(2 ** 63), 2n ** 63n);
+  t.is(bindings.unsignedAsBigInt(2 ** 64 - 2048), 2n ** 64n - 2048n);
+  t.throws(() => bindings.unsignedAsBigInt(2 ** 64), { name: "RangeError" });
+  t.is(bindings.signedAsBigInt(-(2 ** 63)), -(2n ** 63n));
+  t.is(bindings.signedAsBigInt(2 ** 63 - 1024), 2n ** 63n - 1024n);
+});
+
+test("BigInt creation accepts the minimum signed 128 bit integer", (t) => {
+  t.is(bindings.minSignedBigInt(), -(2n ** 127n));
+});
+
+test("ordinary arrays and typed arrays reject fractional integer inputs alike", (t) => {
+  for (const input of [[1.5, 2.5], new Float64Array([1.5, 2.5]), new Float32Array([1.5, 2.5])]) {
+    const error = t.throws(() => bindings.sumIntegerSlice(input), { name: "TypeError" });
+    t.is(error.message, "Expected an integer for i32, got 1.5");
+  }
+  t.is(bindings.sumIntegerSlice([1, 2]), 3);
+  t.is(bindings.sumIntegerSlice(new Float64Array([1, 2])), 3);
+});
+
 nativeOnlyTest("a full bounded Blocking TSFN call on the JS thread reports WouldDeadlock", (t) => {
   const result = isolated(`
     const errors = [];

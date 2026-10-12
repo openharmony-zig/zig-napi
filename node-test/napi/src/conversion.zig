@@ -674,6 +674,24 @@ pub fn closeAsyncIterator(iterator: napi.AsyncIterator(i32)) !napi.PromiseValue 
 
 pub fn renamedFunction() void {}
 
+pub fn unsignedAsBigInt(env: napi.Env, value: u64) !napi.BigInt {
+    return napi.BigInt.create(env, value);
+}
+
+pub fn signedAsBigInt(env: napi.Env, value: i64) !napi.BigInt {
+    return napi.BigInt.create(env, value);
+}
+
+pub fn minSignedBigInt(env: napi.Env) !napi.BigInt {
+    return napi.BigInt.create(env, std.math.minInt(i128));
+}
+
+pub fn sumIntegerSlice(values: []const i32) i32 {
+    var total: i32 = 0;
+    for (values) |value| total += value;
+    return total;
+}
+
 comptime {
     napi.NODE_API_MODULE("conversion", @This());
 }

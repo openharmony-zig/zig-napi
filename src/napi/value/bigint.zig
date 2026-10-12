@@ -97,7 +97,7 @@ pub const BigInt = struct {
                     },
                     i128 => {
                         const is_negative = value < 0;
-                        const abs_value: u128 = if (is_negative) @bitCast(-value) else @bitCast(value);
+                        const abs_value: u128 = @abs(value);
 
                         var words: [2]u64 = undefined;
                         words[0] = @truncate(abs_value);
