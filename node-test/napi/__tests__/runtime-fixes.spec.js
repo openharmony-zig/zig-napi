@@ -124,6 +124,11 @@ test("AsyncIterator.close calls own and inherited return methods and allows thei
   t.true(result.done);
 });
 
+test("exported functions use their public metadata names", (t) => {
+  t.is(bindings.add.name, "add");
+  t.is(bindings.publicFunction.name, "publicFunction");
+});
+
 nativeOnlyTest("a full bounded Blocking TSFN call on the JS thread reports WouldDeadlock", (t) => {
   const result = isolated(`
     const errors = [];

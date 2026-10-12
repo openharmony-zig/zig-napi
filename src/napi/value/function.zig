@@ -254,7 +254,7 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
             };
 
             var result: napi.napi_value = undefined;
-            const fn_status = napi.napi_create_function(env.raw, @ptrCast(function_name.ptr), 0, FnImpl.inner_fn, null, &result);
+            const fn_status = napi.napi_create_function(env.raw, @ptrCast(function_name.ptr), function_name.len, FnImpl.inner_fn, null, &result);
             if (fn_status != napi.napi_ok) {
                 return NapiError.Error.fromStatus(NapiError.Status.New(fn_status));
             }

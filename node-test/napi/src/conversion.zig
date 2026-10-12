@@ -21,6 +21,9 @@ const use_wasm_async_work = builtin.cpu.arch == .wasm32 and builtin.os.tag == .w
 // pages from the module's safe page allocator.
 var counter = counting.CountingAllocator.init(napi.safePageAllocator());
 pub const napi_allocator = counter.allocator();
+pub const napi_config = .{
+    .renamedFunction = napi.ExportOptions{ .name = "publicFunction" },
+};
 
 /// Second, independent accounting allocator used by the allocator-provenance
 /// tests. It is only ever reached through an explicit override.
@@ -668,6 +671,8 @@ pub fn closeIterator(iterator: napi.Iterator(i32)) !void {
 pub fn closeAsyncIterator(iterator: napi.AsyncIterator(i32)) !napi.PromiseValue {
     return iterator.close();
 }
+
+pub fn renamedFunction() void {}
 
 comptime {
     napi.NODE_API_MODULE("conversion", @This());
