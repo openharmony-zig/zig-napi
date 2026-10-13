@@ -106,7 +106,7 @@ pub const Buffer = struct {
                 }
 
                 const allocator = GlobalAllocator.globalAllocator();
-                const buf = allocator.alloc(u8, source.len) catch @panic("OOM");
+                const buf = try allocator.alloc(u8, source.len);
                 @memcpy(buf, source);
 
                 return buf;
@@ -406,4 +406,12 @@ fn externalBufferFinalizer(
         const buffer_hint: *BufferHint = @ptrCast(@alignCast(h));
         buffer_hint.destroy();
     }
+}
+
+test "Buffer slice allocation failure returns OutOfMemory" {
+    const dispatcher = @import("../../test_dispatcher.zig");
+    var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
+    var scope = GlobalAllocator.ScopedOverride.enter(failing.allocator());
+    defer scope.exit();
+    try std.testing.expectError(error.OutOfMemory, Buffer.from_napi_value(dispatcher.env, dispatcher.value_raw, []u8));
 }

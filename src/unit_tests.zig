@@ -1,4 +1,7 @@
 test {
+    _ = @import("napi/wrapper/buffer.zig");
+    _ = @import("napi/wrapper/arraybuffer.zig");
+    _ = @import("napi/value/function.zig");
     _ = @import("test_dispatcher.zig");
     _ = @import("napi/value/native_promise.zig");
     _ = @import("napi/wrapper/managed_reference.zig");

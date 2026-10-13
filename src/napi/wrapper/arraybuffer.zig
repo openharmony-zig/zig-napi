@@ -178,7 +178,7 @@ pub const ArrayBuffer = struct {
                 }
 
                 const allocator = GlobalAllocator.globalAllocator();
-                const buf = allocator.alloc(u8, source.len) catch @panic("OOM");
+                const buf = try allocator.alloc(u8, source.len);
                 @memcpy(buf, source);
 
                 return buf;
@@ -506,4 +506,12 @@ fn externalArrayBufferFinalizer(
         const arraybuffer_hint: *ArrayBufferHint = @ptrCast(@alignCast(h));
         arraybuffer_hint.destroy();
     }
+}
+
+test "ArrayBuffer slice allocation failure returns OutOfMemory" {
+    const dispatcher = @import("../../test_dispatcher.zig");
+    var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
+    var scope = GlobalAllocator.ScopedOverride.enter(failing.allocator());
+    defer scope.exit();
+    try std.testing.expectError(error.OutOfMemory, ArrayBuffer.from_napi_value(dispatcher.env, dispatcher.value_raw, []u8));
 }
