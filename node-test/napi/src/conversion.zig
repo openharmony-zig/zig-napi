@@ -134,6 +134,27 @@ pub fn stringEnumRoundtrip(value: StatusEnum) StatusEnum {
     return value;
 }
 
+pub fn createManualExternal(value: u32) !napi.External(u32) {
+    return napi.External(u32).New(value);
+}
+
+pub fn externalAfterDeinit(accessor: u8) !usize {
+    var external = try napi.External(u32).New(7);
+    external.deinit();
+    return switch (accessor) {
+        0 => external.value().*,
+        1 => external.valueMut().*,
+        2 => external.asPtr().*,
+        3 => external.asConstPtr().*,
+        4 => external.sizeHint(),
+        else => @intCast(external.adjustedSize()),
+    };
+}
+
+pub fn manualExternal(value: napi.NapiValue) !u32 {
+    const external = try napi.External(u32).tryFromRaw(value.env, value.raw);
+    return external.value().*;
+}
 // ----------------------------------------------------------------- rollback
 
 const TextCount = struct {

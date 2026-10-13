@@ -1128,16 +1128,7 @@ pub const Napi = struct {
                                     return try T.from_napi_value(env, raw);
                                 }
                                 if (comptime helper.isExternal(T)) {
-                                    // The external converter reports precise diagnostics
-                                    // through the error state instead of failing itself.
-                                    const converted = T.from_napi_value(env, raw);
-                                    if (NapiError.last_error != null or NapiError.hasPendingException()) {
-                                        if (NapiError.hasPendingException()) {
-                                            return error.PendingException;
-                                        }
-                                        return error.GenericFailure;
-                                    }
-                                    return converted;
+                                    return try T.tryFromRaw(env, raw);
                                 }
 
                                 if (comptime helper.isTuple(T)) {

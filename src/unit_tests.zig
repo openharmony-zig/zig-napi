@@ -1,4 +1,5 @@
 test {
+    _ = @import("napi/wrapper/external.zig");
     _ = @import("napi/wrapper/buffer.zig");
     _ = @import("napi/wrapper/arraybuffer.zig");
     _ = @import("napi/value/function.zig");
