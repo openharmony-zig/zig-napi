@@ -464,12 +464,18 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
             var data: ?*anyopaque = null;
             const argv = if (Argc == 0) null else args_raw[0..].ptr;
             const status = napi.napi_get_cb_info(env, callback_info, &argc, argv, &this_obj, &data);
-            if (status != napi.napi_ok) return null;
+            if (status != napi.napi_ok) {
+                throwError(env, NapiError.Error.withStatus(NapiError.Status.New(status)));
+                return null;
+            }
 
             if (Argc > argc) {
                 var undefined_raw: napi.napi_value = undefined;
                 const undefined_status = napi.napi_get_undefined(env, &undefined_raw);
-                if (undefined_status != napi.napi_ok) return null;
+                if (undefined_status != napi.napi_ok) {
+                    throwError(env, NapiError.Error.withStatus(NapiError.Status.New(undefined_status)));
+                    return null;
+                }
                 for (argc..Argc) |i| {
                     args_raw[i] = undefined_raw;
                 }
@@ -1461,4 +1467,20 @@ pub fn ClassInstance(comptime T: type, comptime HasInit: bool) type {
             return @import("reference.zig").Reference(Self).New(napi_env.Env.from_raw(self.env), self);
         }
     };
+}
+
+test "class callback info failures throw and preserve pending exceptions" {
+    const dispatcher = @import("../../test_dispatcher.zig");
+    const Wrapper = ClassWrapper(struct { value: u32 }, true);
+    var args: [1]napi.napi_value = undefined;
+    defer dispatcher.runtime = .{};
+    dispatcher.runtime = .{ .cb_status = napi.napi_generic_failure };
+    try std.testing.expect(Wrapper.readCallInfo(1, dispatcher.env, null, &args) == null);
+    try std.testing.expectEqual(@as(usize, 1), dispatcher.runtime.throws);
+    dispatcher.runtime = .{ .undefined_status = napi.napi_generic_failure };
+    try std.testing.expect(Wrapper.readCallInfo(1, dispatcher.env, null, &args) == null);
+    try std.testing.expectEqual(@as(usize, 1), dispatcher.runtime.throws);
+    dispatcher.runtime = .{ .cb_status = napi.napi_pending_exception, .pending = true };
+    try std.testing.expect(Wrapper.readCallInfo(1, dispatcher.env, null, &args) == null);
+    try std.testing.expectEqual(@as(usize, 0), dispatcher.runtime.creates);
 }
