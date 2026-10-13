@@ -10,7 +10,7 @@ test("should create bigints", (t) => {
 });
 
 test("should get integers from bigints", (t) => {
-  t.is(bindings.bigintToI64(42n), 42);
+  t.is(bindings.bigintToI64(42n), 42n);
 });
 
 test("should be able to mutate BigInt64Array", (t) => {

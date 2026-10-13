@@ -134,8 +134,62 @@ pub fn stringEnumRoundtrip(value: StatusEnum) StatusEnum {
     return value;
 }
 
+pub const WideRecord = struct { unsigned: u64, signed: i64, maybe: ?u64 };
+pub fn wideRecord(value: WideRecord) WideRecord {
+    return value;
+}
+pub fn wideArray(value: [2]u64) [2]u64 {
+    return value;
+}
+pub fn wideSlice(value: []const i64) []const i64 {
+    return value;
+}
+pub fn wideUnion(value: union(enum) { small: u32, wide: u64 }) u64 {
+    return switch (value) {
+        .small => |v| v,
+        .wide => |v| v,
+    };
+}
+pub fn comptimeIntegers(env: napi.Env) !napi.Array {
+    var array = try napi.Array.New(env, .{});
+    try array.Set(0, 3_000_000_000);
+    try array.Set(1, 9_007_199_254_740_991);
+    try array.Set(2, 9_007_199_254_740_992);
+    try array.Set(3, -9_007_199_254_740_992);
+    try array.Set(4, 18_446_744_073_709_551_616);
+    return array;
+}
+pub fn numericAliases(value: usize, signed: isize, c_value: c_long, other: u63) !f64 {
+    return @floatFromInt(value + @as(usize, @intCast(signed)) + @as(usize, @intCast(c_value)) + @as(usize, @intCast(other)));
+}
+pub fn explicitNumber(env: napi.Env, value: napi.Number) !napi.Number {
+    const integer = try napi.Number.from_napi_value(env.raw, value.raw, u64);
+    return napi.Number.create(env, integer);
+}
+pub fn wideNumericEnum(value: enum(u64) { one = 1, two = 2 }) u32 {
+    return @intCast(@backingInt(value));
+}
+
 pub fn createManualExternal(value: u32) !napi.External(u32) {
     return napi.External(u32).New(value);
+}
+fn wideIdentity(value: u64) u64 {
+    return value;
+}
+pub fn widePromise(env: napi.Env, value: u64) !napi.Promise {
+    var promise = try napi.Promise.New(env);
+    try promise.Resolve(value);
+    return promise;
+}
+pub fn wideAsync(value: u64) napi.Async(u64, .single) {
+    return napi.Async(u64, .single).from(value, wideIdentity);
+}
+pub fn wideWorker(env: napi.Env, value: u64) !napi.Promise {
+    return napi.Worker(env, .{ .data = value, .Execute = wideIdentity }).AsyncQueue();
+}
+pub fn wideTsfn(callback: *napi.ThreadSafeFunction(struct { u64 }, void, true, 0)) !void {
+    defer callback.release(.Release) catch {};
+    try callback.Ok(.{std.math.maxInt(u64)}, .NonBlocking);
 }
 
 pub fn externalAfterDeinit(accessor: u8) !usize {
@@ -155,6 +209,7 @@ pub fn manualExternal(value: napi.NapiValue) !u32 {
     const external = try napi.External(u32).tryFromRaw(value.env, value.raw);
     return external.value().*;
 }
+
 // ----------------------------------------------------------------- rollback
 
 const TextCount = struct {

@@ -1087,6 +1087,7 @@ fn emitType(state: *State, comptime T: type) ![]const u8 {
         bool => return "boolean",
         napi.Bool => return "boolean",
         napi.Number => return "number",
+        u64, i64, u128, i128, napi.BigInt => return "bigint",
         napi.String => return "string",
         napi.Null => return "null",
         napi.Undefined => return "undefined",
@@ -1592,15 +1593,16 @@ fn isSourceEnvType(type_expr: []const u8) bool {
 
 fn isSourceNumericType(type_expr: []const u8) bool {
     const trimmed = std.mem.trim(u8, type_expr, " \t\r\n");
+    if (trimmed.len > 1 and (trimmed[0] == 'i' or trimmed[0] == 'u')) {
+        if (std.fmt.parseInt(u16, trimmed[1..], 10)) |_| return true else |_| {}
+    }
     return std.mem.eql(u8, trimmed, "i8") or
         std.mem.eql(u8, trimmed, "i16") or
         std.mem.eql(u8, trimmed, "i32") or
-        std.mem.eql(u8, trimmed, "i64") or
         std.mem.eql(u8, trimmed, "isize") or
         std.mem.eql(u8, trimmed, "u8") or
         std.mem.eql(u8, trimmed, "u16") or
         std.mem.eql(u8, trimmed, "u32") or
-        std.mem.eql(u8, trimmed, "u64") or
         std.mem.eql(u8, trimmed, "usize") or
         std.mem.eql(u8, trimmed, "f16") or
         std.mem.eql(u8, trimmed, "f32") or
@@ -1906,6 +1908,7 @@ fn emitSourceTypeExpr(state: *State, file_path: []const u8, type_expr: []const u
     if (std.mem.eql(u8, trimmed, "napi.Number")) return "number";
     if (std.mem.eql(u8, trimmed, "napi.Null")) return "null";
     if (std.mem.eql(u8, trimmed, "napi.Undefined")) return "undefined";
+    if (std.mem.eql(u8, trimmed, "i64") or std.mem.eql(u8, trimmed, "u64") or std.mem.eql(u8, trimmed, "i128") or std.mem.eql(u8, trimmed, "u128") or std.mem.eql(u8, trimmed, "napi.BigInt")) return "bigint";
     if (isSourceNumericType(trimmed)) return "number";
     if (isSourceStringType(trimmed)) return "string";
     if (std.mem.eql(u8, trimmed, "AbortSignal") or

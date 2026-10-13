@@ -170,7 +170,7 @@ fn enumTypeToObject(env: napi.napi_env, comptime E: type) !napi.napi_value {
             try object.Define(field_name, field_name);
         } else {
             const Tag = @typeInfo(E).@"enum".tag_type;
-            try object.Define(field_name, @as(Tag, @intCast(field_value)));
+            try object.Define(field_name, try NapiValue.Number.create(Env.from_raw(env), @as(Tag, @intCast(field_value))));
         }
     }
     return raw;
@@ -238,7 +238,11 @@ fn valueMatchesType(env: napi.napi_env, raw: napi.napi_value, comptime T: type) 
     }
 
     return switch (infos) {
-        .float, .int, .comptime_int, .comptime_float => (try napiTypeOf(env, raw)) == napi.napi_number,
+        .int => if (comptime T == u64 or T == i64) blk: {
+            comptime options.requireNapiVersion(.v6);
+            break :blk (try napiTypeOf(env, raw)) == napi.napi_bigint;
+        } else (try napiTypeOf(env, raw)) == napi.napi_number,
+        .float, .comptime_int, .comptime_float => (try napiTypeOf(env, raw)) == napi.napi_number,
         .bool => (try napiTypeOf(env, raw)) == napi.napi_boolean,
         .array => (try isArrayValue(env, raw)) or (try isTypedArrayValue(env, raw)),
         .pointer => |ptr| blk: {
@@ -273,6 +277,10 @@ fn valueMatchesType(env: napi.napi_env, raw: napi.napi_value, comptime T: type) 
             (try napiTypeOf(env, raw)) == napi.napi_number,
         else => false,
     };
+}
+
+fn comptimeIntegerIsSafe(comptime value: comptime_int) bool {
+    return value >= -9_007_199_254_740_991 and value <= 9_007_199_254_740_991;
 }
 
 pub const Napi = struct {
@@ -453,6 +461,17 @@ pub const Napi = struct {
         }
     }
 
+    pub fn integerFromNapiValue(env: napi.napi_env, raw: napi.napi_value, comptime T: type) !T {
+        if (comptime T == u64 or T == i64) {
+            comptime options.requireNapiVersion(.v6);
+            if (try napiTypeOf(env, raw) != napi.napi_bigint) {
+                return NapiError.failTypeError("Expected a BigInt for {s}", .{helper.shortTypeName(T)});
+            }
+            return NapiValue.BigInt.from_napi_value(env, raw, T);
+        }
+        return Napi.numericFromNapiValue(env, raw, T);
+    }
+
     /// Fast path for types that map directly onto an N-API numeric getter.
     /// Uses the same validation rules as `from_napi_value`.
     pub fn from_napi_value_fast(env: napi.napi_env, raw: napi.napi_value, comptime T: type) !T {
@@ -465,7 +484,8 @@ pub const Napi = struct {
                 }
                 return result;
             },
-            .float, .int => return Napi.numericFromNapiValue(env, raw, T),
+            .float => return Napi.numericFromNapiValue(env, raw, T),
+            .int => return Napi.integerFromNapiValue(env, raw, T),
             else => @compileError("Unsupported fast from_napi_value type: " ++ @typeName(T)),
         }
     }
@@ -492,6 +512,12 @@ pub const Napi = struct {
 
     pub fn to_napi_value_fast(env: napi.napi_env, value: anytype) !napi.napi_value {
         const T = @TypeOf(value);
+        if (comptime T == comptime_int) {
+            return if (comptime comptimeIntegerIsSafe(value))
+                (try NapiValue.Number.create(Env.from_raw(env), value)).raw
+            else
+                (try NapiValue.BigInt.create(Env.from_raw(env), value)).raw;
+        }
         const value_type = switch (T) {
             comptime_int => comptime helper.comptimeIntMode(value),
             comptime_float => comptime helper.comptimeFloatMode(value),
@@ -517,7 +543,13 @@ pub const Napi = struct {
             },
             .int => |int| {
                 var raw: napi.napi_value = undefined;
-                const status = if (int.signedness == .signed) blk: {
+                const status = if (comptime T == u64 or T == i64) blk: {
+                    comptime options.requireNapiVersion(.v6);
+                    break :blk if (T == u64)
+                        napi.napi_create_bigint_uint64(env, value, &raw)
+                    else
+                        napi.napi_create_bigint_int64(env, value, &raw);
+                } else if (int.signedness == .signed) blk: {
                     if (int.bits <= 32) {
                         break :blk napi.napi_create_int32(env, @intCast(value), &raw);
                     }
@@ -526,9 +558,8 @@ pub const Napi = struct {
                     if (int.bits <= 32) {
                         break :blk napi.napi_create_uint32(env, @intCast(value), &raw);
                     }
-                    // Unsigned values above 2^31 do not fit `napi_create_int64`
-                    // without narrowing. Emit a JavaScript number instead; values
-                    // beyond 2^53 need `napi.BigInt` for exact results.
+                    // These integer types retain number semantics even on
+                    // platforms where their width is 64 bits.
                     break :blk napi.napi_create_double(env, @floatFromInt(value), &raw);
                 };
                 if (status != napi.napi_ok) {
@@ -1048,9 +1079,8 @@ pub const Napi = struct {
                             .undefined => {
                                 return undefined;
                             },
-                            .float, .int => {
-                                return Napi.numericFromNapiValue(env, raw, T);
-                            },
+                            .float => return Napi.numericFromNapiValue(env, raw, T),
+                            .int => return Napi.integerFromNapiValue(env, raw, T),
                             .array => {
                                 return NapiValue.Array.from_napi_value_with_allocator(env, raw, T, allocator);
                             },
@@ -1246,20 +1276,16 @@ pub const Napi = struct {
                         return (try NapiValue.Undefined.create(Env.from_raw(env))).raw;
                     },
                     .float, .int, .comptime_int, .comptime_float => {
-                        const merge_type = switch (value_type) {
-                            comptime_int => comptime helper.comptimeIntMode(value),
-                            comptime_float => comptime helper.comptimeFloatMode(value),
-                            else => value_type,
-                        };
-
-                        switch (merge_type) {
-                            u128, i128 => {
-                                return (try NapiValue.BigInt.create(Env.from_raw(env), value)).raw;
-                            },
-                            else => {
-                                return (try NapiValue.Number.create(Env.from_raw(env), value)).raw;
-                            },
+                        if (comptime value_type == comptime_int) {
+                            return Napi.to_napi_value_fast(env, value);
                         }
+                        if (comptime value_type == u128 or value_type == i128) {
+                            return (try NapiValue.BigInt.create(Env.from_raw(env), value)).raw;
+                        }
+                        if (comptime Napi.canFastTo(value_type)) {
+                            return Napi.to_napi_value_fast(env, value);
+                        }
+                        return (try NapiValue.Number.create(Env.from_raw(env), value)).raw;
                     },
                     .array, .pointer => {
                         const stringMode = comptime helper.stringLike(value_type);
@@ -1545,5 +1571,31 @@ test "metadata skipped fields retain borrowed defaults during deep clone and rol
         try std.testing.expectEqualStrings("first", copy.first);
         try std.testing.expectEqualStrings("last", copy.last);
         try std.testing.expect(source.first.ptr != copy.first.ptr);
+    }
+}
+
+test "fast and generic integer output agree on BigInt and comptime boundaries" {
+    const dispatcher = @import("../../test_dispatcher.zig");
+    defer dispatcher.runtime = .{};
+    inline for (.{ @as(u64, std.math.maxInt(u64)), @as(i64, std.math.minInt(i64)), 9_007_199_254_740_992, -9_007_199_254_740_992 }) |value| {
+        _ = try Napi.to_napi_value_fast(dispatcher.env, value);
+        try std.testing.expectEqual(napi.napi_bigint, dispatcher.runtime.output_type);
+        _ = try Napi.to_napi_value(dispatcher.env, value, null);
+        try std.testing.expectEqual(napi.napi_bigint, dispatcher.runtime.output_type);
+    }
+    inline for (.{ 3_000_000_000, 9_007_199_254_740_991, -9_007_199_254_740_991, @as(usize, 1), @as(isize, 1) }) |value| {
+        _ = try Napi.to_napi_value_fast(dispatcher.env, value);
+        try std.testing.expectEqual(napi.napi_number, dispatcher.runtime.output_type);
+        _ = try Napi.to_napi_value(dispatcher.env, value, null);
+        try std.testing.expectEqual(napi.napi_number, dispatcher.runtime.output_type);
+    }
+}
+
+test "unusual integer widths retain number semantics" {
+    const dispatcher = @import("../../test_dispatcher.zig");
+    defer dispatcher.runtime = .{};
+    inline for (.{ @as(c_long, 1), @as(u63, 1), @as(i48, 1) }) |value| {
+        _ = try Napi.to_napi_value_auto(dispatcher.env, value, null);
+        try std.testing.expectEqual(napi.napi_number, dispatcher.runtime.output_type);
     }
 }

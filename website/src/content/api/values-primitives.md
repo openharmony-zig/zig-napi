@@ -39,9 +39,16 @@ pub fn read(value: napi.NapiValue) !i32 {
 
 Use `BigInt` for `i128`, `u128`, and values that should not be represented as JavaScript numbers.
 
-Integer inputs reject fractions, non-finite numbers and out-of-range values with
-JavaScript errors. `u64`/`usize` outputs use a double, without narrowing to `i64`;
-use BigInt when exact values above `2^53 - 1` matter.
+Automatic conversion maps exactly `u64` and `i64` to JavaScript `bigint` and
+requires Node-API v6. Inputs must be BigInt: passing a number throws `TypeError`,
+and an out-of-range BigInt throws `RangeError`. `u128` and `i128` outputs also use
+BigInt. `usize`, `isize`, C integer types, and other integer widths retain number
+semantics on every platform. Explicit `Number.create` / `Number.from_napi_value`
+also retain number semantics, including for `u64` and `i64`.
+
+Number inputs reject fractions, non-finite numbers, and out-of-range values.
+Comptime integer outputs use number through the safe integer interval
+`-(2^53 - 1)` to `2^53 - 1`, and BigInt outside it.
 
 ## `String`
 
@@ -62,8 +69,8 @@ Manual copies must be released with the allocator that created them.
 ## `BigInt`
 
 `BigInt.from_napi_value(env, raw, T)` is fallible and supports `i64` and `u64`
-extraction. The conversion layer uses checked `BigInt.create` for `i128` and
-`u128` returns. `create` also accepts integer widths up to 64 bits.
+extraction. Automatic conversion uses checked BigInt operations for `i64` /
+`u64` inputs and outputs, and `BigInt.create` for `i128` / `u128` outputs. `create` also accepts integer widths up to 64 bits.
 
 ## Null And Undefined
 
