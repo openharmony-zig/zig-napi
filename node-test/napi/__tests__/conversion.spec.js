@@ -951,6 +951,49 @@ test("comptime integers use number through the safe integer boundary", (t) => {
   t.is(bindings.wideNumericEnum(2), 2);
 });
 
+test("ordinary unions choose the first convertible variant", (t) => {
+  t.is(bindings.unionWidths(300), "big");
+  t.is(bindings.unionWidths(1), "small");
+});
+test("ordinary unions select fractional numbers", (t) => {
+  t.is(bindings.unionFraction(1.5), "float");
+  t.is(bindings.unionFraction(1), "int");
+});
+test("ordinary unions select structures by required input fields", (t) => {
+  t.is(bindings.unionObjects({ renamed: 2 }), "right");
+  t.is(bindings.unionObjects({ left: 1, renamed: 2 }), "left");
+  t.is(bindings.unionObjects(Object.create({ renamed: 2 })), "right");
+  t.throws(() => bindings.unionObjects({ left: undefined }), { name: "TypeError" });
+  const original = new Error("union getter");
+  t.is(t.throws(() => bindings.unionObjects({ get left() { throw original; } })), original);
+});
+test("ordinary unions treat defaulted struct fields as required input", (t) => {
+  t.is(bindings.unionDefaults({ id: 1 }), "plain");
+  t.is(bindings.unionDefaults({ id: 1, label: "named" }), "defaulted");
+});
+test("ordinary unions select structures by field value types", (t) => {
+  t.is(bindings.unionFieldTypes({ value: 1 }), "count");
+  t.is(bindings.unionFieldTypes({ value: "one" }), "text");
+});
+test("ordinary unions recurse through nested variants", (t) => {
+  t.is(bindings.unionNested(300), "big");
+  t.is(bindings.unionNested("text"), "nested");
+});
+test("ordinary unions validate enum members and numeric ranges", (t) => {
+  t.is(bindings.unionEnums(3), "number");
+  t.is(bindings.unionEnums("Missing"), "text");
+  t.is(bindings.unionEnums("Ready"), "status");
+  t.is(bindings.unionFloats(1e300), "wide");
+  t.is(bindings.unionOptional(300), "wide");
+  t.is(bindings.unionOptional(null), "small");
+  t.throws(() => bindings.unionWidths(2 ** 32), { name: "RangeError" });
+  t.throws(() => bindings.unionWidths(1.5), { name: "TypeError" });
+  t.throws(() => bindings.unionWidths(false), { name: "TypeError", message: /does not match any supported variant/ });
+  const before = bindings.activeBytes();
+  for (let index = 0; index < 100; index++) t.is(bindings.unionEnums("Missing"), "text");
+  t.is(bindings.activeBytes(), before);
+});
+
 test("External.tryFromRaw reports foreign values as conversion errors", (t) => {
   const values = require("../../load-addon")("example");
   t.is(bindings.manualExternal(bindings.createManualExternal(7)), 7);
@@ -958,6 +1001,12 @@ test("External.tryFromRaw reports foreign values as conversion errors", (t) => {
   t.throws(() => bindings.manualExternal({}), { message: /Expected external value/ });
 });
 
+test("ordinary unions check BigInt losslessness before choosing a variant", (t) => {
+  t.is(bindings.unionBigInts(2n ** 64n - 1n), "unsigned");
+  t.is(bindings.unionBigInts(-1n), "signed");
+  t.is(bindings.unionBigInts(1n), "signed");
+  t.throws(() => bindings.unionBigInts(2n ** 64n), { name: "RangeError" });
+});
 test("BigInt results survive Promise async worker and TSFN delivery", async (t) => {
   const value = 2n ** 64n - 1n;
   t.is(await bindings.widePromise(value), value);

@@ -34,7 +34,7 @@ All other parameters are read from JavaScript arguments in order. Missing argume
 | array, slice, `std.ArrayList(T)`                      | JavaScript Array, or numeric TypedArray when `T` is supported |
 | enum                                                  | numeric enum value                                            |
 | enum with `pub const napi_string_enum = true`         | string enum name                                              |
-| union(enum)                                           | first matching union field                                    |
+| union(enum)                                           | first variant whose range, members, or fields fit             |
 | `napi.NapiValue`                                      | raw JavaScript value                                          |
 | `napi.Function`, `*napi.Function`, `napi.FunctionRef` | JavaScript function                                           |
 | `napi.ThreadSafeFunction` pointer                     | JavaScript function promoted to a TSFN                        |

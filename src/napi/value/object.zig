@@ -56,11 +56,7 @@ pub const Object = struct {
                         initialized = i + 1;
                         continue;
                     }
-                    var element: napi.napi_value = undefined;
-                    const status = napi.napi_get_named_property(env, raw, Metadata.name(T, field_name).ptr, &element);
-                    if (status != napi.napi_ok) {
-                        return NapiError.failStatus(status);
-                    }
+                    const element = try inputFieldRaw(env, raw, T, field_name);
                     @field(result, field_name) = try Napi.from_napi_value_auto_with_allocator(env, element, field_type, allocator);
                     initialized = i + 1;
                 }
@@ -70,6 +66,13 @@ pub const Object = struct {
                 @compileError("Unsupported type: " ++ @typeName(infos));
             },
         }
+    }
+
+    pub fn inputFieldRaw(env: napi.napi_env, raw: napi.napi_value, comptime T: type, comptime field_name: []const u8) !napi.napi_value {
+        var element: napi.napi_value = null;
+        const status = napi.napi_get_named_property(env, raw, Metadata.name(T, field_name).ptr, &element);
+        if (status != napi.napi_ok) return NapiError.failStatus(status);
+        return element;
     }
 
     pub fn Create(env: Env) !Object {
