@@ -93,6 +93,26 @@ function run(command, args, options = {}) {
   return true;
 }
 
+function runWatch(command, args, options, state) {
+  if (state.stopped) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const child = childProcess.spawn(command, args, {
+      cwd: options.cwd,
+      env: options.env,
+      stdio: "inherit",
+      shell: false,
+    });
+    state.child = child;
+    child.once("error", (error) => console.error(`zig-napi: ${error.message}`));
+    child.once("close", (code) => {
+      state.child = undefined;
+      if (!state.stopped && code !== 0 && options.failureHint)
+        console.error(`zig-napi: ${options.failureHint}`);
+      resolve(!state.stopped && code === 0);
+    });
+  });
+}
+
 function normalizePathForZig(value) {
   return value.split(path.sep).join("/");
 }
@@ -1043,7 +1063,7 @@ async function commandNew(projectDir, flags) {
   console.log(`Created ${packageName} in ${targetDir}`);
 }
 
-async function commandBuild(flags, passthrough = []) {
+async function commandBuild(flags, passthrough = [], watchState) {
   const output = require("./build-output.cjs");
   flags = { ...flags, jsBinding: flags.jsBinding ?? flags.js };
   output.validate(flags, passthrough);
@@ -1071,12 +1091,14 @@ async function commandBuild(flags, passthrough = []) {
   args.push(...passthrough);
   const emnapiEnv = compileFlavors.length > 0 ? resolveWasiEmnapiEnv(cwd) : undefined;
   if (flags.verbose) console.log(`zig ${args.map((arg) => JSON.stringify(arg)).join(" ")}`);
-  const built = run("zig", args, {
+  const runOptions = {
     cwd,
     env: emnapiEnv ? { ...process.env, ...emnapiEnv } : process.env,
     failureHint: wasiMemoryFailureHint(config, compileFlavors),
-    keepAlive: flags.watch,
-  });
+  };
+  const built = watchState
+    ? await runWatch("zig", args, runOptions, watchState)
+    : run("zig", args, runOptions);
   if (!built) return;
   const outputDir = path.resolve(cwd, flags.buildOutputDir || flags.outputDir || ".");
   fs.mkdirSync(outputDir, { recursive: true });
@@ -1184,25 +1206,28 @@ async function commandWatch(flags, passthrough) {
   let timer;
   let building = false;
   let pending = false;
+  const state = { stopped: false, child: undefined };
   const build = async () => {
+    if (state.stopped) return;
     if (building) {
       pending = true;
       return;
     }
     building = true;
     try {
-      await commandBuild(flags, passthrough);
+      await commandBuild(flags, passthrough, state);
     } catch (error) {
       console.error(error);
     }
     building = false;
-    if (pending) {
+    if (pending && !state.stopped) {
       pending = false;
       void build();
     }
   };
   const watcher = fs.watch(cwd, { recursive: true }, (_event, file) => {
     if (
+      state.stopped ||
       !file ||
       file
         .split(/[\\/]/)
@@ -1216,16 +1241,19 @@ async function commandWatch(flags, passthrough) {
     clearTimeout(timer);
     timer = setTimeout(() => void build(), 100);
   });
-  process.once("SIGINT", () => {
+  const stop = (signal) => {
+    if (state.stopped) return;
+    state.stopped = true;
+    pending = false;
     clearTimeout(timer);
     watcher.close();
-  });
-  process.once("SIGTERM", () => {
-    clearTimeout(timer);
-    watcher.close();
-  });
+    process.exitCode = 128 + os.constants.signals[signal];
+    if (state.child) state.child.kill(signal);
+  };
+  process.on("SIGINT", () => stop("SIGINT"));
+  process.on("SIGTERM", () => stop("SIGTERM"));
   await build();
-  console.log(`Watching Zig sources in ${cwd}`);
+  if (!state.stopped) console.log(`Watching Zig sources in ${cwd}`);
 }
 
 async function commandDts(flags, passthrough = []) {
