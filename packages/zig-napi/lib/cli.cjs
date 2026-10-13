@@ -2,6 +2,7 @@
 
 const childProcess = require("node:child_process");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const { NapiCli, writeJsBinding } = require("@napi-rs/cli");
 const { Command } = require("commander");
@@ -338,6 +339,77 @@ async function napiOptions(flags) {
 
 function cleanOptions(options) {
   return Object.fromEntries(Object.entries(options).filter(([, value]) => value !== undefined));
+}
+
+async function previewNapiRename(cwd, flags) {
+  cwd = fs.realpathSync(cwd);
+  const excluded = (name) =>
+    ["node_modules", ".git", ".zig-cache", "zig-out"].includes(name) || name.startsWith(".tmp");
+  const files = (root) => {
+    const contents = new Map();
+    const walk = (directory) => {
+      for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+        if (entry.isSymbolicLink() || excluded(entry.name)) continue;
+        const file = path.join(directory, entry.name);
+        if (entry.isDirectory()) walk(file);
+        else if (entry.isFile()) contents.set(path.relative(root, file), fs.readFileSync(file));
+      }
+    };
+    walk(root);
+    return contents;
+  };
+  const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "zig-napi-rename-")));
+  const stdoutWrite = process.stdout.write;
+  try {
+    fs.cpSync(cwd, directory, {
+      recursive: true,
+      filter: (file) => {
+        const stat = fs.lstatSync(file);
+        return (
+          (stat.isFile() || stat.isDirectory()) && (file === cwd || !excluded(path.basename(file)))
+        );
+      },
+    });
+    const before = files(directory);
+    const options = { ...flags, cwd: directory };
+    for (const key of ["packageJsonPath", "configPath", "npmDir", "manifestPath"]) {
+      if (!flags[key]) continue;
+      let requested = path.resolve(cwd, flags[key]);
+      const missing = [];
+      while (!fs.existsSync(requested)) {
+        missing.unshift(path.basename(requested));
+        requested = path.dirname(requested);
+      }
+      const relative = path.relative(cwd, path.join(fs.realpathSync(requested), ...missing));
+      if (relative === ".." || relative.startsWith(".." + path.sep) || path.isAbsolute(relative))
+        throw new Error(`Rename path leaves the project: ${flags[key]}`);
+      options[key] = path.resolve(directory, relative);
+    }
+    // The upstream API has no dry-run mode and may write logs to stdout.
+    process.stdout.write = (_chunk, encoding, callback) => {
+      const done = typeof encoding === "function" ? encoding : callback;
+      if (done) process.nextTick(done);
+      return true;
+    };
+    await napiCli.rename(cleanOptions(options));
+    process.stdout.write = stdoutWrite;
+    const after = files(directory);
+    const writes = [...after]
+      .filter(([file, content]) => !before.get(file)?.equals(content))
+      .map(([file, content]) => ({
+        file: path.join(cwd, file),
+        content: content.toString("utf8"),
+      }));
+    const removals = [...before.keys()]
+      .filter((file) => !after.has(file))
+      .map((file) => path.join(cwd, file));
+    console.log(
+      JSON.stringify({ writes, renames: [], ...(removals.length ? { removals } : {}) }, null, 2),
+    );
+  } finally {
+    process.stdout.write = stdoutWrite;
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
 }
 
 function readJson(file) {
@@ -1403,8 +1475,9 @@ function createProgram() {
     .action(async (flags) => {
       const cwd = path.resolve(flags.cwd || ".");
       await readZigNapiConfig(cwd, flags);
-      if (!flags.binaryName && !flags.dryRun && !flags.author) {
-        await napiCli.rename(cleanOptions({ ...flags, cwd }));
+      if (flags.binaryName === undefined && flags.author === undefined) {
+        if (flags.dryRun) await previewNapiRename(cwd, flags);
+        else await napiCli.rename(cleanOptions({ ...flags, cwd }));
       } else {
         require("./rename-project.cjs")(cwd, flags);
       }
