@@ -91,7 +91,7 @@ Exports a Zig struct type as a JavaScript class with constructor initialization 
 | `pub fn method(self: *T, ...)`       | instance method                               |
 | `pub fn method(self: T, ...)`        | instance method with value receiver           |
 | `pub fn staticMethod(...)`           | static method                                 |
-| static factory returning `T` or `*T` | static factory returning a class instance     |
+| static factory returning `T`         | static factory returning a class instance     |
 | `pub const value = ...`              | static readonly value                         |
 | `pub const arg_ownership = ...`      | wrapper configuration, not a class member     |
 | `pub fn deinit(self: *T)`            | called when the wrapped instance is finalized |
@@ -123,10 +123,11 @@ pub const CounterClass = napi.Class(Counter);
   the native state, so field writes through the copy are not visible afterwards.
 - Every other method is a static method. Its `this` is the class constructor and
   is never unwrapped, so `Class.twice(3)` behaves like a plain function.
-- A static method returning `T` or `*T` is a factory. The returned value is moved
-  into a real instance of the class (correct prototype, wrapped exactly once)
-  and user `init` is _not_ executed again. `*T` moves the pointee; the
-  allocation holding it stays owned by the factory.
+- A static method returning `T`, `!T`, or `Result(T)` is a factory. The returned
+  value is moved into a real instance of the class (correct prototype, wrapped
+  exactly once), and user `init` is _not_ executed again. Returning `*T` or
+  `*const T`, including inside an error union or Result, is a compile error.
+  Store heap allocations in fields of `T` and release them in `deinit`.
 - Each `napi_env` owns its own constructor reference, so the main thread and
   worker threads can construct instances and call factories concurrently. The
   reference is weak and the definition is released through an environment
@@ -213,7 +214,7 @@ napi.ClassWithoutInit(comptime T: type)
 
 Exports a class wrapper when construction should be controlled by native factory functions instead of the JavaScript constructor path.
 
-Declaration generation emits a private constructor for this form. Static factory methods that return `T` or `*T` are the public construction path.
+Declaration generation emits a private constructor for this form. Static factory methods returning `T` by value (including `!T` and `Result(T)`) are the public construction path.
 
 ## `Reference` And `Ref`
 

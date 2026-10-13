@@ -21,6 +21,22 @@ function withFixture(source, version, action) {
   }
 }
 
+for (const payload of ["*Self", "*const Self", "!*Self", "!*const Self", "napi.Result(*Self)", "napi.Result(*const Self)"]) {
+  nativeTest(`class factories reject ${payload} returns`, (t) => {
+    withFixture(`const napi = @import("napi");
+const Model = struct {
+    const Self = @This();
+    pub fn make() ${payload} { return undefined; }
+};
+export fn probe() void { _ = napi.ClassWithoutInit(Model).to_napi_value(napi.Env.from_raw(null)) catch {}; }
+`, 8, ({ fixture, modules }) => {
+      const result = spawnSync("zig", ["build-obj", "-fno-emit-bin", "--dep", "napi", `-Mroot=${fixture}`, ...modules], { cwd: root, encoding: "utf8", timeout: 20000 });
+      t.not(result.status, 0, result.stderr);
+      t.regex(result.stderr, /factory must return.*by value/i);
+    });
+  });
+}
+
 for (const type of ["u64", "i64"]) {
   nativeTest(`${type} generic conversion requires Node-API v6`, (t) => {
     withFixture(`const napi = @import("napi");

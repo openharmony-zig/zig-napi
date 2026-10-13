@@ -1439,7 +1439,7 @@ fn emitClassDecl(state: *State, comptime ExportName: []const u8, comptime T: typ
                 try appendFmt(&class_text, "  {s}set {s}(value: {s})\n", .{ if (is_instance) "" else "static ", exported_name, try emitType(state, parameter) });
                 continue;
             }
-            const is_factory = ret_payload == Wrapped or ret_payload == *Wrapped;
+            const is_factory = ret_payload == Wrapped;
             if (!is_instance and is_factory) {
                 const method_param_names = try state.source.getClassMethodParamNames(ExportName, decl);
                 try appendFmt(&class_text, "  static {s}(", .{exported_name});
