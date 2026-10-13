@@ -125,20 +125,11 @@ pub fn Reference(comptime T: type) type {
             return T.from_raw(env.raw, raw_value);
         }
 
-        /// Release the reference *and* delete it: the count is dropped first
-        /// (which makes the JavaScript value collectible again) and the handle
-        /// is destroyed afterwards, so this reference cannot be revived with
-        /// `Ref`. Callers that only need to stop counting a value must not use
-        /// this; they keep the reference and pass `GetValue` around instead.
+        /// Delete the reference regardless of its count, releasing its hold on
+        /// the JavaScript value. This handle cannot be revived with `Ref`.
         pub fn Unref(self: *Self, env: Env) !void {
             if (self.isTaken()) {
                 return NapiError.Error.fromStatus(@as([]const u8, "Ref value has been deleted"));
-            }
-
-            var count: u32 = 0;
-            const unref_status = napi.napi_reference_unref(env.raw, self.raw_ref, &count);
-            if (unref_status != napi.napi_ok) {
-                return NapiError.Error.fromStatus(NapiError.Status.New(unref_status));
             }
 
             const delete_status = napi.napi_delete_reference(env.raw, self.raw_ref);
@@ -167,4 +158,37 @@ pub fn Reference(comptime T: type) type {
             return Self.Unref(self, env);
         }
     };
+}
+
+test "reference deletion is independent of count and safe to retry" {
+    const std = @import("std");
+    const dispatcher = @import("../../test_dispatcher.zig");
+    const Wrapper = struct {
+        raw: napi.napi_value,
+        pub fn from_raw(_: napi.napi_env, value: napi.napi_value) @This() {
+            return .{ .raw = value };
+        }
+    };
+    const env = Env.from_raw(dispatcher.env);
+    defer dispatcher.runtime = .{};
+    defer NapiError.clearLastError();
+    dispatcher.runtime = .{};
+    var zero = Reference(Wrapper).from_raw(dispatcher.env, @ptrFromInt(4));
+    try zero.Delete(env);
+    try std.testing.expect(zero.isTaken());
+    try std.testing.expectError(error.GenericFailure, zero.GetValue(env));
+    try std.testing.expectEqualStrings("Ref value has been deleted", NapiError.last_error.?.JsError.custom_status.?);
+    dispatcher.runtime = .{};
+    var strong = Reference(Wrapper).from_raw(dispatcher.env, @ptrFromInt(4));
+    _ = try strong.Ref(env);
+    _ = try strong.Ref(env);
+    dispatcher.runtime.delete_status = napi.napi_generic_failure;
+    try std.testing.expectError(error.GenericFailure, strong.Delete(env));
+    try std.testing.expect(!strong.isTaken());
+    try std.testing.expectEqual(@as(u32, 2), dispatcher.runtime.count);
+    dispatcher.runtime.delete_status = napi.napi_ok;
+    try strong.Delete(env);
+    try std.testing.expect(strong.isTaken());
+    try std.testing.expectEqual(@as(usize, 0), dispatcher.runtime.unrefs);
+    try std.testing.expectError(error.GenericFailure, strong.GetValue(env));
 }
