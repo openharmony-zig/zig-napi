@@ -181,20 +181,11 @@ pub const Object = struct {
         return Napi.from_napi_value_auto(self.env, raw, T);
     }
 
-    /// Check if the object has a property
-    /// If key is []u8 or likely, key will marked as a string, it will try to get a named property
-    /// Otherwise, key will be marked as a NapiValue and check a property by napi_has_property
-    pub fn Has(self: Object, comptime key: []const u8) !bool {
-        var result: bool = false;
-
-        const is_string = helper.isString(key);
-        const status = switch (is_string) {
-            .true => napi.napi_has_named_property(self.env, self.raw, @ptrCast(key.ptr), &result),
-            .false => napi.napi_has_property(self.env, self.raw, @ptrCast(key.ptr), &result),
-        };
-        if (status != napi.napi_ok) {
-            return NapiError.failStatus(status);
-        }
+    /// Check for a string property on the object or its prototype chain.
+    pub fn Has(self: Object, key: []const u8) !bool {
+        var result = false;
+        const status = napi.napi_has_property(self.env, self.raw, try self.keyToNapiValue(key), &result);
+        if (status != napi.napi_ok) return NapiError.failStatus(status);
         return result;
     }
 

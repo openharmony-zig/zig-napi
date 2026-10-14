@@ -938,3 +938,18 @@ test("a custom native deinit runs next to the resource rollback", (t) => {
   t.is(bindings.activeBytes(), baseline);
   t.is(bindings.activeAllocations(), baselineAllocations);
 });
+test("External.tryFromRaw reports foreign values as conversion errors", (t) => {
+  const values = require("../../load-addon")("example");
+  t.is(bindings.manualExternal(bindings.createManualExternal(7)), 7);
+  t.throws(() => bindings.manualExternal(values.createMisalignedExternal()), { message: /not created by zig-napi/ });
+  t.throws(() => bindings.manualExternal({}), { message: /Expected external value/ });
+});
+
+
+nativeOnlyTest("External accessors panic clearly after deinit", (t) => {
+  for (let accessor = 0; accessor < 6; accessor++) {
+    const result = runIsolated(`b.externalAfterDeinit(${accessor});`);
+    t.not(result.status, 0);
+    t.regex(result.stderr, /External accessed after deinit/);
+  }
+});

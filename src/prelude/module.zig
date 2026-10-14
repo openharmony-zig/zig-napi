@@ -6,7 +6,6 @@ const Env = @import("../napi/env.zig").Env;
 const Object = @import("../napi/value.zig").Object;
 const NapiError = @import("../napi/wrapper/error.zig");
 const Napi = @import("../napi/util/napi.zig").Napi;
-const Undefined = @import("../napi/value/undefined.zig").Undefined;
 const Metadata = @import("../napi/metadata.zig");
 const options = @import("../napi/options.zig");
 
@@ -30,10 +29,10 @@ pub fn NODE_API_MODULE_WITH_INIT(
         /// Report a failed export conversion to JavaScript. A pending exception is
         /// left untouched so the original error object survives.
         fn reportInitFailure(inner_env: Env, err: anyerror) void {
-            if (err == error.PendingException or NapiError.hasPendingException()) {
+            if (err == error.PendingException or inner_env.isExceptionPending()) {
                 return;
             }
-            NapiError.throwCurrent(inner_env);
+            NapiError.throwAnyErrorInto(err, inner_env);
         }
 
         fn defineExport(exports: Object, comptime member: []const u8, value: napi.napi_value) !void {
@@ -65,18 +64,17 @@ pub fn NODE_API_MODULE_WITH_INIT(
             defer outer_frame.restore();
 
             const export_obj = Object.from_raw(env, exports);
-            const undefined_value = Undefined.New(inner_env);
 
             inline for (root_infos.@"struct".field_names) |field_name| {
                 if (comptime Metadata.get(root, field_name).skip) continue;
                 const value = Napi.to_napi_value(env, @field(root, field_name), Metadata.name(root, field_name)) catch |err| {
                     reportInitFailure(inner_env, err);
-                    return undefined_value.raw;
+                    return exports;
                 };
 
                 defineExport(export_obj, field_name, value) catch |err| {
                     reportInitFailure(inner_env, err);
-                    return undefined_value.raw;
+                    return exports;
                 };
             }
 
@@ -92,11 +90,11 @@ pub fn NODE_API_MODULE_WITH_INIT(
                 }
                 const value = Napi.to_napi_value(env, origin_value, Metadata.name(root, decl)) catch |err| {
                     reportInitFailure(inner_env, err);
-                    return undefined_value.raw;
+                    return exports;
                 };
                 defineExport(export_obj, decl, value) catch |err| {
                     reportInitFailure(inner_env, err);
-                    return undefined_value.raw;
+                    return exports;
                 };
             }
 
@@ -106,7 +104,7 @@ pub fn NODE_API_MODULE_WITH_INIT(
                     export_obj,
                 ) catch |e| {
                     reportInitFailure(inner_env, e);
-                    return export_obj.raw;
+                    return exports;
                 };
 
                 return (result orelse export_obj).raw;
@@ -122,7 +120,7 @@ pub fn NODE_API_MODULE_WITH_INIT(
             .nm_flags = 0,
             .nm_filename = null,
             .nm_register_func = InitFn.inner_init,
-            .nm_modname = @ptrCast(name.ptr),
+            .nm_modname = @ptrCast((name ++ "\x00").ptr),
             .nm_priv = null,
             .reserved = .{ null, null, null, null },
         };

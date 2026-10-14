@@ -67,7 +67,7 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
                 }
 
                 fn undefinedValue(inner_env: napi.napi_env) napi.napi_value {
-                    const undefined_value = Undefined.create(Env.from_raw(inner_env)) catch @panic("napi: failed to create undefined value");
+                    const undefined_value = Undefined.create(Env.from_raw(inner_env)) catch return null;
                     return undefined_value.raw;
                 }
 
@@ -254,7 +254,7 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
             };
 
             var result: napi.napi_value = undefined;
-            const fn_status = napi.napi_create_function(env.raw, @ptrCast(function_name.ptr), 0, FnImpl.inner_fn, null, &result);
+            const fn_status = napi.napi_create_function(env.raw, @ptrCast(function_name.ptr), function_name.len, FnImpl.inner_fn, null, &result);
             if (fn_status != napi.napi_ok) {
                 return NapiError.Error.fromStatus(NapiError.Status.New(fn_status));
             }
@@ -430,4 +430,18 @@ pub fn Function(comptime Args: type, comptime Return: type) type {
             return Reference(Self).New(Env.from_raw(self.env), self);
         }
     };
+}
+
+test "callback undefined failure returns a null handle" {
+    const dispatcher = @import("../../test_dispatcher.zig");
+    const Body = struct {
+        fn call() !void {
+            return error.InvalidArg;
+        }
+    };
+    const function = try Function(struct {}, void).New(Env.from_raw(dispatcher.env), "call", Body.call);
+    dispatcher.runtime = .{ .undefined_status = napi.napi_generic_failure };
+    defer dispatcher.runtime = .{};
+    try std.testing.expect(function.inner_fn.?(dispatcher.env, null) == null);
+    try std.testing.expect(dispatcher.runtime.pending);
 }

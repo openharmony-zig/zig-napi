@@ -213,16 +213,18 @@ fn isDtsType(comptime T: type) bool {
 fn isArrayList(comptime T: type) bool {
     const info = @typeInfo(T);
     if (info != .@"struct") return false;
-    var has_items = false;
-    var has_capacity = false;
-    inline for (info.@"struct".field_names) |field_name| {
-        if (std.mem.eql(u8, field_name, "items")) has_items = true;
-        if (std.mem.eql(u8, field_name, "capacity")) has_capacity = true;
+    inline for (info.@"struct".field_names, info.@"struct".field_types) |field_name, field_type| {
+        if (comptime !std.mem.eql(u8, field_name, "items")) continue;
+        const items_info = @typeInfo(field_type);
+        if (items_info != .pointer or items_info.pointer.size != .slice) return false;
+        const child = items_info.pointer.child;
+        return T == std.ArrayList(child) or T == std.array_list.Aligned(child, std.mem.Alignment.fromByteUnitsOptional(items_info.pointer.attrs.@"align"));
     }
-    return has_items and has_capacity;
+    return false;
 }
 
 fn arrayListElementType(comptime T: type) type {
+    if (!isArrayList(T)) @compileError("Expected ArrayList type: " ++ @typeName(T));
     const info = @typeInfo(T);
     inline for (info.@"struct".field_names, info.@"struct".field_types) |field_name, field_type| {
         if (std.mem.eql(u8, field_name, "items")) {

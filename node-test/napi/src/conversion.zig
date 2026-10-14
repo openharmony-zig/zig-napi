@@ -21,6 +21,9 @@ const use_wasm_async_work = builtin.cpu.arch == .wasm32 and builtin.os.tag == .w
 // pages from the module's safe page allocator.
 var counter = counting.CountingAllocator.init(napi.safePageAllocator());
 pub const napi_allocator = counter.allocator();
+pub const napi_config = .{
+    .renamedFunction = napi.ExportOptions{ .name = "publicFunction" },
+};
 
 /// Second, independent accounting allocator used by the allocator-provenance
 /// tests. It is only ever reached through an explicit override.
@@ -131,6 +134,27 @@ pub fn stringEnumRoundtrip(value: StatusEnum) StatusEnum {
     return value;
 }
 
+pub fn createManualExternal(value: u32) !napi.External(u32) {
+    return napi.External(u32).New(value);
+}
+
+pub fn externalAfterDeinit(accessor: u8) !usize {
+    var external = try napi.External(u32).New(7);
+    external.deinit();
+    return switch (accessor) {
+        0 => external.value().*,
+        1 => external.valueMut().*,
+        2 => external.asPtr().*,
+        3 => external.asConstPtr().*,
+        4 => external.sizeHint(),
+        else => @intCast(external.adjustedSize()),
+    };
+}
+
+pub fn manualExternal(value: napi.NapiValue) !u32 {
+    const external = try napi.External(u32).tryFromRaw(value.env, value.raw);
+    return external.value().*;
+}
 // ----------------------------------------------------------------- rollback
 
 const TextCount = struct {
@@ -625,6 +649,82 @@ pub fn callNumber(callback: napi.Function(struct {}, i32)) !i32 {
 
 pub fn concatUtf16(env: napi.Env, input: []const u16) !napi.String {
     return try napi.String.createUtf16(env, input);
+}
+
+pub fn tsfnCallAsyncThenAbort(tsfn: *PlainTsfn) !napi.Promise {
+    const promise = try tsfn.CallAsync(.{1}, .NonBlocking);
+    try tsfn.abort();
+    return promise;
+}
+
+pub fn tsfnCallAsyncBatchThenAbort(tsfn: *PlainTsfn) ![3]napi.Promise {
+    var promises: [3]napi.Promise = undefined;
+    for (&promises, 0..) |*promise, index| promise.* = try tsfn.CallAsync(.{@intCast(index)}, .NonBlocking);
+    try tsfn.abort();
+    return promises;
+}
+
+pub fn tsfnCallAsyncQueueFailure(tsfn: *LimitedTsfn) ![2]napi.Promise {
+    defer tsfn.release(.Release) catch {};
+    return .{
+        try tsfn.CallAsync(.{1}, .NonBlocking),
+        try tsfn.CallAsync(.{2}, .NonBlocking),
+    };
+}
+
+pub fn tsfnBlockingQueueProbe(tsfn: *LimitedTsfn) !void {
+    defer tsfn.release(.Release) catch {};
+    try tsfn.Ok(.{1}, .Blocking);
+    try tsfn.Ok(.{2}, .Blocking);
+}
+
+pub fn tsfnBuilderBlockingQueueProbe(env: napi.Env, callback: napi.NapiValue) !void {
+    const tsfn = try PlainTsfn.builder(env, callback).maxQueueSize(1).build();
+    defer tsfn.release(.Release) catch {};
+    try tsfn.Ok(.{1}, .Blocking);
+    try tsfn.Ok(.{2}, .Blocking);
+}
+
+pub fn closeIterator(iterator: napi.Iterator(i32)) !void {
+    try iterator.close();
+}
+
+pub fn closeAsyncIterator(iterator: napi.AsyncIterator(i32)) !napi.PromiseValue {
+    return iterator.close();
+}
+
+pub fn renamedFunction() void {}
+
+pub fn unsignedAsBigInt(env: napi.Env, value: u64) !napi.BigInt {
+    return napi.BigInt.create(env, value);
+}
+
+pub fn signedAsBigInt(env: napi.Env, value: i64) !napi.BigInt {
+    return napi.BigInt.create(env, value);
+}
+
+pub fn minSignedBigInt(env: napi.Env) !napi.BigInt {
+    return napi.BigInt.create(env, std.math.minInt(i128));
+}
+
+pub fn sumIntegerSlice(values: []const i32) i32 {
+    var total: i32 = 0;
+    for (values) |value| total += value;
+    return total;
+}
+
+pub const Page = struct { items: []const u32, total: u32 };
+
+pub fn page() Page {
+    return .{ .items = &.{ 1, 2, 3 }, .total = 10 };
+}
+
+pub fn roundtripPage(value: Page) Page {
+    return value;
+}
+
+pub fn roundtripArrayList(value: std.ArrayList(u32)) std.ArrayList(u32) {
+    return value;
 }
 
 comptime {

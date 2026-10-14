@@ -232,6 +232,16 @@ pub fn toError(status: Status) anyerror {
     };
 }
 
+fn exceptionPending(env: napi.napi_env) bool {
+    var pending = false;
+    return napi.napi_is_exception_pending(env, &pending) == napi.napi_ok and pending;
+}
+
+fn undefinedOrNull(env: napi.napi_env) napi.napi_value {
+    var result: napi.napi_value = null;
+    return if (napi.napi_get_undefined(env, &result) == napi.napi_ok) result else null;
+}
+
 fn napiError(comptime T: type) type {
     return struct {
         status: ?Status,
@@ -246,19 +256,25 @@ fn napiError(comptime T: type) type {
         /// Marks the error payload as borrowed data for ownership handling.
         pub const is_napi_error = true;
 
-        pub fn to_napi_error(self: Self, env: Env) napi.napi_value {
-            var e: napi.napi_value = undefined;
-            const status_str = if (self.custom_status) |custom_status| custom_status else self.status.?.ToString();
-            const code: napi.napi_value = String.New(env, status_str).raw;
-            const message: napi.napi_value = String.New(env, self.message).raw;
-            const create_status = switch (T) {
-                JsErrorType => napi.napi_create_error(env.raw, code, message, &e),
-                JsTypeErrorType => napi.napi_create_type_error(env.raw, code, message, &e),
-                JsRangeErrorType => napi.napi_create_range_error(env.raw, code, message, &e),
+        fn createError(self: Self, env: Env) ?napi.napi_value {
+            const status_str = self.custom_status orelse self.status.?.ToString();
+            var code: napi.napi_value = null;
+            var code_value: napi.napi_value = null;
+            if (napi.napi_create_string_utf8(env.raw, status_str.ptr, status_str.len, &code_value) == napi.napi_ok) code = code_value;
+            var message: napi.napi_value = null;
+            if (napi.napi_create_string_utf8(env.raw, self.message.ptr, self.message.len, &message) != napi.napi_ok) return null;
+            var result: napi.napi_value = null;
+            const status = switch (T) {
+                JsErrorType => napi.napi_create_error(env.raw, code, message, &result),
+                JsTypeErrorType => napi.napi_create_type_error(env.raw, code, message, &result),
+                JsRangeErrorType => napi.napi_create_range_error(env.raw, code, message, &result),
                 else => unreachable,
             };
-            std.debug.assert(create_status == napi.napi_ok);
-            return e;
+            return if (status == napi.napi_ok) result else null;
+        }
+
+        pub fn to_napi_error(self: Self, env: Env) napi.napi_value {
+            return self.createError(env) orelse undefinedOrNull(env.raw);
         }
 
         pub fn fromMessage(message: []const u8) Self {
@@ -293,24 +309,12 @@ fn napiError(comptime T: type) type {
         }
 
         pub fn throwInto(self: Self, env: Env) void {
-            var e: napi.napi_value = undefined;
-            const status_str = if (self.custom_status) |custom_status| custom_status else self.status.?.ToString();
-            const code: napi.napi_value = String.New(env, status_str).raw;
-            const message: napi.napi_value = String.New(env, self.message).raw;
-
-            const create_status = switch (T) {
-                JsErrorType => napi.napi_create_error(env.raw, code, message, &e),
-                JsTypeErrorType => napi.napi_create_type_error(env.raw, code, message, &e),
-                JsRangeErrorType => napi.napi_create_range_error(env.raw, code, message, &e),
-                else => unreachable,
+            if (exceptionPending(env.raw)) return;
+            const result = self.createError(env) orelse {
+                if (!exceptionPending(env.raw)) _ = napi.napi_throw_error(env.raw, null, "Failed to create native error");
+                return;
             };
-            std.debug.assert(create_status == napi.napi_ok);
-
-            const throw_status = napi.napi_throw(env.raw, e);
-            // `napi_throw` reports `napi_pending_exception` when JavaScript already
-            // holds one. The existing exception wins; overwriting it would replace
-            // the original error object (for example the one thrown by a getter).
-            std.debug.assert(throw_status == napi.napi_ok or throw_status == napi.napi_pending_exception);
+            _ = napi.napi_throw(env.raw, result);
         }
     };
 }
@@ -328,9 +332,7 @@ pub fn checkNapiStatus(env: napi.napi_env, err: anytype) napi.napi_value {
     const err_type = @TypeOf(err);
 
     const inner_env = Env.from_raw(env);
-    var result: napi.napi_value = undefined;
-    const status = napi.napi_get_undefined(env, &result);
-    std.debug.assert(status == napi.napi_ok);
+    const result = undefinedOrNull(env);
 
     switch (err_type) {
         Status => {
@@ -560,4 +562,40 @@ test "saturated error storage preserves every saved frame" {
         try std.testing.expectEqualStrings(try std.fmt.bufPrint(&expected, "frame {d}", .{index}), messageOf(last_error.?));
     }
     clearLastError();
+}
+
+test "error creation failures fall back to undefined or static throws" {
+    const dispatcher = @import("../../test_dispatcher.zig");
+    const env = Env.from_raw(dispatcher.env);
+    defer dispatcher.runtime = .{};
+    const errors = [_]Error{ Error.withReason("message"), Error.withTypeError("message"), Error.withRangeError("message") };
+    for (errors) |err| {
+        dispatcher.runtime = .{ .create_status = napi.napi_generic_failure };
+        try std.testing.expectEqual(dispatcher.undefined_raw, err.to_napi_error(env));
+        dispatcher.runtime = .{ .create_status = napi.napi_generic_failure };
+        err.throwInto(env);
+        try std.testing.expectEqual(@as(usize, 1), dispatcher.runtime.fallbacks);
+        try std.testing.expectEqual(@as(usize, 0), dispatcher.runtime.throws);
+        dispatcher.runtime = .{ .string_failure = 1 };
+        err.throwInto(env);
+        try std.testing.expect(dispatcher.runtime.code == null);
+        try std.testing.expectEqual(@as(usize, 1), dispatcher.runtime.throws);
+        dispatcher.runtime = .{ .string_failure = 2 };
+        err.throwInto(env);
+        try std.testing.expectEqual(@as(usize, 1), dispatcher.runtime.fallbacks);
+        dispatcher.runtime = .{ .create_status = napi.napi_generic_failure, .undefined_status = napi.napi_generic_failure };
+        try std.testing.expect(err.to_napi_error(env) == null);
+        dispatcher.runtime = .{ .pending = true };
+        err.throwInto(env);
+        try std.testing.expectEqual(@as(usize, 0), dispatcher.runtime.string_calls);
+        dispatcher.runtime = .{ .throw_status = napi.napi_generic_failure };
+        err.throwInto(env);
+        try std.testing.expectEqual(@as(usize, 1), dispatcher.runtime.throws);
+    }
+}
+test "status error returns null when undefined creation fails" {
+    const dispatcher = @import("../../test_dispatcher.zig");
+    dispatcher.runtime = .{ .undefined_status = napi.napi_generic_failure };
+    defer dispatcher.runtime = .{};
+    try std.testing.expect(checkNapiStatus(dispatcher.env, Status.GenericFailure) == null);
 }

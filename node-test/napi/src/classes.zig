@@ -800,3 +800,33 @@ pub const RefusingFactoryClass = napi.ClassWithoutInit(RefusingFactory);
 comptime {
     napi.NODE_API_MODULE("classes", @This());
 }
+
+const DuplicateProperties = struct {
+    pub const napi_config = .{
+        .first = napi.ExportOptions{ .name = "duplicate" },
+        .second = napi.ExportOptions{ .name = "duplicate" },
+    };
+
+    pub fn first() void {}
+    pub fn second() void {}
+};
+
+pub fn defineDuplicateClass(env: napi.Env) !void {
+    _ = try napi.Class(DuplicateProperties).to_napi_value(env);
+}
+
+const FailingStaticValue = struct {
+    pub const napi_custom = true;
+
+    pub fn to_napi_value(_: @This(), _: napi.napi_sys.napi_sys.napi_env) !napi.napi_sys.napi_sys.napi_value {
+        return error.OutOfMemory;
+    }
+};
+
+const FailingStaticClass = struct {
+    pub const value = FailingStaticValue{};
+};
+
+pub fn defineFailingStaticClass(env: napi.Env) !void {
+    _ = try napi.Class(FailingStaticClass).to_napi_value(env);
+}

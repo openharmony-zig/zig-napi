@@ -57,21 +57,20 @@ pub fn External(comptime T: type) type {
         }
 
         pub fn from_raw(env: napi.napi_env, raw: napi.napi_value) Self {
-            return Self.from_napi_value(env, raw);
+            return Self.tryFromRaw(env, raw) catch @panic("External.from_raw requires a valid zig-napi External of the expected type");
         }
 
-        pub fn from_napi_value(env: napi.napi_env, raw: napi.napi_value) Self {
-            const header = headerFromNapiValue(env, raw, true) orelse return invalid(env, raw);
-
-            return Self{
-                .env = env,
-                .raw = raw,
-                .header = header,
-            };
+        pub fn tryFromRaw(env: napi.napi_env, raw: napi.napi_value) !Self {
+            const header = (try headerFromNapiValue(env, raw, true)) orelse return error.InvalidArg;
+            return .{ .env = env, .raw = raw, .header = header };
         }
 
-        pub fn matches_napi_value(env: napi.napi_env, raw: napi.napi_value) bool {
-            return headerFromNapiValue(env, raw, false) != null;
+        pub fn from_napi_value(env: napi.napi_env, raw: napi.napi_value) !Self {
+            return Self.tryFromRaw(env, raw);
+        }
+
+        pub fn matches_napi_value(env: napi.napi_env, raw: napi.napi_value) !bool {
+            return (try headerFromNapiValue(env, raw, false)) != null;
         }
 
         pub fn to_napi_value(self: Self, env: napi.napi_env) !napi.napi_value {
@@ -124,47 +123,37 @@ pub fn External(comptime T: type) type {
             }
         }
 
-        fn headerFromNapiValue(env: napi.napi_env, raw: napi.napi_value, comptime report_error: bool) ?*TaggedHeader {
+        fn headerFromNapiValue(env: napi.napi_env, raw: napi.napi_value, comptime report_error: bool) !?*TaggedHeader {
             var value_type: napi.napi_valuetype = undefined;
             const type_status = napi.napi_typeof(env, raw, &value_type);
-            if (type_status != napi.napi_ok) {
-                if (report_error) {
-                    NapiError.last_error = NapiError.Error.withStatus(NapiError.Status.New(type_status));
-                }
-                return null;
-            }
+            if (type_status != napi.napi_ok) return NapiError.failStatus(type_status);
             if (value_type != napi.napi_external) {
                 if (report_error) {
                     NapiError.last_error = NapiError.Error.withCodeAndMessage("InvalidArg", "Expected external value");
                 }
-                return null;
+                return if (report_error) error.InvalidArg else null;
             }
 
             var data: ?*anyopaque = null;
             const status = napi.napi_get_value_external(env, raw, &data);
-            if (status != napi.napi_ok) {
-                if (report_error) {
-                    NapiError.last_error = NapiError.Error.withStatus(NapiError.Status.New(status));
-                }
-                return null;
-            }
+            if (status != napi.napi_ok) return NapiError.failStatus(status);
             if (data == null) {
                 if (report_error) {
                     NapiError.last_error = NapiError.Error.withStatus(NapiError.Status.InvalidArg);
                 }
-                return null;
+                return if (report_error) error.InvalidArg else null;
             }
 
             const data_ptr = data.?;
             if (!Registry.contains(data_ptr)) {
                 if (report_error) NapiError.last_error = NapiError.Error.withCodeAndMessage("InvalidArg", "External value was not created by zig-napi");
-                return null;
+                return if (report_error) error.InvalidArg else null;
             }
             if (@intFromPtr(data_ptr) % @alignOf(TaggedHeader) != 0) {
                 if (report_error) {
                     NapiError.last_error = NapiError.Error.withCodeAndMessage("InvalidArg", "External value was not created by zig-napi");
                 }
-                return null;
+                return if (report_error) error.InvalidArg else null;
             }
 
             const header: *TaggedHeader = @ptrCast(@alignCast(data_ptr));
@@ -172,13 +161,13 @@ pub fn External(comptime T: type) type {
                 if (report_error) {
                     NapiError.last_error = NapiError.Error.withCodeAndMessage("InvalidArg", "External value was not created by zig-napi");
                 }
-                return null;
+                return if (report_error) error.InvalidArg else null;
             }
             if (!std.mem.eql(u8, header.typeName(), @typeName(T))) {
                 if (report_error) {
                     NapiError.last_error = NapiError.Error.withCodeAndMessage("InvalidArg", "External value type does not match expected type");
                 }
-                return null;
+                return if (report_error) error.InvalidArg else null;
             }
 
             return header;
@@ -193,27 +182,19 @@ pub fn External(comptime T: type) type {
         }
 
         pub fn asConstPtr(self: Self) *const T {
-            return @ptrCast(@alignCast(self.header.?.value_ptr.?));
+            return @ptrCast(@alignCast((self.header orelse @panic("External accessed after deinit")).value_ptr.?));
         }
 
         pub fn asPtr(self: Self) *T {
-            return @ptrCast(@alignCast(self.header.?.value_ptr.?));
+            return @ptrCast(@alignCast((self.header orelse @panic("External accessed after deinit")).value_ptr.?));
         }
 
         pub fn sizeHint(self: Self) usize {
-            return self.header.?.size_hint;
+            return (self.header orelse @panic("External accessed after deinit")).size_hint;
         }
 
         pub fn adjustedSize(self: Self) i64 {
-            return self.header.?.adjusted_size;
-        }
-
-        fn invalid(env: napi.napi_env, raw: napi.napi_value) Self {
-            return Self{
-                .env = env,
-                .raw = raw,
-                .header = null,
-            };
+            return (self.header orelse @panic("External accessed after deinit")).adjusted_size;
         }
 
         fn createHeader(payload: T, size_hint: usize) !*TaggedHeader {
@@ -298,4 +279,19 @@ fn externalFinalizer(
 
         releaseHeader(env, header);
     }
+}
+
+test "External conversion fails explicitly and probes leave no diagnostic" {
+    const dispatcher = @import("../../test_dispatcher.zig");
+    defer dispatcher.runtime = .{};
+    defer NapiError.clearLastError();
+    dispatcher.runtime = .{ .input_type = napi.napi_external };
+    try std.testing.expectError(error.InvalidArg, External(u32).tryFromRaw(dispatcher.env, dispatcher.value_raw));
+    try std.testing.expectEqualStrings("External value was not created by zig-napi", NapiError.last_error.?.JsError.message);
+    NapiError.clearLastError();
+    try std.testing.expect(!try External(u32).matches_napi_value(dispatcher.env, dispatcher.value_raw));
+    try std.testing.expect(NapiError.last_error == null);
+    dispatcher.runtime.type_status = napi.napi_pending_exception;
+    try std.testing.expectError(error.PendingException, External(u32).matches_napi_value(dispatcher.env, dispatcher.value_raw));
+    try std.testing.expect(NapiError.hasPendingException());
 }

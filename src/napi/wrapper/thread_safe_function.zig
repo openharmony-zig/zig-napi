@@ -170,11 +170,71 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
         aborted: bool,
         failed: bool = false,
         queue: ?*QueueState = null,
+        thread: std.Thread.Id = 0,
+        queue_limit: usize = MaxQueueSize,
+        completions: ?*Completion = null,
         freed: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
         comptime thread_safe_function_call_variant: bool = ThreadSafeFunctionCalleeHandled,
         comptime max_queue_size: usize = MaxQueueSize,
 
         const Self = @This();
+        /// A pending `CallAsync` promise. It is shared by the queued call
+        /// (until its dispose runs) and the owner's pending list (until the
+        /// promise is settled or the TSFN finalizes), and freed once both let go.
+        /// Older Node releases finalize before draining the queue with a null
+        /// environment while newer ones (nodejs/node#61956) drain first, so
+        /// neither side may assume it releases the state last.
+        const Completion = struct {
+            promise: @import("../value/promise.zig").Promise,
+            allocator: std.mem.Allocator,
+            owner: ?*Self = null,
+            previous: ?*Completion = null,
+            next: ?*Completion = null,
+            queued: bool = true,
+
+            fn attach(state: *@This(), owner: *Self) void {
+                state.owner = owner;
+                state.next = owner.completions;
+                if (state.next) |next| next.previous = state;
+                owner.completions = state;
+            }
+            fn detach(state: *@This()) void {
+                const owner = state.owner orelse return;
+                if (state.previous) |previous| previous.next = state.next else owner.completions = state.next;
+                if (state.next) |next| next.previous = state.previous;
+                state.owner = null;
+                state.previous = null;
+                state.next = null;
+            }
+            /// Drops the owner's claim; frees the state if the queue let go too.
+            fn forget(state: *@This()) void {
+                state.detach();
+                if (!state.queued) state.allocator.destroy(state);
+            }
+            fn complete(env: Env, result: JsCallResult(Return), context: ?*anyopaque) void {
+                if (env.raw == null) return;
+                const state: *@This() = @ptrCast(@alignCast(context.?));
+                if (state.owner == null) return;
+                switch (result) {
+                    .ok => |value| state.promise.Resolve(value) catch |err| {
+                        state.promise.Reject(NapiError.mapAnyError(err)) catch {};
+                    },
+                    .thrown => |value| state.promise.rejectRaw(value.raw) catch {},
+                    .failure => |err| state.promise.Reject(err) catch {},
+                    .closed => state.promise.Reject(NapiError.Error.withReason("ThreadSafeFunction closed")) catch {},
+                }
+                state.forget();
+            }
+            /// Queue dispose. A null-environment drain cannot settle the
+            /// promise, so an unsettled state stays on the owner's pending list
+            /// for the finalizer to reject; `owner` is only compared here, never
+            /// dereferenced, because the wrapper may already be freed.
+            fn destroy(context: ?*anyopaque) void {
+                const state: *@This() = @ptrCast(@alignCast(context.?));
+                state.queued = false;
+                if (state.owner == null) state.allocator.destroy(state);
+            }
+        };
 
         /// Fallback handle returned when the underlying thread-safe function
         /// could not be created. All operations report the stored error instead
@@ -234,10 +294,14 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
         }
         pub fn tryFrom_rawWithOptions(env: napi.napi_env, raw: napi.napi_value, config: Options) !*Self {
             const ThreadSafe = struct {
-                fn finalize(_: napi.napi_env, data: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
+                fn finalize(inner_env: napi.napi_env, data: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
                     const raw_data = data orelse return;
                     const self: *Self = @ptrCast(@alignCast(raw_data));
                     self.closed = true;
+                    while (self.completions) |state| {
+                        if (inner_env != null) state.promise.Reject(NapiError.Error.withReason("ThreadSafeFunction closed")) catch {};
+                        state.forget();
+                    }
                     self.deinit();
                 }
 
@@ -250,10 +314,10 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
                     // the null-environment shutdown drain, and the item carries
                     // everything that release needs (its allocator and its own
                     // error snapshot). The wrapper context, by contrast, may
-                    // already be gone: Node runs this TSFN's user finalizer -
-                    // which frees the wrapper - before it drains the queue with
-                    // a null environment (node_api.cc ThreadSafeFunction::
-                    // Finalize/EmptyQueueAndDelete), so `context` must not be
+                    // already be gone: older Node releases run this TSFN's user
+                    // finalizer - which frees the wrapper - before they drain
+                    // the queue with a null environment, while newer ones
+                    // (nodejs/node#61956) drain first, so `context` must not be
                     // dereferenced before that drain is filtered out.
                     defer freeCallData(allocator, call_data);
 
@@ -346,6 +410,8 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
                 .tsfn_raw = null,
                 .closed = false,
                 .aborted = false,
+                .thread = if (@import("builtin").cpu.arch.isWasm()) 0 else std.Thread.getCurrentId(),
+                .queue_limit = config.max_queue_size,
             };
 
             if (comptime options.isOhosAddon()) {
@@ -416,6 +482,7 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
             // The failure handle is a process-wide singleton.
             if (self.failed) return;
             if (self.freed.swap(true, .acq_rel)) return;
+            while (self.completions) |state| state.forget();
             if (self.queue) |queue| {
                 queue.closed.store(true, .release);
                 queue.wake();
@@ -498,10 +565,18 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
                 };
                 data.reserved = true;
             }
-            const status = napi.napi_call_threadsafe_function(self.tsfn_raw, @ptrCast(data), mode.to_raw());
+            const prevent_deadlock = if (comptime !options.isOhosAddon() and !@import("builtin").cpu.arch.isWasm())
+                mode == .Blocking and self.queue_limit != 0 and self.thread == std.Thread.getCurrentId()
+            else
+                false;
+            const status = napi.napi_call_threadsafe_function(self.tsfn_raw, @ptrCast(data), if (prevent_deadlock) napi.napi_tsfn_nonblocking else mode.to_raw());
             if (status != napi.napi_ok) {
                 // The item never entered the queue: release it here.
                 freeCallData(data.allocator, data);
+                if (prevent_deadlock and status == napi.napi_queue_full) {
+                    NapiError.last_error = NapiError.Error.withCodeAndMessage("WouldDeadlock", "ThreadSafeFunction queue cannot accept this call");
+                    return error.WouldDeadlock;
+                }
                 return NapiError.failStatus(status);
             }
         }
@@ -638,26 +713,6 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
         /// a Promise: resolving the deferred adopts it, including its rejection.
         pub fn CallAsync(self: *const Self, args: Args, mode: ThreadSafeFunctionMode) !@import("../value/promise.zig").Promise {
             const Promise = @import("../value/promise.zig").Promise;
-            const Completion = struct {
-                promise: Promise,
-                allocator: std.mem.Allocator,
-                fn complete(env: Env, result: JsCallResult(Return), context: ?*anyopaque) void {
-                    if (env.raw == null) return;
-                    const state: *@This() = @ptrCast(@alignCast(context.?));
-                    switch (result) {
-                        .ok => |value| state.promise.Resolve(value) catch |err| {
-                            state.promise.Reject(NapiError.mapAnyError(err)) catch {};
-                        },
-                        .thrown => |value| state.promise.rejectRaw(value.raw) catch {},
-                        .failure => |err| state.promise.Reject(err) catch {},
-                        .closed => state.promise.Reject(NapiError.Error.withReason("ThreadSafeFunction closed")) catch {},
-                    }
-                }
-                fn destroy(context: ?*anyopaque) void {
-                    const state: *@This() = @ptrCast(@alignCast(context.?));
-                    state.allocator.destroy(state);
-                }
-            };
             if (self.failed or self.tsfn_raw == null) {
                 ownership.deinitValue(Args, args, self.payloadAllocator());
                 return self.notCreatedError();
@@ -672,8 +727,10 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
                 return err;
             };
             state.* = .{ .promise = promise, .allocator = self.allocator };
+            state.attach(@constCast(self));
             self.CallWithReturnValue(args, mode, state, Completion.complete, Completion.destroy) catch |err| {
                 promise.Reject(NapiError.mapAnyError(err)) catch {};
+                state.forget();
                 // Once a Promise exists, expose its rejection to the caller.
                 // Throwing here would orphan a rejected, unobservable Promise.
                 return promise;

@@ -214,17 +214,6 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
             };
             try ContextRegistry.add(context);
 
-            // A failure to register the deterministic release path has to be
-            // reported: silently continuing would leak the context until the
-            // constructor is collected.
-            if (comptime options.selectedNapiVersion().isAtLeast(.v3)) {
-                const status = napi.napi_add_env_cleanup_hook(env, contextCleanupHook, context);
-                if (status != napi.napi_ok) {
-                    ContextRegistry.remove(context);
-                    return NapiError.failStatus(status);
-                }
-            }
-
             return context;
         }
 
@@ -475,12 +464,18 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
             var data: ?*anyopaque = null;
             const argv = if (Argc == 0) null else args_raw[0..].ptr;
             const status = napi.napi_get_cb_info(env, callback_info, &argc, argv, &this_obj, &data);
-            if (status != napi.napi_ok) return null;
+            if (status != napi.napi_ok) {
+                throwError(env, NapiError.Error.withStatus(NapiError.Status.New(status)));
+                return null;
+            }
 
             if (Argc > argc) {
                 var undefined_raw: napi.napi_value = undefined;
                 const undefined_status = napi.napi_get_undefined(env, &undefined_raw);
-                if (undefined_status != napi.napi_ok) return null;
+                if (undefined_status != napi.napi_ok) {
+                    throwError(env, NapiError.Error.withStatus(NapiError.Status.New(undefined_status)));
+                    return null;
+                }
                 for (argc..Argc) |i| {
                     args_raw[i] = undefined_raw;
                 }
@@ -1046,6 +1041,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
 
         fn define_class(env: napi.napi_env) !napi.napi_value {
             const context = try createContext(env);
+            errdefer releaseContext(context);
 
             // Count instance properties and methods
             comptime var property_count: usize = fields.field_names.len;
@@ -1337,7 +1333,6 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                 while (other < prop_idx) {
                     if (std.mem.eql(u8, std.mem.span(properties[descriptor_index].utf8name), std.mem.span(properties[other].utf8name))) {
                         if (properties[descriptor_index].method != null or properties[other].method != null or properties[descriptor_index].value != null or properties[other].value != null or (properties[descriptor_index].getter != null and properties[other].getter != null) or (properties[descriptor_index].setter != null and properties[other].setter != null)) {
-                            releaseContext(context);
                             return NapiError.failTypeError("Duplicate class property name", .{});
                         }
                         properties[descriptor_index].getter = properties[descriptor_index].getter orelse properties[other].getter;
@@ -1351,7 +1346,6 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
             var constructor: napi.napi_value = undefined;
             const define_status = napi.napi_define_class(env, class_name.ptr, class_name.len, constructor_callback, context, prop_idx, &properties, &constructor);
             if (define_status != napi.napi_ok) {
-                releaseContext(context);
                 return NapiError.failStatus(define_status);
             }
 
@@ -1361,7 +1355,6 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
             var new_constructor_ref: napi.napi_ref = undefined;
             const ref_status = napi.napi_create_reference(env, constructor, 0, &new_constructor_ref);
             if (ref_status != napi.napi_ok) {
-                releaseContext(context);
                 return NapiError.failStatus(ref_status);
             }
             context.constructor_ref = new_constructor_ref;
@@ -1369,10 +1362,14 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
             // Environments without cleanup hooks release the context from the
             // constructor finalizer instead (see `ClassContext`). Only one of
             // the two mechanisms is ever active, so a context is released once.
-            if (comptime !options.selectedNapiVersion().isAtLeast(.v3)) {
+            if (comptime options.selectedNapiVersion().isAtLeast(.v3)) {
+                const status = napi.napi_add_env_cleanup_hook(env, contextCleanupHook, context);
+                if (status != napi.napi_ok) {
+                    return NapiError.failStatus(status);
+                }
+            } else {
                 const wrap_status = napi.napi_wrap(env, constructor, context, contextFinalizer, null, null);
                 if (wrap_status != napi.napi_ok) {
-                    releaseContext(context);
                     return NapiError.failStatus(wrap_status);
                 }
             }
@@ -1470,4 +1467,20 @@ pub fn ClassInstance(comptime T: type, comptime HasInit: bool) type {
             return @import("reference.zig").Reference(Self).New(napi_env.Env.from_raw(self.env), self);
         }
     };
+}
+
+test "class callback info failures throw and preserve pending exceptions" {
+    const dispatcher = @import("../../test_dispatcher.zig");
+    const Wrapper = ClassWrapper(struct { value: u32 }, true);
+    var args: [1]napi.napi_value = undefined;
+    defer dispatcher.runtime = .{};
+    dispatcher.runtime = .{ .cb_status = napi.napi_generic_failure };
+    try std.testing.expect(Wrapper.readCallInfo(1, dispatcher.env, null, &args) == null);
+    try std.testing.expectEqual(@as(usize, 1), dispatcher.runtime.throws);
+    dispatcher.runtime = .{ .undefined_status = napi.napi_generic_failure };
+    try std.testing.expect(Wrapper.readCallInfo(1, dispatcher.env, null, &args) == null);
+    try std.testing.expectEqual(@as(usize, 1), dispatcher.runtime.throws);
+    dispatcher.runtime = .{ .cb_status = napi.napi_pending_exception, .pending = true };
+    try std.testing.expect(Wrapper.readCallInfo(1, dispatcher.env, null, &args) == null);
+    try std.testing.expectEqual(@as(usize, 0), dispatcher.runtime.creates);
 }
