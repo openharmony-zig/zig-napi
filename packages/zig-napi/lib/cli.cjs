@@ -2,6 +2,7 @@
 
 const childProcess = require("node:child_process");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const { NapiCli, writeJsBinding } = require("@napi-rs/cli");
 const { Command } = require("commander");
@@ -90,6 +91,26 @@ function run(command, args, options = {}) {
     process.exit(result.status || 1);
   }
   return true;
+}
+
+function runWatch(command, args, options, state) {
+  if (state.stopped) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const child = childProcess.spawn(command, args, {
+      cwd: options.cwd,
+      env: options.env,
+      stdio: "inherit",
+      shell: false,
+    });
+    state.child = child;
+    child.once("error", (error) => console.error(`zig-napi: ${error.message}`));
+    child.once("close", (code) => {
+      state.child = undefined;
+      if (!state.stopped && code !== 0 && options.failureHint)
+        console.error(`zig-napi: ${options.failureHint}`);
+      resolve(!state.stopped && code === 0);
+    });
+  });
 }
 
 function normalizePathForZig(value) {
@@ -340,6 +361,77 @@ function cleanOptions(options) {
   return Object.fromEntries(Object.entries(options).filter(([, value]) => value !== undefined));
 }
 
+async function previewNapiRename(cwd, flags) {
+  cwd = fs.realpathSync(cwd);
+  const excluded = (name) =>
+    ["node_modules", ".git", ".zig-cache", "zig-out"].includes(name) || name.startsWith(".tmp");
+  const files = (root) => {
+    const contents = new Map();
+    const walk = (directory) => {
+      for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+        if (entry.isSymbolicLink() || excluded(entry.name)) continue;
+        const file = path.join(directory, entry.name);
+        if (entry.isDirectory()) walk(file);
+        else if (entry.isFile()) contents.set(path.relative(root, file), fs.readFileSync(file));
+      }
+    };
+    walk(root);
+    return contents;
+  };
+  const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "zig-napi-rename-")));
+  const stdoutWrite = process.stdout.write;
+  try {
+    fs.cpSync(cwd, directory, {
+      recursive: true,
+      filter: (file) => {
+        const stat = fs.lstatSync(file);
+        return (
+          (stat.isFile() || stat.isDirectory()) && (file === cwd || !excluded(path.basename(file)))
+        );
+      },
+    });
+    const before = files(directory);
+    const options = { ...flags, cwd: directory };
+    for (const key of ["packageJsonPath", "configPath", "npmDir", "manifestPath"]) {
+      if (!flags[key]) continue;
+      let requested = path.resolve(cwd, flags[key]);
+      const missing = [];
+      while (!fs.existsSync(requested)) {
+        missing.unshift(path.basename(requested));
+        requested = path.dirname(requested);
+      }
+      const relative = path.relative(cwd, path.join(fs.realpathSync(requested), ...missing));
+      if (relative === ".." || relative.startsWith(".." + path.sep) || path.isAbsolute(relative))
+        throw new Error(`Rename path leaves the project: ${flags[key]}`);
+      options[key] = path.resolve(directory, relative);
+    }
+    // The upstream API has no dry-run mode and may write logs to stdout.
+    process.stdout.write = (_chunk, encoding, callback) => {
+      const done = typeof encoding === "function" ? encoding : callback;
+      if (done) process.nextTick(done);
+      return true;
+    };
+    await napiCli.rename(cleanOptions(options));
+    process.stdout.write = stdoutWrite;
+    const after = files(directory);
+    const writes = [...after]
+      .filter(([file, content]) => !before.get(file)?.equals(content))
+      .map(([file, content]) => ({
+        file: path.join(cwd, file),
+        content: content.toString("utf8"),
+      }));
+    const removals = [...before.keys()]
+      .filter((file) => !after.has(file))
+      .map((file) => path.join(cwd, file));
+    console.log(
+      JSON.stringify({ writes, renames: [], ...(removals.length ? { removals } : {}) }, null, 2),
+    );
+  } finally {
+    process.stdout.write = stdoutWrite;
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+}
+
 function readJson(file) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
 }
@@ -517,6 +609,23 @@ function appendWasiThreadsBuildFlags(args, target, passthrough) {
   if (!hasCpuOption) {
     args.push("-Dcpu=baseline+atomics+bulk_memory+mutable_globals");
   }
+}
+
+function resolveCompileFlavors(target, passthrough) {
+  let passthroughTarget;
+  let cpu;
+  for (const [index, argument] of passthrough.entries()) {
+    if (argument.startsWith("-Dtarget=")) passthroughTarget = argument.slice("-Dtarget=".length);
+    else if (argument === "-Dtarget") passthroughTarget = passthrough[index + 1];
+    else if (argument.startsWith("-Dcpu=")) cpu = argument.slice("-Dcpu=".length);
+    else if (argument === "-Dcpu") cpu = passthrough[index + 1];
+  }
+  if (passthroughTarget === "wasm32-wasi") {
+    const threads = cpu?.split("+").includes("atomics") ?? isWasiThreadsTargetName(target);
+    return [getWasiFlavor(threads ? "wasm32-wasip1-threads" : "wasm32-wasip1")];
+  }
+  const flavor = getWasiFlavor(passthroughTarget ?? target);
+  return flavor ? [flavor] : [];
 }
 
 /**
@@ -954,7 +1063,7 @@ async function commandNew(projectDir, flags) {
   console.log(`Created ${packageName} in ${targetDir}`);
 }
 
-async function commandBuild(flags, passthrough = []) {
+async function commandBuild(flags, passthrough = [], watchState) {
   const output = require("./build-output.cjs");
   flags = { ...flags, jsBinding: flags.jsBinding ?? flags.js };
   output.validate(flags, passthrough);
@@ -962,6 +1071,7 @@ async function commandBuild(flags, passthrough = []) {
   const cwd = path.resolve(process.cwd(), flags.cwd || ".");
   const config = await readZigNapiConfig(cwd, flags);
   const flavors = resolveConfiguredFlavors(config, flags);
+  const compileFlavors = resolveCompileFlavors(flags.target, passthrough);
   resolveWasmConfig(config);
   if (config.packageJson.zigNapi?.managedZigDependency) {
     scaffold.resolveDependency(cwd, resolveZigNapiPath(cwd), config.packageJson);
@@ -977,16 +1087,18 @@ async function commandBuild(flags, passthrough = []) {
       `-Dtarget=${isWasiTargetName(flags.target) ? "wasm32-wasi" : zigTarget(flags.target)}`,
     );
   appendWasiThreadsBuildFlags(args, flags.target, passthrough);
-  appendWasiMemoryBuildFlags(args, config, flavors);
+  appendWasiMemoryBuildFlags(args, config, compileFlavors);
   args.push(...passthrough);
-  const emnapiEnv = flavors.length > 0 ? resolveWasiEmnapiEnv(cwd) : undefined;
+  const emnapiEnv = compileFlavors.length > 0 ? resolveWasiEmnapiEnv(cwd) : undefined;
   if (flags.verbose) console.log(`zig ${args.map((arg) => JSON.stringify(arg)).join(" ")}`);
-  const built = run("zig", args, {
+  const runOptions = {
     cwd,
     env: emnapiEnv ? { ...process.env, ...emnapiEnv } : process.env,
-    failureHint: wasiMemoryFailureHint(config, flavors),
-    keepAlive: flags.watch,
-  });
+    failureHint: wasiMemoryFailureHint(config, compileFlavors),
+  };
+  const built = watchState
+    ? await runWatch("zig", args, runOptions, watchState)
+    : run("zig", args, runOptions);
   if (!built) return;
   const outputDir = path.resolve(cwd, flags.buildOutputDir || flags.outputDir || ".");
   fs.mkdirSync(outputDir, { recursive: true });
@@ -1094,25 +1206,28 @@ async function commandWatch(flags, passthrough) {
   let timer;
   let building = false;
   let pending = false;
+  const state = { stopped: false, child: undefined };
   const build = async () => {
+    if (state.stopped) return;
     if (building) {
       pending = true;
       return;
     }
     building = true;
     try {
-      await commandBuild(flags, passthrough);
+      await commandBuild(flags, passthrough, state);
     } catch (error) {
       console.error(error);
     }
     building = false;
-    if (pending) {
+    if (pending && !state.stopped) {
       pending = false;
       void build();
     }
   };
   const watcher = fs.watch(cwd, { recursive: true }, (_event, file) => {
     if (
+      state.stopped ||
       !file ||
       file
         .split(/[\\/]/)
@@ -1126,16 +1241,19 @@ async function commandWatch(flags, passthrough) {
     clearTimeout(timer);
     timer = setTimeout(() => void build(), 100);
   });
-  process.once("SIGINT", () => {
+  const stop = (signal) => {
+    if (state.stopped) return;
+    state.stopped = true;
+    pending = false;
     clearTimeout(timer);
     watcher.close();
-  });
-  process.once("SIGTERM", () => {
-    clearTimeout(timer);
-    watcher.close();
-  });
+    process.exitCode = 128 + os.constants.signals[signal];
+    if (state.child) state.child.kill(signal);
+  };
+  process.on("SIGINT", () => stop("SIGINT"));
+  process.on("SIGTERM", () => stop("SIGTERM"));
   await build();
-  console.log(`Watching Zig sources in ${cwd}`);
+  if (!state.stopped) console.log(`Watching Zig sources in ${cwd}`);
 }
 
 async function commandDts(flags, passthrough = []) {
@@ -1385,8 +1503,9 @@ function createProgram() {
     .action(async (flags) => {
       const cwd = path.resolve(flags.cwd || ".");
       await readZigNapiConfig(cwd, flags);
-      if (!flags.binaryName && !flags.dryRun && !flags.author) {
-        await napiCli.rename(cleanOptions({ ...flags, cwd }));
+      if (flags.binaryName === undefined && flags.author === undefined) {
+        if (flags.dryRun) await previewNapiRename(cwd, flags);
+        else await napiCli.rename(cleanOptions({ ...flags, cwd }));
       } else {
         require("./rename-project.cjs")(cwd, flags);
       }
@@ -1465,6 +1584,9 @@ async function main() {
       if (command === "build" || command === "package") return "--verbose";
     }
     const match = arg.match(/^--([a-z-]+)=(true|false)$/);
+    if (match && match[2] === "false" && (match[1] === "js" || match[1] === "js-binding")) {
+      return `--no-${match[1]}`;
+    }
     return match && booleans.has(match[1])
       ? `--${match[2] === "false" ? "no-" : ""}${match[1]}`
       : arg;

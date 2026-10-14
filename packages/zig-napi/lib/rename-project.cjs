@@ -113,10 +113,15 @@ module.exports = function renameProject(cwd, flags) {
     const escaped = oldBinary.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const moduleName = new RegExp(`(NODE_API_MODULE(?:_WITH_INIT)?\\(\\s*)"${escaped}"`, "g");
     const buildName = new RegExp(`(\\.name\\s*=\\s*)"${escaped}"`, "g");
+    const binaryReference = new RegExp(`(?<![A-Za-z0-9_.-])${escaped}\\.`, "g");
+    const packageReference = new RegExp(
+      `(?<![A-Za-z0-9_.@/-])${oldPackage.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}-`,
+      "g",
+    );
     const walk = (directory) => {
       for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
         if (
-          ["node_modules", ".git", ".zig-cache"].includes(entry.name) ||
+          ["node_modules", ".git", ".zig-cache", "zig-out"].includes(entry.name) ||
           entry.name.startsWith(".tmp")
         )
           continue;
@@ -126,13 +131,12 @@ module.exports = function renameProject(cwd, flags) {
           walk(file);
           continue;
         }
-        if (entry.name.endsWith(".zig"))
-          stage(
-            file,
-            text(file)
-              .replace(moduleName, `$1${JSON.stringify(binary)}`)
-              .replace(buildName, `$1${JSON.stringify(binary)}`),
-          );
+        if (entry.name.endsWith(".zig")) {
+          let source = text(file).replace(moduleName, `$1${JSON.stringify(binary)}`);
+          if (entry.name === "build.zig")
+            source = source.replace(buildName, `$1${JSON.stringify(binary)}`);
+          stage(file, source);
+        }
         if (/\.(?:cjs|mjs|js|cts|ts)$/.test(entry.name)) {
           const source = text(file);
           const managed =
@@ -145,8 +149,8 @@ module.exports = function renameProject(cwd, flags) {
             stage(
               file,
               source
-                .replaceAll(oldBinary + ".", binary + ".")
-                .replaceAll(oldPackage + "-", packageName + "-")
+                .replace(binaryReference, () => binary + ".")
+                .replace(packageReference, () => packageName + "-")
                 .replaceAll(JSON.stringify(oldBinary), JSON.stringify(binary))
                 .replaceAll(JSON.stringify(oldPackage), JSON.stringify(packageName)),
             );
