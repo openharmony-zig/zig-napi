@@ -7,6 +7,12 @@ const root = path.resolve(__dirname, "../../..");
 const isWasi = ["true", "error"].includes(process.env.NAPI_RS_FORCE_WASI);
 const nativeTest = isWasi ? test.skip : test;
 
+// fs.rmSync requires Node.js 14.14, but the addon matrix still covers Node.js 12.
+function removeDirectory(directory) {
+  if (typeof fs.rmSync === "function") fs.rmSync(directory, { recursive: true, force: true });
+  else fs.rmdirSync(directory, { recursive: true });
+}
+
 function withFixture(source, version, action) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "zig-napi-runtime-"));
   try {
@@ -17,7 +23,7 @@ function withFixture(source, version, action) {
     const modules = ["--dep", "napi-sys", "--dep", "build_options", `-Mnapi=${path.join(root, "src/napi.zig")}`, "--dep", "build_options", `-Mnapi-sys=${path.join(root, "src/sys/api.zig")}`, `-Mbuild_options=${options}`];
     action({ directory, fixture, modules });
   } finally {
-    fs.rmSync(directory, { recursive: true, force: true });
+    removeDirectory(directory);
   }
 }
 
