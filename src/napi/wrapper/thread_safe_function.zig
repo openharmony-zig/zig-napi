@@ -178,12 +178,19 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
         comptime max_queue_size: usize = MaxQueueSize,
 
         const Self = @This();
+        /// A pending `CallAsync` promise. It is shared by the queued call
+        /// (until its dispose runs) and the owner's pending list (until the
+        /// promise is settled or the TSFN finalizes), and freed once both let go.
+        /// Older Node releases finalize before draining the queue with a null
+        /// environment while newer ones (nodejs/node#61956) drain first, so
+        /// neither side may assume it releases the state last.
         const Completion = struct {
             promise: @import("../value/promise.zig").Promise,
             allocator: std.mem.Allocator,
             owner: ?*Self = null,
             previous: ?*Completion = null,
             next: ?*Completion = null,
+            queued: bool = true,
 
             fn attach(state: *@This(), owner: *Self) void {
                 state.owner = owner;
@@ -199,6 +206,11 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
                 state.previous = null;
                 state.next = null;
             }
+            /// Drops the owner's claim; frees the state if the queue let go too.
+            fn forget(state: *@This()) void {
+                state.detach();
+                if (!state.queued) state.allocator.destroy(state);
+            }
             fn complete(env: Env, result: JsCallResult(Return), context: ?*anyopaque) void {
                 if (env.raw == null) return;
                 const state: *@This() = @ptrCast(@alignCast(context.?));
@@ -211,12 +223,16 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
                     .failure => |err| state.promise.Reject(err) catch {},
                     .closed => state.promise.Reject(NapiError.Error.withReason("ThreadSafeFunction closed")) catch {},
                 }
-                state.detach();
+                state.forget();
             }
+            /// Queue dispose. A null-environment drain cannot settle the
+            /// promise, so an unsettled state stays on the owner's pending list
+            /// for the finalizer to reject; `owner` is only compared here, never
+            /// dereferenced, because the wrapper may already be freed.
             fn destroy(context: ?*anyopaque) void {
                 const state: *@This() = @ptrCast(@alignCast(context.?));
-                state.detach();
-                state.allocator.destroy(state);
+                state.queued = false;
+                if (state.owner == null) state.allocator.destroy(state);
             }
         };
 
@@ -284,7 +300,7 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
                     self.closed = true;
                     while (self.completions) |state| {
                         if (inner_env != null) state.promise.Reject(NapiError.Error.withReason("ThreadSafeFunction closed")) catch {};
-                        state.detach();
+                        state.forget();
                     }
                     self.deinit();
                 }
@@ -298,10 +314,10 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
                     // the null-environment shutdown drain, and the item carries
                     // everything that release needs (its allocator and its own
                     // error snapshot). The wrapper context, by contrast, may
-                    // already be gone: Node runs this TSFN's user finalizer -
-                    // which frees the wrapper - before it drains the queue with
-                    // a null environment (node_api.cc ThreadSafeFunction::
-                    // Finalize/EmptyQueueAndDelete), so `context` must not be
+                    // already be gone: older Node releases run this TSFN's user
+                    // finalizer - which frees the wrapper - before they drain
+                    // the queue with a null environment, while newer ones
+                    // (nodejs/node#61956) drain first, so `context` must not be
                     // dereferenced before that drain is filtered out.
                     defer freeCallData(allocator, call_data);
 
@@ -466,7 +482,7 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
             // The failure handle is a process-wide singleton.
             if (self.failed) return;
             if (self.freed.swap(true, .acq_rel)) return;
-            while (self.completions) |state| state.detach();
+            while (self.completions) |state| state.forget();
             if (self.queue) |queue| {
                 queue.closed.store(true, .release);
                 queue.wake();
@@ -714,6 +730,7 @@ pub fn ThreadSafeFunction(comptime Args: type, comptime Return: type, comptime T
             state.attach(@constCast(self));
             self.CallWithReturnValue(args, mode, state, Completion.complete, Completion.destroy) catch |err| {
                 promise.Reject(NapiError.mapAnyError(err)) catch {};
+                state.forget();
                 // Once a Promise exists, expose its rejection to the caller.
                 // Throwing here would orphan a rejected, unobservable Promise.
                 return promise;
