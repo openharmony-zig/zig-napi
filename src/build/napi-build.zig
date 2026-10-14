@@ -1026,19 +1026,21 @@ pub fn generateTypeDefinition(build: *std.Build, option: TypeDefinitionBuildOpti
     });
     addon_root.addImport("build_options", addon_build_options.createModule());
 
-    const ndk_root = try resolveNdkPath(build);
-    if (ndk_root.len > 0) {
-        const include_path = try std.fs.path.join(build.allocator, &[_][]const u8{ ndk_root, "sysroot", "usr", "include" });
-        addon_root.addIncludePath(.{ .cwd_relative = include_path });
+    if (!option.node_addon) {
+        const ndk_root = try resolveNdkPath(build);
+        if (ndk_root.len > 0) {
+            const include_path = try std.fs.path.join(build.allocator, &[_][]const u8{ ndk_root, "sysroot", "usr", "include" });
+            addon_root.addIncludePath(.{ .cwd_relative = include_path });
 
-        const platform_include_path = try std.fs.path.join(build.allocator, &[_][]const u8{
-            ndk_root,
-            "sysroot",
-            "usr",
-            "include",
-            "aarch64-linux-ohos",
-        });
-        addon_root.addIncludePath(.{ .cwd_relative = platform_include_path });
+            const platform_include_path = try std.fs.path.join(build.allocator, &[_][]const u8{
+                ndk_root,
+                "sysroot",
+                "usr",
+                "include",
+                "aarch64-linux-ohos",
+            });
+            addon_root.addIncludePath(.{ .cwd_relative = platform_include_path });
+        }
     }
 
     generator.root_module.addImport("addon_root", addon_root);
