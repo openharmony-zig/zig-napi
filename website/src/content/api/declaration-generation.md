@@ -81,7 +81,7 @@ When the inferred public shape is not the desired public contract, use `napi.dts
 
 `napi.Class(T)` emits a public constructor. Constructor parameters come from `T.init` when present; otherwise each field becomes a constructor parameter.
 
-`napi.ClassWithoutInit(T)` emits a private constructor. Static factory methods that return `T` or `*T` become constructors on the JavaScript side.
+`napi.ClassWithoutInit(T)` emits a private constructor. Static factory methods returning `T` by value (including `!T` and `Result(T)`) return class instances on the JavaScript side. Pointer returns (`*T` / `*const T`) are rejected by the runtime build.
 
 Struct fields become instance properties. Function declarations become instance methods when their first parameter is `*T` or `T`; otherwise they become static methods. Non-function declarations become `static readonly` values.
 

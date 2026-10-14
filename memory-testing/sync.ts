@@ -64,6 +64,6 @@ export function exerciseSyncWrappers(native: NativeAddon) {
     );
 
     assertEqual(String(native.create_bigint_value()), "9007199254740993", "bigint return");
-    assertEqual(native.bigint_to_i64(native.create_small_bigint_value()), 42, "bigint input");
+    assertEqual(native.bigint_to_i64(native.create_small_bigint_value()), BigInt(42), "bigint input");
   }
 }

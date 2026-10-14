@@ -105,23 +105,15 @@ test("string conversion failures are reported instead of returning empty strings
 });
 
 test("checked numeric conversions", (t) => {
-  t.is(bindings.unsignedRoundtrip(0), 0);
-  t.is(bindings.unsignedRoundtrip(9007199254740992), 9007199254740992);
-  t.throws(() => bindings.unsignedRoundtrip(-1), { name: "RangeError" });
-  t.throws(() => bindings.unsignedRoundtrip(1.5), { name: "TypeError" });
-  t.throws(() => bindings.unsignedRoundtrip(NaN), { name: "TypeError" });
-  t.throws(() => bindings.unsignedRoundtrip(Infinity), { name: "TypeError" });
-
-  // maxInt(u64) must not be narrowed to i64; it is emitted as a JS number.
-  const max = bindings.maxUnsigned();
-  t.is(typeof max, "number");
-  t.is(max, 18446744073709551616);
-
-  t.is(bindings.signedRoundtrip(-9007199254740991), -9007199254740991);
-  t.throws(() => bindings.signedRoundtrip(2 ** 63), { name: "RangeError" });
-  // -2^63 itself is representable and valid; twice that is not.
-  t.is(bindings.signedRoundtrip(-(2 ** 63)), -(2 ** 63));
-  t.throws(() => bindings.signedRoundtrip(-(2 ** 63) * 2), { name: "RangeError" });
+  for (const value of [0n, 2n ** 53n, 2n ** 64n - 1n]) t.is(bindings.unsignedRoundtrip(value), value);
+  for (const value of [-(2n ** 63n), -1n, 0n, 2n ** 63n - 1n]) t.is(bindings.signedRoundtrip(value), value);
+  for (const value of [0, -1, 1.5, NaN, Infinity]) {
+    t.throws(() => bindings.unsignedRoundtrip(value), { name: "TypeError" });
+    t.throws(() => bindings.signedRoundtrip(value), { name: "TypeError" });
+  }
+  for (const value of [-1n, 2n ** 64n]) t.throws(() => bindings.unsignedRoundtrip(value), { name: "RangeError" });
+  for (const value of [-(2n ** 63n) - 1n, 2n ** 63n]) t.throws(() => bindings.signedRoundtrip(value), { name: "RangeError" });
+  t.is(bindings.maxUnsigned(), 2n ** 64n - 1n);
 
   t.is(bindings.narrowRoundtrip(0), 0);
   t.is(bindings.narrowRoundtrip(255), 255);
@@ -938,6 +930,70 @@ test("a custom native deinit runs next to the resource rollback", (t) => {
   t.is(bindings.activeBytes(), baseline);
   t.is(bindings.activeAllocations(), baselineAllocations);
 });
+
+test("BigInt conversions recurse through compound values", (t) => {
+  const record = { unsigned: 2n ** 64n - 1n, signed: -(2n ** 63n), maybe: 42n };
+  t.deepEqual(bindings.wideRecord(record), record);
+  t.deepEqual(bindings.wideRecord({ ...record, maybe: null }), { ...record, maybe: undefined });
+  t.deepEqual(bindings.wideArray([0n, record.unsigned]), [0n, record.unsigned]);
+  t.deepEqual(bindings.wideSlice([record.signed, 2n ** 63n - 1n]), [record.signed, 2n ** 63n - 1n]);
+  t.is(bindings.wideUnion(record.unsigned), record.unsigned);
+  t.is(bindings.wideUnion(42), 42n);
+  t.throws(() => bindings.wideRecord({ ...record, unsigned: 42 }), { name: "TypeError" });
+  t.throws(() => bindings.wideArray([0n, 2n ** 64n]), { name: "RangeError" });
+  t.throws(() => bindings.wideUnion(2n ** 64n), { name: "RangeError" });
+});
+
+test("comptime integers use number through the safe integer boundary", (t) => {
+  t.deepEqual(bindings.comptimeIntegers(), [3000000000, Number.MAX_SAFE_INTEGER, 9007199254740992n, -9007199254740992n, 2n ** 64n]);
+  t.is(bindings.numericAliases(1, 2, 3, 4), 10);
+  t.is(bindings.explicitNumber(2 ** 63), 2 ** 63);
+  t.is(bindings.wideNumericEnum(2), 2);
+});
+
+test("ordinary unions choose the first convertible variant", (t) => {
+  t.is(bindings.unionWidths(300), "big");
+  t.is(bindings.unionWidths(1), "small");
+});
+test("ordinary unions select fractional numbers", (t) => {
+  t.is(bindings.unionFraction(1.5), "float");
+  t.is(bindings.unionFraction(1), "int");
+});
+test("ordinary unions select structures by required input fields", (t) => {
+  t.is(bindings.unionObjects({ renamed: 2 }), "right");
+  t.is(bindings.unionObjects({ left: 1, renamed: 2 }), "left");
+  t.is(bindings.unionObjects(Object.create({ renamed: 2 })), "right");
+  t.throws(() => bindings.unionObjects({ left: undefined }), { name: "TypeError" });
+  const original = new Error("union getter");
+  t.is(t.throws(() => bindings.unionObjects({ get left() { throw original; } })), original);
+});
+test("ordinary unions treat defaulted struct fields as required input", (t) => {
+  t.is(bindings.unionDefaults({ id: 1 }), "plain");
+  t.is(bindings.unionDefaults({ id: 1, label: "named" }), "defaulted");
+});
+test("ordinary unions select structures by field value types", (t) => {
+  t.is(bindings.unionFieldTypes({ value: 1 }), "count");
+  t.is(bindings.unionFieldTypes({ value: "one" }), "text");
+});
+test("ordinary unions recurse through nested variants", (t) => {
+  t.is(bindings.unionNested(300), "big");
+  t.is(bindings.unionNested("text"), "nested");
+});
+test("ordinary unions validate enum members and numeric ranges", (t) => {
+  t.is(bindings.unionEnums(3), "number");
+  t.is(bindings.unionEnums("Missing"), "text");
+  t.is(bindings.unionEnums("Ready"), "status");
+  t.is(bindings.unionFloats(1e300), "wide");
+  t.is(bindings.unionOptional(300), "wide");
+  t.is(bindings.unionOptional(null), "small");
+  t.throws(() => bindings.unionWidths(2 ** 32), { name: "RangeError" });
+  t.throws(() => bindings.unionWidths(1.5), { name: "TypeError" });
+  t.throws(() => bindings.unionWidths(false), { name: "TypeError", message: /does not match any supported variant/ });
+  const before = bindings.activeBytes();
+  for (let index = 0; index < 100; index++) t.is(bindings.unionEnums("Missing"), "text");
+  t.is(bindings.activeBytes(), before);
+});
+
 test("External.tryFromRaw reports foreign values as conversion errors", (t) => {
   const values = require("../../load-addon")("example");
   t.is(bindings.manualExternal(bindings.createManualExternal(7)), 7);
@@ -945,6 +1001,20 @@ test("External.tryFromRaw reports foreign values as conversion errors", (t) => {
   t.throws(() => bindings.manualExternal({}), { message: /Expected external value/ });
 });
 
+test("ordinary unions check BigInt losslessness before choosing a variant", (t) => {
+  t.is(bindings.unionBigInts(2n ** 64n - 1n), "unsigned");
+  t.is(bindings.unionBigInts(-1n), "signed");
+  t.is(bindings.unionBigInts(1n), "signed");
+  t.throws(() => bindings.unionBigInts(2n ** 64n), { name: "RangeError" });
+});
+test("BigInt results survive Promise async worker and TSFN delivery", async (t) => {
+  const value = 2n ** 64n - 1n;
+  t.is(await bindings.widePromise(value), value);
+  t.is(await bindings.wideAsync(value), value);
+  t.is(await bindings.wideWorker(value), value);
+  const delivered = await new Promise((resolve, reject) => bindings.wideTsfn((error, result) => error ? reject(error) : resolve(result)));
+  t.is(delivered, value);
+});
 
 nativeOnlyTest("External accessors panic clearly after deinit", (t) => {
   for (let accessor = 0; accessor < 6; accessor++) {

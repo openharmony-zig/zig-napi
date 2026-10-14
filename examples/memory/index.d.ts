@@ -26,12 +26,6 @@ export interface NestedPayload {
   maybe?: string
 }
 
-export interface BigInt {
-  env?: unknown
-  raw?: unknown
-  type: number
-}
-
 // Opaque host buffer; use the native buffer API to access its bytes.
 export type Buffer = object
 
@@ -88,9 +82,9 @@ export declare function create_function(): (arg0: number, arg1: number) => numbe
 export declare function call_function(cb: (arg0: number, arg1: number) => number): number
 export declare function call_function_with_reference(cb: (arg0: number, arg1: number) => number): number
 export declare function function_reference_ref_count(cb: (arg0: number, arg1: number) => number): number
-export declare function create_bigint_value(): BigInt
-export declare function create_small_bigint_value(): BigInt
-export declare function bigint_to_i64(value: BigInt): number
+export declare function create_bigint_value(): bigint
+export declare function create_small_bigint_value(): bigint
+export declare function bigint_to_i64(value: bigint): bigint
 export declare function manual_resolved_promise(): Promise<unknown>
 export declare function create_buffer_copy(len: number): Buffer
 export declare function create_buffer_new(len: number): Buffer

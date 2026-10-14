@@ -122,7 +122,7 @@ test("getter exceptions preserve the original JS exception", (t) => {
 
 test("numeric bounds throw without terminating Node", (t) => {
   const result = child(
-    `const assert=require('assert');assert.throws(()=>a.unsigned(-1));assert.throws(()=>a.smallSigned(128));assert.throws(()=>a.smallSigned(NaN));assert.throws(()=>a.smallSigned(Infinity));assert.strictEqual(a.smallSigned(127),127);assert.strictEqual(a.maxUnsigned(),Number(18446744073709551615n));`,
+    `const assert=require('assert');assert.throws(()=>a.unsigned(-1n));assert.throws(()=>a.smallSigned(128));assert.throws(()=>a.smallSigned(NaN));assert.throws(()=>a.smallSigned(Infinity));assert.strictEqual(a.smallSigned(127),127);assert.strictEqual(a.maxUnsigned(),18446744073709551615n);`,
   );
   t.is(result.status, 0, result.stderr);
   t.is(result.signal, null);

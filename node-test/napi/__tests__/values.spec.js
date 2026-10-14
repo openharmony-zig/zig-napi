@@ -192,8 +192,8 @@ test("TypedArray", (t) => {
   t.deepEqual(bindings.i32ArrayToArray(new Int32Array([-1, 2])), [-1, 2]);
   t.deepEqual(bindings.f32ArrayToArray(new Float32Array([1.5, 2.5])), [1.5, 2.5]);
   t.deepEqual(bindings.f64ArrayToArray(new Float64Array([1.5, 2.5])), [1.5, 2.5]);
-  t.deepEqual(bindings.i64ArrayToArray(new BigInt64Array([1n, -2n])), [1, -2]);
-  t.deepEqual(bindings.u64ArrayToArray(new BigUint64Array([1n, 2n])), [1, 2]);
+  t.deepEqual(bindings.i64ArrayToArray(new BigInt64Array([1n, -2n])), [1n, -2n]);
+  t.deepEqual(bindings.u64ArrayToArray(new BigUint64Array([1n, 2n])), [1n, 2n]);
 
   t.is(bindings.acceptSlice(new Int32Array([1, 2, 3])), 6);
   t.is(bindings.acceptUint8ClampedSlice(new Uint8ClampedArray([1, 2, 3])), 6);

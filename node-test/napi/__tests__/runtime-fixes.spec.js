@@ -129,12 +129,12 @@ test("exported functions use their public metadata names", (t) => {
   t.is(bindings.publicFunction.name, "publicFunction");
 });
 
-test("64 bit Number inputs preserve the validated integer value", (t) => {
-  t.is(bindings.unsignedAsBigInt(2 ** 63), 2n ** 63n);
-  t.is(bindings.unsignedAsBigInt(2 ** 64 - 2048), 2n ** 64n - 2048n);
-  t.throws(() => bindings.unsignedAsBigInt(2 ** 64), { name: "RangeError" });
-  t.is(bindings.signedAsBigInt(-(2 ** 63)), -(2n ** 63n));
-  t.is(bindings.signedAsBigInt(2 ** 63 - 1024), 2n ** 63n - 1024n);
+test("64 bit BigInt inputs preserve the validated integer value", (t) => {
+  t.is(bindings.unsignedAsBigInt(2n ** 63n), 2n ** 63n);
+  t.is(bindings.unsignedAsBigInt(2n ** 64n - 2048n), 2n ** 64n - 2048n);
+  t.throws(() => bindings.unsignedAsBigInt(2n ** 64n), { name: "RangeError" });
+  t.is(bindings.signedAsBigInt(-(2n ** 63n)), -(2n ** 63n));
+  t.is(bindings.signedAsBigInt(2n ** 63n - 1024n), 2n ** 63n - 1024n);
 });
 
 test("BigInt creation accepts the minimum signed 128 bit integer", (t) => {

@@ -586,11 +586,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
         fn factoryValueFromPayload(payload: anytype) ?T {
             const Payload = @TypeOf(payload);
             if (Payload == T) return payload;
-            // A factory returning `*T` moves the pointee into the instance.
-            // The allocation holding it stays owned by the factory.
-            if (Payload == *T) return payload.*;
-            if (Payload == *const T) return payload.*;
-            @compileError("Factory method must return " ++ @typeName(T) ++ ", *" ++ @typeName(T) ++ " or *const " ++ @typeName(T) ++ ", got: " ++ @typeName(Payload));
+            @compileError("Class factory must return " ++ @typeName(T) ++ " by value (T, !T or Result(T)); store heap allocations in T fields and release them in deinit");
         }
 
         fn factoryValueFromResult(env: napi.napi_env, result: anytype) ?T {
@@ -1217,7 +1213,10 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                         const return_payload = returnPayloadType(return_type);
                         const is_factory_method = blk: {
                             if (is_instance_method) break :blk false;
-                            if (return_payload == T or return_payload == *T or return_payload == *const T) break :blk true;
+                            if (return_payload == *T or return_payload == *const T) {
+                                @compileError("Class factory must return " ++ @typeName(T) ++ " by value (T, !T or Result(T)); store heap allocations in T fields and release them in deinit");
+                            }
+                            if (return_payload == T) break :blk true;
                             break :blk false;
                         };
 

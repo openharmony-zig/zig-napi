@@ -24,8 +24,8 @@ All other parameters are read from JavaScript arguments in order. Missing argume
 | Zig type                                              | JavaScript input                                              |
 | ----------------------------------------------------- | ------------------------------------------------------------- |
 | `bool`                                                | boolean                                                       |
-| integer and float types                               | number                                                        |
-| `napi.BigInt`                                         | bigint                                                        |
+| integer and float types except `u64` / `i64`          | number                                                        |
+| `u64`, `i64`, `napi.BigInt`                           | bigint                                                        |
 | `[]u8`, `[]const u8`, `[N]u8`                         | UTF-8 string input                                            |
 | `[]u16`, `[]const u16`, `[N]u16`                      | UTF-16 string input                                           |
 | `?T`                                                  | `T`, `null`, or `undefined`                                   |
@@ -34,7 +34,7 @@ All other parameters are read from JavaScript arguments in order. Missing argume
 | array, slice, `std.ArrayList(T)`                      | JavaScript Array, or numeric TypedArray when `T` is supported |
 | enum                                                  | numeric enum value                                            |
 | enum with `pub const napi_string_enum = true`         | string enum name                                              |
-| union(enum)                                           | first matching union field                                    |
+| union(enum)                                           | first variant whose range, members, or fields fit             |
 | `napi.NapiValue`                                      | raw JavaScript value                                          |
 | `napi.Function`, `*napi.Function`, `napi.FunctionRef` | JavaScript function                                           |
 | `napi.ThreadSafeFunction` pointer                     | JavaScript function promoted to a TSFN                        |

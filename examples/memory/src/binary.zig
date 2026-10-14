@@ -154,34 +154,34 @@ pub fn typedarray_sum(value: napi.Uint8Array) usize {
     return sum;
 }
 
-pub fn int16_typedarray_sum(value: napi.Int16Array) i64 {
-    var sum: i64 = 0;
+pub fn int16_typedarray_sum(value: napi.Int16Array) f64 {
+    var sum: f64 = 0;
     for (value.asConstSlice()) |item| {
-        sum += @intCast(item);
+        sum += @floatFromInt(item);
     }
     return sum;
 }
 
-pub fn uint16_typedarray_sum(value: napi.Uint16Array) i64 {
-    var sum: i64 = 0;
+pub fn uint16_typedarray_sum(value: napi.Uint16Array) f64 {
+    var sum: f64 = 0;
     for (value.asConstSlice()) |item| {
-        sum += @intCast(item);
+        sum += @floatFromInt(item);
     }
     return sum;
 }
 
-pub fn int32_typedarray_sum(value: napi.Int32Array) i64 {
-    var sum: i64 = 0;
+pub fn int32_typedarray_sum(value: napi.Int32Array) f64 {
+    var sum: f64 = 0;
     for (value.asConstSlice()) |item| {
-        sum += @intCast(item);
+        sum += @floatFromInt(item);
     }
     return sum;
 }
 
-pub fn uint32_typedarray_sum(value: napi.Uint32Array) i64 {
-    var sum: i64 = 0;
+pub fn uint32_typedarray_sum(value: napi.Uint32Array) f64 {
+    var sum: f64 = 0;
     for (value.asConstSlice()) |item| {
-        sum += @intCast(item);
+        sum += @floatFromInt(item);
     }
     return sum;
 }
