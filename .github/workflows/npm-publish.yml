@@ -1,34 +1,35 @@
 name: Publish Node CLI
 
 on:
-  push:
+  pull_request:
     branches: [ main ]
+    types: [ closed ]
+    paths: [ '.github/releases/cli-version' ]
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
   publish:
     name: Publish zig-napi CLI
+    if: >-
+      github.event.pull_request.merged &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'release/cli'
     runs-on: ubuntu-latest
-    if: "github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'chore(npm): publish')"
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          fetch-depth: 0
 
-      - name: Verify publish commit
-        shell: bash
-        env:
-          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
-        run: |
-          set -euo pipefail
-          subject="$(printf '%s' "${COMMIT_MESSAGE}" | sed -n '1p')"
-          if [[ ! "${subject}" =~ ^chore\(npm\):\ publish(\ \(#[0-9]+\))?$ ]]; then
-            echo "Refusing to publish from commit subject: ${subject}"
-            exit 1
-          fi
+      - name: Verify the approved CLI version
+        run: python3 scripts/release/prepare.py merged cli
 
       - name: Setup Zig
         uses: mlugg/setup-zig@v2

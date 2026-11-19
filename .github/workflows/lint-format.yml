@@ -36,6 +36,9 @@ jobs:
       - name: Validate prek config
         run: pnpm exec prek validate-config prek.toml
 
+      - name: Test release planning
+        run: python3 -B -m unittest discover -s scripts/release
+
       - name: Check Zig syntax
         run: pnpm run check:zig
 

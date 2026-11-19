@@ -206,11 +206,13 @@ test("new applies NAPI, license, package manager, declaration and CI choices", (
   );
   const pkg = JSON.parse(fs.readFileSync(path.join(project, "package.json")));
   const zon = fs.readFileSync(path.join(project, "build.zig.zon"), "utf8");
-  assert.match(
-    zon,
-    /\.url = "https:\/\/github\.com\/openharmony-zig\/zig-napi\/archive\/refs\/tags\/0\.2\.0\.tar\.gz"/,
+  const pin = require("../lib/zig-release.json");
+  assert.ok(
+    zon.includes(
+      `https://github.com/openharmony-zig/zig-napi/archive/refs/tags/${pin.version}.tar.gz`,
+    ),
   );
-  assert.match(zon, /\.hash = "zig_napi-0\.2\.0-H6Owa3v4EABILIXlrpXwo4e18Jg3KGVg9bWK5EgB7Exo"/);
+  assert.ok(zon.includes(`.hash = "${pin.hash}"`));
   assert.doesNotMatch(zon, /\.path\s*=/);
   assert.equal(pkg.zigNapi.managedZigDependency, undefined);
   assert.equal(pkg.license, "Apache-2.0");

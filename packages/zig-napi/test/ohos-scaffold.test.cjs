@@ -52,7 +52,9 @@ test("the OHOS template plans and generates a DevEco HAR with matching ArkTS and
   assert.match(read("package/" + pkg.main), /from "libdemo_native\.so"/);
   assert.match(read("package/" + pkg.types), /function add\(/);
   assert.match(read("src/lib.zig"), /NODE_API_MODULE\("demo_native"/);
-  assert.match(read("build.zig.zon"), /archive\/refs\/tags\/0\.2\.0\.tar\.gz/);
+  const pin = require("../lib/zig-release.json");
+  assert.ok(read("build.zig.zon").includes(`/archive/refs/tags/${pin.version}.tar.gz`));
+  assert.ok(read("build.zig.zon").includes(`.hash = "${pin.hash}"`));
   assert.match(read("package/src/main/module.json5"), /"type": ['"]har['"]/);
   for (const name of ["npm", "node_modules", "package.json", ".github"]) {
     assert.equal(fs.existsSync(path.join(project, name)), false, name);
