@@ -1,0 +1,5 @@
+{
+  "name": 'lib__ADDON_NAME__.so',
+  "version": '0.1.0',
+  "types": 'Index.d.ts',
+}

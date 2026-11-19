@@ -1,0 +1,8 @@
+{
+  "app": {
+    "bundleName": 'org.example.zigaddon',
+    "vendor": 'example',
+    "versionCode": 1,
+    "versionName": '0.1.0',
+  },
+}

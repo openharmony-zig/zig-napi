@@ -5,7 +5,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { NapiCli, writeJsBinding } = require("@napi-rs/cli");
-const { Command } = require("commander");
+const { Command, Option } = require("commander");
 const upstream = require("./upstream.cjs");
 const scaffold = require("./scaffold.cjs");
 const { zigTarget } = require("./targets.cjs");
@@ -32,7 +32,7 @@ const {
 
 const packageDir = path.resolve(__dirname, "..");
 const workspaceRoot = path.resolve(packageDir, "..", "..");
-const templateDir = path.join(packageDir, "templates", "node-addon");
+const templatesDir = path.join(packageDir, "templates");
 const napiCli = new NapiCli();
 
 const availableTargets = [
@@ -229,6 +229,7 @@ function validateAddonNameOrFail(value) {
 }
 
 async function promptNewOptions(projectDir, flags) {
+  const ohos = flags.template === "ohos";
   if (!isInteractive(flags)) {
     if (!projectDir) {
       fail("project directory is required; pass <dir> or run in an interactive terminal");
@@ -240,7 +241,7 @@ async function promptNewOptions(projectDir, flags) {
       projectDir,
       packageName,
       addonName: validateAddonNameOrFail(flags.addon || sanitizeZigName(packageName)),
-      targets: resolveNonInteractiveTargets(flags),
+      targets: ohos ? scaffold.ohosTargets : resolveNonInteractiveTargets(flags),
     };
   }
 
@@ -255,7 +256,7 @@ async function promptNewOptions(projectDir, flags) {
   const packageName =
     flags.name ||
     (await input({
-      message: "Package name (the name field in your package.json file)",
+      message: "Package name",
       default: defaultPackageName,
       validate: validatePackageName,
     }));
@@ -267,23 +268,32 @@ async function promptNewOptions(projectDir, flags) {
       validate: validateAddonName,
     }));
 
-  flags.minNodeApi ??= await select({
-    message: "Minimum Node-API version",
-    choices: Array.from({ length: 10 }, (_, i) => ({
-      name: `napi${i + 1} (${scaffold.nodeEngine(i + 1)})`,
-      value: i + 1,
-    })),
-    default: 4,
-  });
+  if (!ohos) {
+    flags.minNodeApi ??= await select({
+      message: "Minimum Node-API version",
+      choices: Array.from({ length: 10 }, (_, i) => ({
+        name: `napi${i + 1} (${scaffold.nodeEngine(i + 1)})`,
+        value: i + 1,
+      })),
+      default: 4,
+    });
+    flags.enableTypeDef ??= await confirm({
+      message: "Enable type definition auto-generation",
+      default: true,
+    });
+  }
   flags.license ??= await input({ message: "License for open-sourced project", default: "MIT" });
-  flags.enableTypeDef ??= await confirm({
-    message: "Enable type definition auto-generation",
-    default: true,
-  });
   flags.enableGithubActions ??= await confirm({
     message: "Enable GitHub Actions CI",
     default: true,
   });
+
+  const names = {
+    projectDir: targetPath,
+    packageName: normalizePackageNameOrFail(packageName),
+    addonName: validateAddonNameOrFail(addonName),
+  };
+  if (ohos) return { ...names, targets: scaffold.ohosTargets };
 
   const targets = flags.targets.length
     ? flags.targets
@@ -299,12 +309,7 @@ async function promptNewOptions(projectDir, flags) {
           })),
         });
 
-  return {
-    projectDir: targetPath,
-    packageName: normalizePackageNameOrFail(packageName),
-    addonName: validateAddonNameOrFail(addonName),
-    targets: resolveNewTargets({ ...flags, targets }),
-  };
+  return { ...names, targets: resolveNewTargets({ ...flags, targets }) };
 }
 
 function copyTemplate(from, to, replacements) {
@@ -563,6 +568,16 @@ function resolveZigNapiPath(targetDir, value) {
     );
   }
   return path.relative(fs.realpathSync(targetDir), fs.realpathSync(source)) || ".";
+}
+
+const zigNapiArchive = "https://github.com/openharmony-zig/zig-napi/archive/refs/tags/0.2.0.tar.gz";
+const zigNapiHash = "zig_napi-0.2.0-H6Owa3v4EABILIXlrpXwo4e18Jg3KGVg9bWK5EgB7Exo";
+
+function scaffoldDependency(targetDir, source) {
+  if (source) {
+    return `.{ .path = ${JSON.stringify(normalizePathForZig(resolveZigNapiPath(targetDir, source)))} }`;
+  }
+  return `.{ .url = ${JSON.stringify(zigNapiArchive)}, .hash = ${JSON.stringify(zigNapiHash)} }`;
 }
 
 async function readZigNapiConfig(cwd, flags) {
@@ -1015,8 +1030,36 @@ function resolveWasiEmnapiEnv(cwd) {
 }
 
 async function commandNew(projectDir, flags) {
+  if (!flags.template && isInteractive(flags)) {
+    const { select } = await import("@inquirer/prompts");
+    flags.template = await select({
+      message: "Project template",
+      choices: [
+        { name: "Node.js / WASI addon", value: "node" },
+        { name: "OpenHarmony native addon (HAR)", value: "ohos" },
+      ],
+      default: "node",
+    });
+  }
+  const ohos = flags.template === "ohos";
+  if (
+    ohos &&
+    (flags.targets.length ||
+      flags.enableAllTargets ||
+      !flags.enableDefaultTargets ||
+      flags.minNodeApi ||
+      flags.packageManager ||
+      flags.testFramework ||
+      flags.enableTypeDef === false)
+  ) {
+    throw new Error(
+      "Node target and package options do not apply to the OHOS template. Select a single OHOS ABI at build time with zig build -Dtarget=<triple>.",
+    );
+  }
   const options = await promptNewOptions(projectDir, flags);
-  const projectOptions = scaffold.options(flags);
+  const projectOptions = ohos
+    ? { ...flags, enableTypeDef: true, enableGithubActions: flags.enableGithubActions ?? true }
+    : scaffold.options(flags);
   const targetDir = path.resolve(process.cwd(), options.projectDir);
   if (fs.existsSync(targetDir) && fs.readdirSync(targetDir).length && !flags.force) {
     fail(`${targetDir} is not empty; pass --force to write into it`);
@@ -1026,6 +1069,7 @@ async function commandNew(projectDir, flags) {
       JSON.stringify(
         {
           directory: targetDir,
+          ...(ohos ? { template: "ohos" } : {}),
           packageName: options.packageName,
           targets: options.targets,
           minNodeApi: projectOptions.minNodeApiVersion,
@@ -1043,23 +1087,27 @@ async function commandNew(projectDir, flags) {
   const packageName = options.packageName;
   const addonName = options.addonName;
   fs.mkdirSync(targetDir, { recursive: true });
-  const zigNapiZigPath = resolveZigNapiPath(targetDir, flags.zigNapi);
+  const dependency = scaffoldDependency(targetDir, flags.zigNapi);
 
-  copyTemplate(templateDir, targetDir, {
+  copyTemplate(path.join(templatesDir, ohos ? "ohos-addon" : "node-addon"), targetDir, {
     __PACKAGE_NAME__: packageName,
     __ADDON_NAME__: addonName,
     __ZIG_PACKAGE_NAME__: sanitizeZigName(packageName),
-    __ZIG_NAPI_ZIG_PATH__: JSON.stringify(normalizePathForZig(zigNapiZigPath)).slice(1, -1),
+    __ZIG_NAPI_DEPENDENCY__: dependency,
     '      "__NAPI_TARGETS__"': formatJsonStringArrayItems(options.targets, "      "),
     __FINGERPRINT__: "0x0",
     __CLI_VERSION__: readJson(path.join(packageDir, "package.json")).version,
   });
-  scaffold.configure(targetDir, projectOptions, options.targets, addonName);
-  // Loaders are generated from the same code path a build uses, so a scaffold
-  // and a built project cannot drift apart.
-  await generateWasiBindings(targetDir, { target: undefined, buildOutputDir: "." });
-  updateTemplatePackageForTargets(targetDir, options.targets);
-  await commandCreateNpmDirs({ cwd: targetDir });
+  if (ohos) {
+    scaffold.configureOhos(targetDir, projectOptions, packageName, addonName);
+  } else {
+    scaffold.configure(targetDir, projectOptions, options.targets, addonName);
+    // Loaders are generated from the same code path a build uses, so a scaffold
+    // and a built project cannot drift apart.
+    await generateWasiBindings(targetDir, { target: undefined, buildOutputDir: "." });
+    updateTemplatePackageForTargets(targetDir, options.targets);
+    await commandCreateNpmDirs({ cwd: targetDir });
+  }
   repairZigFingerprint(targetDir);
 
   console.log(`Created ${packageName} in ${targetDir}`);
@@ -1416,15 +1464,18 @@ function createProgram() {
   program
     .name("zig-napi")
     .version(readJson(path.join(packageDir, "package.json")).version, "-v, --version")
-    .description("CLI tools for building Node.js addons with zig-napi")
+    .description("Create Node.js, WASI and OpenHarmony addons with zig-napi")
     .showHelpAfterError()
     .showSuggestionAfterError();
 
   program
     .command("new")
-    .description("create a Zig Node-API addon project")
+    .description("create a Zig Node.js/WASI or OpenHarmony addon project")
+    .addOption(
+      new Option("--template <kind>", "project template (default: node)").choices(["node", "ohos"]),
+    )
     .argument("[dir]", "project directory")
-    .option("-n, --name <package>", "npm package name")
+    .option("-n, --name <package>", "package name")
     .option("-v, --min-node-api <version>", "minimum Node-API version (1–10; default: 4)")
     .option("--package-manager <manager>", "package manager: yarn or pnpm (default: yarn)")
     .option("-l, --license <license>", "package license (default: MIT)")
