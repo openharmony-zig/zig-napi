@@ -214,3 +214,24 @@ pub const validateOptional = strict.validateOptional;
 comptime {
     napi.NODE_API_MODULE("example", @This());
 }
+
+pub fn cancelReaderFromThread(reader: napi.ReadableStreamReader(i32), request: bool) !napi.PromiseOf(void) {
+    if (comptime @import("builtin").cpu.arch.isWasm()) return error.NativeThreadRequired;
+    const cancellation = try reader.cancelHandle();
+    defer cancellation.handle.Close();
+    if (!request) return cancellation.completion;
+    const Worker = struct {
+        fn run(handle: napi.ReaderCancelHandle) void {
+            defer handle.Close();
+            handle.cancel("native stop") catch return;
+            handle.cancel(null) catch return;
+        }
+    };
+    const copy = cancellation.handle.Clone();
+    const worker = @import("std").Thread.spawn(.{}, Worker.run, .{copy}) catch |err| {
+        copy.Close();
+        return err;
+    };
+    worker.join();
+    return cancellation.completion;
+}

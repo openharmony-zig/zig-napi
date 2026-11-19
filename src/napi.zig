@@ -46,6 +46,7 @@ pub const PromiseValue = value.PromiseValue;
 pub const NativePromise = @import("./napi/value/native_promise.zig").NativePromise;
 pub const PromiseOf = @import("./napi/value/protocol.zig").PromiseOf;
 pub const ReadableStream = @import("./napi/value/streams.zig").ReadableStream;
+pub const ReaderCancelHandle = @import("./napi/value/reader_cancel.zig").ReaderCancelHandle;
 pub const ReadableStreamReader = @import("./napi/value/streams.zig").ReadableStreamReader;
 pub const WritableStream = @import("./napi/value/streams.zig").WritableStream;
 pub const WritableStreamWriter = @import("./napi/value/streams.zig").WritableStreamWriter;
