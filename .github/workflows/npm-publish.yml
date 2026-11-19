@@ -48,6 +48,11 @@ jobs:
           registry-url: https://registry.npmjs.org/
           cache: pnpm
 
+      - name: Ensure npm supports trusted publishing
+        run: |
+          npm install --global npm@^11.5.1
+          npm --version
+
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
 
@@ -91,8 +96,6 @@ jobs:
 
       - name: Publish to npm
         working-directory: packages/zig-napi
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           tag=$(node -p "const v = require('./package.json').version.split('+')[0]; v.includes('-') ? (v.split('-')[1].match(/^[a-z]+/i)?.[0] || 'next') : 'latest'")
           npm publish "$ZIG_NAPI_CLI_TARBALL" --ignore-scripts --provenance --access public --tag "$tag"
