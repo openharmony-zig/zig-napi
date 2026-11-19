@@ -145,6 +145,13 @@ jobs:
         with:
           pattern: addon-*
           path: artifacts
+      - name: Set release repository for npm provenance
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          if ! node -e 'process.exit(require("./package.json").repository ? 0 : 1)'; then
+            npm pkg set repository.type=git "repository.url=git+$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
+          fi
       - run: ${exec} zig-napi create-npm-dirs
       - run: ${exec} zig-napi artifacts --output-dir artifacts
       - uses: actions/upload-artifact@v4
