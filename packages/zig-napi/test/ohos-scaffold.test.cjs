@@ -6,7 +6,6 @@ const path = require("node:path");
 const test = require("node:test");
 
 const cli = path.resolve(__dirname, "../bin/zig-napi.js");
-const checkout = path.resolve(__dirname, "../../..");
 
 function scaffold(t, ...flags) {
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "zig-napi-ohos-"));
@@ -64,7 +63,7 @@ test(
   "the generated OHOS addon cross-compiles and emits ArkTS declarations",
   { skip: process.env.ZIG_NAPI_TEST_OHOS !== "1" },
   (t) => {
-    const { project, generate } = scaffold(t, "--zig-napi", checkout);
+    const { project, generate } = scaffold(t);
     generate();
     assert.ok(fs.existsSync(path.join(project, ".github/workflows/CI.yml")));
     // Remove the seed declaration to verify that the Zig generator produced it.

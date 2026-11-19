@@ -571,12 +571,13 @@ function resolveZigNapiPath(targetDir, value) {
 }
 
 const zigNapiArchive = "https://github.com/openharmony-zig/zig-napi/archive/refs/tags/0.2.0.tar.gz";
+const zigNapiHash = "zig_napi-0.2.0-H6Owa3v4EABILIXlrpXwo4e18Jg3KGVg9bWK5EgB7Exo";
 
 function scaffoldDependency(targetDir, source) {
   if (source) {
     return `.{ .path = ${JSON.stringify(normalizePathForZig(resolveZigNapiPath(targetDir, source)))} }`;
   }
-  return `.{ .url = ${JSON.stringify(zigNapiArchive)} }`;
+  return `.{ .url = ${JSON.stringify(zigNapiArchive)}, .hash = ${JSON.stringify(zigNapiHash)} }`;
 }
 
 async function readZigNapiConfig(cwd, flags) {

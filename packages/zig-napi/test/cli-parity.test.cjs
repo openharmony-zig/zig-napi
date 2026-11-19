@@ -210,6 +210,7 @@ test("new applies NAPI, license, package manager, declaration and CI choices", (
     zon,
     /\.url = "https:\/\/github\.com\/openharmony-zig\/zig-napi\/archive\/refs\/tags\/0\.2\.0\.tar\.gz"/,
   );
+  assert.match(zon, /\.hash = "zig_napi-0\.2\.0-H6Owa3v4EABILIXlrpXwo4e18Jg3KGVg9bWK5EgB7Exo"/);
   assert.doesNotMatch(zon, /\.path\s*=/);
   assert.equal(pkg.zigNapi.managedZigDependency, undefined);
   assert.equal(pkg.license, "Apache-2.0");
