@@ -106,6 +106,11 @@ pub fn ReadableStreamReader(comptime T: type) type {
             const object = Object.from_raw(self.env, self.raw);
             return (try object.Get("read", Function(struct {}, Protocol.PromiseOf(Protocol.Iteration(T))))).Apply(object, .{});
         }
+        /// Create on the JS thread. Move the handle to a native worker and
+        /// observe the completion Promise on the original JS thread.
+        pub fn cancelHandle(self: Self) !@import("reader_cancel.zig").ReaderCancellation {
+            return @import("reader_cancel.zig").ReaderCancelHandle.init(Env.from_raw(self.env), Object.from_raw(self.env, self.raw));
+        }
         pub fn cancel(self: Self, reason: Value) !PromiseValue {
             const object = Object.from_raw(self.env, self.raw);
             return (try object.Get("cancel", Function(struct { Value }, PromiseValue))).Apply(object, .{reason});

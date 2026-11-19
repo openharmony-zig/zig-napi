@@ -566,3 +566,35 @@ test("weak references collect their target and survive environment termination",
 test("global Symbol registry preserves identity", (t) => {
   t.is(native.paritySymbolFor("zig-napi.parity"), Symbol.for("zig-napi.parity"));
 });
+
+testWebStreams("native cancellation wakes a pending read and preserves JS failures", async (t) => {
+  if (process.env.NAPI_RS_FORCE_WASI) {
+    t.pass();
+    return;
+  }
+  let calls = 0;
+  const reader = new ReadableStream({
+    cancel(reason) {
+      calls++;
+      t.is(reason, "native stop");
+    },
+  }).getReader();
+  const pending = reader.read();
+  await native.cancelReaderFromThread(reader, false);
+  t.is(calls, 0);
+  await native.cancelReaderFromThread(reader, true);
+  t.true((await pending).done);
+  t.is(calls, 1);
+  const failure = new Error("reader refused");
+  for (const cancel of [
+    () => {
+      throw failure;
+    },
+    () => Promise.reject(failure),
+  ]) {
+    const observed = await t.throwsAsync(
+      native.cancelReaderFromThread({ read() {}, cancel }, true),
+    );
+    t.is(observed, failure);
+  }
+});

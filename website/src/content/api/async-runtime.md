@@ -446,3 +446,15 @@ Two details the example depends on, both documented above: the rejection is the
 `AbortError` the operation's own cancellation produces (not a fresh error), and
 every event the runner emitted before it noticed the abort has already been
 delivered when the promise settles.
+
+## Cancelling a Web Stream reader from a native thread
+
+Call `reader.cancelHandle()` on the JavaScript thread. It returns a
+`ReaderCancelHandle` and a JavaScript `completion` promise. Transfer the handle
+to the worker, or call `Clone()` to give the worker its own owner. Each owner
+calls `Close()` once. The first `handle.cancel(reason)` queues the reader's
+bound cancel method and copies the optional UTF-8 reason before returning.
+The promise adopts the JavaScript cancellation result, including rejections.
+The dispatcher keeps the event loop alive while a native owner is active.
+Closing all owners without requesting cancellation resolves the promise and leaves the reader open.
+A standard reader settles a pending read when cancelled and retains its lock.
