@@ -63,7 +63,12 @@ function workflow(targets, binaryName, packageManager) {
   // JSON is a YAML-compatible scalar/collection format; serializing the matrix
   // keeps package names and target strings out of shell/YAML interpolation.
   return `name: CI
-on: [push, pull_request, workflow_dispatch]
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
 permissions:
   contents: read
 env:
@@ -140,11 +145,61 @@ jobs:
         with:
           pattern: addon-*
           path: artifacts
+      - run: ${exec} zig-napi create-npm-dirs
       - run: ${exec} zig-napi artifacts --output-dir artifacts
       - uses: actions/upload-artifact@v4
         with:
           name: npm-packages
           path: npm/
+      - name: Prepare release tarballs
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          version=$(node -p 'require("./package.json").version')
+          test "$GITHUB_REF_NAME" = "v$version"
+          ${exec} zig-napi pre-publish --no-gh-release --skip-optional-publish --root-publisher npm
+          mkdir -p release/platforms release/root
+          for pkg in npm/*/; do
+            npm pack "./$pkg" --ignore-scripts --pack-destination release/platforms
+          done
+          npm pack --ignore-scripts --pack-destination release/root
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        with:
+          name: release-tarballs
+          path: release/
+          if-no-files-found: error
+  publish:
+    needs: packages
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org/
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-tarballs
+      - name: Publish platform packages, then the root package
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: \${{ secrets.NPM_TOKEN }}
+        run: |
+          tag=latest
+          if [[ \${GITHUB_REF_NAME%%+*} == *-* ]]; then tag=next; fi
+          for archive in platforms/*.tgz root/*.tgz; do
+            spec=$(tar -xOzf "$archive" package/package.json | jq -r '.name + "@" + .version')
+            integrity="sha512-$(openssl dgst -sha512 -binary "$archive" | openssl base64 -A)"
+            if [[ $(npm view "$spec" dist.integrity) == "$integrity" ]]; then
+              echo "$spec already published"
+              continue
+            fi
+            npm publish "$archive" --ignore-scripts --access public --provenance --tag "$tag"
+          done
 `;
 }
 
