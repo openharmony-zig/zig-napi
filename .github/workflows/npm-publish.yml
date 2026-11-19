@@ -68,8 +68,11 @@ jobs:
           NAPI_RS_FORCE_WASI: 'error'
         run: node examples/node/test.js
 
-      - name: Build wasm node-test matrix
+      - name: Build wasm node-test matrix (threaded)
         run: node packages/zig-napi/bin/zig-napi.js build --cwd node-test --target wasm32-wasip1-threads -- --summary all
+
+      - name: Build wasm node-test matrix (single-threaded)
+        run: node packages/zig-napi/bin/zig-napi.js build --cwd node-test --target wasm32-wasip1 -- --summary all
 
       - name: Test wasm node-test matrix
         working-directory: node-test
