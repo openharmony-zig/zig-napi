@@ -239,6 +239,32 @@ test("new applies NAPI, license, package manager, declaration and CI choices", (
   assert.match(fs.readFileSync(path.join(second, "build.zig"), "utf8"), /\.version = \.v4/);
 });
 
+for (const esm of [false, true]) {
+  test(`a postbuild WASI fallback preserves its target in the ${esm ? "ESM" : "CJS"} root loader`, async (t) => {
+    const cwd = fixture(t, { targets: ["wasm32-wasip1"] });
+    const preload = fakeZig(cwd);
+    fs.writeFileSync(path.join(cwd, "index.d.ts"), "export declare function add(): number;\n");
+    const flags = esm ? ["--esm", "--js", "index.mjs"] : [];
+    success(invoke(["build", "--platform", ...flags], cwd, preload));
+    const loader = path.join(cwd, esm ? "index.mjs" : "index.js");
+    const source = fs.readFileSync(loader, "utf8");
+    const marker = "if (!nativeBinding) {";
+    const at = source.lastIndexOf(marker);
+    assert.notEqual(at, -1);
+    fs.writeFileSync(
+      loader,
+      source.slice(0, at) +
+        'nativeBinding = { __napiBindingTarget: "wasm32-wasip1", add: () => 42 };\n' +
+        source.slice(at),
+    );
+    const binding = esm
+      ? await import(require("node:url").pathToFileURL(loader).href)
+      : require(loader);
+    assert.equal(binding.add(), 42);
+    assert.equal(binding.__napiBindingTarget, "wasm32-wasip1");
+  });
+}
+
 test("build options affect native artifacts, declarations, output paths and pipe inputs", (t) => {
   const dir = fixture(t),
     preload = fakeZig(dir);
@@ -704,25 +730,4 @@ test("FreeBSD targets share the npm, Zig and loader artifact names", (t) => {
     assert.equal(platformId(zigTarget(triple)), "freebsd-" + abi);
     assert.equal(api.parseTriple(triple).platformArchABI, "freebsd-" + abi);
   }
-});
-
-test("a postbuild fallback preserves the configured WASI identity in the root loader", (t) => {
-  const cwd = fixture(t, { targets: ["wasm32-wasip1"] });
-  const preload = fakeZig(cwd);
-  fs.writeFileSync(path.join(cwd, "index.d.ts"), "export declare function add(): number;\n");
-  success(invoke(["build", "--platform"], cwd, preload));
-  const loader = path.join(cwd, "index.js");
-  const source = fs.readFileSync(loader, "utf8");
-  const marker = "if (!nativeBinding) {";
-  const at = source.lastIndexOf(marker);
-  assert.notEqual(at, -1);
-  fs.writeFileSync(
-    loader,
-    source.slice(0, at) +
-      'nativeBinding = { __napiBindingTarget: "wasm32-wasip1", add: () => 42 };\n' +
-      source.slice(at),
-  );
-  const binding = require(loader);
-  assert.equal(binding.add(), 42);
-  assert.equal(binding.__napiBindingTarget, "wasm32-wasip1");
 });
