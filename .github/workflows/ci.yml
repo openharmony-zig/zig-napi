@@ -4,7 +4,6 @@ on:
   push:
     branches: [ main ]
   pull_request:
-    branches: [ main ]
   workflow_dispatch:
 
 permissions:
@@ -39,6 +38,18 @@ jobs:
           pushd examples/init && zig build && popd
           pushd examples/allocator-custom && zig build && popd
           pushd examples/allocator-builtin && zig build && popd
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.24.0
+      - run: pnpm --filter @ohos-rs/zig-cli... install --frozen-lockfile
+      - name: Build the generated OpenHarmony addon for all three ABIs
+        env:
+          ZIG_NAPI_TEST_OHOS: '1'
+        run: node --test packages/zig-napi/test/ohos-scaffold.test.cjs
 
   ohos-qemu-e2e:
     runs-on: ubuntu-24.04

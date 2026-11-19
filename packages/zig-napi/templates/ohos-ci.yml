@@ -1,0 +1,23 @@
+name: Build OpenHarmony addon
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: openharmony-rs/setup-ohos-sdk@v0.2
+        with:
+          version: '5.0.0'
+      - uses: openharmony-zig/setup-zig-ohos@v0.1.0
+        with:
+          tag: '0.17.0'
+      - run: zig build --prefix package/libs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ohos-addon
+          path: |
+            package/libs/
+            package/types/
+          if-no-files-found: error

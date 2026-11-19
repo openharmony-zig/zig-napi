@@ -170,13 +170,11 @@ WASI addons link emnapi's `libemnapi-basic-napi-rs.a` from a `node_modules/emnap
 
 Async work and thread-safe functions come from the `@emnapi/core` plugins in both flavors; the threaded flavor runs them on the plugin's JavaScript worker threads through the `emnapi_async_worker_create` / `emnapi_async_worker_init` exports. That is deliberately **not** napi-rs' implementation, which links emnapi's full C composition and uses the uv/libuv thread pool over real wasi pthreads: Zig 0.17 cannot build a multithreaded wasm module, so a zig-napi WASI addon has no libuv/Tokio-style async API. Memory stays a loader decision — the module imports memory with the linker minimum (257 pages by default) and a 4 GiB maximum, and the loader's `wasm.initialMemory` (4000 pages by default) must stay below `wasm.maximumMemory`, because the Zig allocator grows the linear memory past its current size. A **single** allocation is capped at 1 GiB − 64 KiB (a wasm32 bump-allocator size-class limit: `malloc`/Zig `Allocator` return null/an out-of-memory error instead of trapping above it, and a failed `realloc` keeps the old block), while the total memory can still be 4 GiB across many allocations. Build-side overrides: `-Dwasi-initial-memory-pages=<pages>`, `-Dwasi-max-memory-pages=<pages>`, `-Dwasi-stack-size=<bytes>`, plus `-Demnapi-link-dir=<dir>` (or `EMNAPI_LINK_DIR`) and `-Demnapi-archive=<name-or-path>` to select a different emnapi archive.
 
-The package also provides a `zig-napi` CLI for Node.js addons. Zig-specific commands such as `new` and `build` are implemented by this project. Packaging commands reuse the community `@napi-rs/cli` API for npm package directory creation, artifact collection, and pre-publish processing.
+The package provides the `zig-napi` CLI for generating Node.js/WASI and OpenHarmony addons. Zig-specific commands such as `new` and `build` are implemented by this project. Packaging commands reuse the community `@napi-rs/cli` API for npm package directory creation, artifact collection, and pre-publish processing.
 
 The CLI requires Node.js 20.17 or newer.
 
-Create a new Node addon project:
-
-The `zig-napi` CLI handles Node.js native addons and WASI products. OHOS products use the library's OHOS build API and the OHOS SDK build/signing tools; they are validated separately through the QEMU HAP pipeline.
+To create a Node addon project, run the following commands.
 
 ```bash
 pnpm install
@@ -196,6 +194,18 @@ pnpm --filter @ohos-rs/zig-cli cli new ../../my-addon --no-interactive --name my
 Pass `--targets <triple>` repeatedly or as a comma-separated list to choose the generated package targets manually, or pass `--enable-all-targets` to enable every Node/WASI target known to the CLI. `new` immediately creates a `package.json` and README in `npm/<platform-arch-abi>/` for each selected target, including separate `wasm32-wasi` and `wasm32-wasip1` packages when both WASI flavors are selected. These directories contain package metadata; build each target with `zig-napi build --platform --target <triple>` and run `zig-napi artifacts --output-dir zig-out/node` to fill them with binaries and loaders. A build compiles the host target by default, or the one specified by `--target`.
 
 `new` uses napi-rs' defaults: Node-API 4, MIT, Yarn, AVA, TypeScript declarations and GitHub Actions enabled. Set `--min-node-api 1` through `10`, `--license`, `--package-manager yarn|pnpm`, `--enable-type-def=false`, or `--enable-github-actions=false` to change them. The generated CI builds the selected targets with stock Zig 0.17, tests host-compatible/WASI binaries and collects the platform packages. Pushing a tag that matches the addon version (for example, `v1.2.3`) publishes the platform tarballs first and the root tarball last. Stable releases use `latest` and prereleases use `next`. Configure npm trusted publishing for the generated `CI.yml` on the root and platform packages, or set the repository’s `NPM_TOKEN` secret. `new --dry-run` prints the plan without creating files or invoking Zig. By default, `new` writes the GitHub archive URL for tag `0.2.0` to `build.zig.zon`. Once the tag is available, use `zig fetch --save-exact=zig-napi https://github.com/openharmony-zig/zig-napi/archive/refs/tags/0.2.0.tar.gz` in the project to record its package hash. Pass `--zig-napi <checkout>` to use local sources for development or offline generation.
+
+To generate an OpenHarmony native library and a DevEco Studio HAR project, select the OHOS template.
+
+```sh
+zig-napi new my-library --template ohos --no-interactive
+cd my-library
+zig build --prefix package/libs
+ohpm install
+hvigorw --mode module -p module=addon@default assembleHar
+```
+
+Use the patched Zig 0.17.0 and set `OHOS_NDK_HOME` to the SDK directory containing `native/sysroot`. The Zig build emits the three native ABIs and regenerates the ArkTS declarations. The HAR exposes the Zig functions through its package name. During development, add `--zig-napi /path/to/zig-napi` to generate against a local checkout.
 
 Run the bundled Node example:
 
