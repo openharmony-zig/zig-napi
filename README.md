@@ -51,26 +51,25 @@ The build CLI and the artifacts it produces are independent: the CLI runs on the
 ### Scaffold a Node.js or WASI addon
 
 ```bash
-npm install -D @ohos-rs/zig-cli
-npx zig-napi new my-addon
+pnpm dlx @ohos-rs/zig-cli new my-addon
 
 cd my-addon
-npm install
-npm run build
-npm test
+pnpm install
+pnpm run build
+pnpm test
 ```
 
 `zig-napi new` asks for the package name, native addon binary name, and target platforms interactively, matching napi-rs' `new` workflow. For scripted usage, pass `--no-interactive` with explicit options:
 
 ```bash
-npx zig-napi new my-addon --no-interactive --name my-addon --addon my_addon --targets x86_64-unknown-linux-gnu
+pnpm dlx @ohos-rs/zig-cli new my-addon --no-interactive --name my-addon --addon my_addon --targets x86_64-unknown-linux-gnu
 ```
 
 Pass `--targets <triple>` repeatedly or as a comma-separated list to choose the generated package targets, or pass `--enable-all-targets` to enable every Node/WASI target known to the CLI.
 
 `new` immediately creates a `package.json` and README in `npm/<platform-arch-abi>/` for each selected target, including separate `wasm32-wasi` and `wasm32-wasip1` packages when both WASI flavors are selected. These directories hold package metadata; build each target with `zig-napi build --platform --target <triple>` and run `zig-napi artifacts --output-dir zig-out/node` to fill them with binaries and loaders. A build compiles the host target by default, or the target specified by `--target`.
 
-`new` uses napi-rs' defaults: Node-API 4, MIT, Yarn, AVA, TypeScript declarations, and GitHub Actions enabled. Change them with `--min-node-api 1` through `10`, `--license`, `--package-manager yarn|pnpm`, `--enable-type-def=false`, or `--enable-github-actions=false`.
+`new` defaults to pnpm, Node-API 4, the MIT license, and AVA, with TypeScript declarations and GitHub Actions enabled. Use `--package-manager yarn` to select Yarn. The other defaults can be changed with `--min-node-api 1` through `10`, `--license`, `--enable-type-def=false`, or `--enable-github-actions=false`.
 
 The generated CI builds the selected targets with stock Zig 0.17, tests host-compatible/WASI binaries, and collects the platform packages. Pushing a tag that matches the addon version (for example, `v1.2.3`) publishes the platform tarballs first and the root tarball last. Stable releases use `latest` and prereleases use `next`. Configure npm trusted publishing for the generated `CI.yml` on the root and platform packages, or set the repository's `NPM_TOKEN` secret. `new --dry-run` prints the plan without creating files or invoking Zig.
 

@@ -23,6 +23,7 @@ function options(flags) {
   const defaults = createNewCommand([]).getOptions();
   const result = {
     ...defaults,
+    packageManager: "pnpm",
     ...Object.fromEntries(Object.entries(flags).filter(([, v]) => v !== undefined)),
   };
   result.minNodeApiVersion = Number(flags.minNodeApi ?? defaults.minNodeApiVersion);
