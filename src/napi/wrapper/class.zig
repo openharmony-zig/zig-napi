@@ -11,6 +11,37 @@ const ArrayBuffer = @import("./arraybuffer.zig").ArrayBuffer;
 const Metadata = @import("../metadata.zig");
 const options = @import("../options.zig");
 
+fn setClassKey(env: napi.napi_env, descriptor: *napi.napi_property_descriptor, comptime config: Metadata.ExportOptions) !void {
+    if (comptime config.symbol == null) return;
+    const key = config.symbol.?;
+    if (config.name != null) @compileError("class members must choose a string name or a symbol key");
+    const environment = napi_env.Env.from_raw(env);
+    const symbol = switch (key) {
+        .registry => |description| try environment.symbolFor(description),
+        .well_known => |id| blk: {
+            const global = try environment.getGlobal();
+            const value = try global.Get("Symbol", @import("../value.zig").NapiValue);
+            const object = @import("../value/object.zig").Object.from_raw(env, value.raw);
+            const Symbol = @import("../value/special.zig").Symbol;
+            const symbol = try object.Get(@tagName(id), Symbol);
+            if (!try Symbol.matches_napi_value(env, symbol.raw)) return NapiError.failTypeError("Symbol.{s} is unavailable", .{@tagName(id)});
+            break :blk symbol;
+        },
+    };
+    descriptor.utf8name = null;
+    descriptor.name = symbol.raw;
+}
+
+fn sameClassKey(env: napi.napi_env, a: napi.napi_property_descriptor, b: napi.napi_property_descriptor) !bool {
+    if ((a.attributes & napi.napi_static) != (b.attributes & napi.napi_static)) return false;
+    if (a.name == null and b.name == null) return std.mem.eql(u8, std.mem.span(a.utf8name), std.mem.span(b.utf8name));
+    if (a.name == null or b.name == null) return false;
+    var equal: bool = false;
+    const status = napi.napi_strict_equals(env, a.name, b.name, &equal);
+    if (status != napi.napi_ok) return NapiError.failStatus(status);
+    return equal;
+}
+
 /// Ownership policy for the converted `init`/factory arguments of a class.
 ///
 /// A class declares the policy with a declaration, never with a field:
@@ -1164,6 +1195,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                     .attributes = field_config.attributes orelse napi.napi_default,
                     .data = context,
                 };
+                try setClassKey(env, &properties[prop_idx], field_config);
                 prop_idx += 1;
             }
 
@@ -1188,6 +1220,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                         .attributes = napi.napi_static | napi.napi_enumerable,
                         .data = null,
                     };
+                    try setClassKey(env, &properties[prop_idx], Metadata.get(T, decl));
                     prop_idx += 1;
                 }
             }
@@ -1319,6 +1352,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
                                 .data = context,
                             };
                         }
+                        try setClassKey(env, &properties[prop_idx], method_config);
                         prop_idx += 1;
                     }
                 }
@@ -1330,7 +1364,7 @@ pub fn ClassWrapper(comptime T: type, comptime HasInit: bool) type {
             while (descriptor_index < prop_idx) : (descriptor_index += 1) {
                 var other = descriptor_index + 1;
                 while (other < prop_idx) {
-                    if (std.mem.eql(u8, std.mem.span(properties[descriptor_index].utf8name), std.mem.span(properties[other].utf8name))) {
+                    if (try sameClassKey(env, properties[descriptor_index], properties[other])) {
                         if (properties[descriptor_index].method != null or properties[other].method != null or properties[descriptor_index].value != null or properties[other].value != null or (properties[descriptor_index].getter != null and properties[other].getter != null) or (properties[descriptor_index].setter != null and properties[other].setter != null)) {
                             return NapiError.failTypeError("Duplicate class property name", .{});
                         }
