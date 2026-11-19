@@ -1,0 +1,19 @@
+{
+  "app": {
+    "products": [
+      {
+        "name": 'default',
+        "runtimeOS": 'HarmonyOS',
+        "targetSdkVersion": '5.0.0(12)',
+        "compatibleSdkVersion": '5.0.0(12)',
+      },
+    ],
+    "buildModeSet": [{ "name": 'debug' }, { "name": 'release' }],
+  },
+  "modules": [
+    {
+      "name": 'addon',
+      "srcPath": './package',
+    },
+  ],
+}

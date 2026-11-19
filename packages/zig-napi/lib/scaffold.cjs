@@ -256,6 +256,35 @@ function configure(directory, flags, targets, binaryName) {
   }
 }
 
+const ohosTargets = ["aarch64-linux-ohos", "arm-linux-ohoseabi", "x86_64-linux-ohos"];
+
+function configureOhos(directory, flags, name, binaryName) {
+  const manifest = {
+    name,
+    version: "0.1.0",
+    license: flags.license ?? "MIT",
+    main: "Index.ets",
+    types: "types/Index.d.ts",
+    dependencies: { [`lib${binaryName}.so`]: "file:./types" },
+  };
+  fs.writeFileSync(
+    path.join(directory, "package/oh-package.json5"),
+    JSON.stringify(manifest, null, 2) + "\n",
+  );
+  fs.writeFileSync(
+    path.join(directory, ".gitignore"),
+    ".zig-cache/\nzig-cache/\nzig-out/\nzig-pkg/\npackage/libs/\noh_modules/\n.hvigor/\n.idea/\nbuild/\nlocal.properties\n",
+  );
+  if (flags.enableGithubActions) {
+    const workflows = path.join(directory, ".github", "workflows");
+    fs.mkdirSync(workflows, { recursive: true });
+    fs.copyFileSync(
+      path.join(__dirname, "../templates/ohos-ci.yml"),
+      path.join(workflows, "CI.yml"),
+    );
+  }
+}
+
 // A scaffold can be created by a global CLI and then checked out elsewhere.
 // Rebase only the dependency we own to the CLI actually running the build.
 // Explicit --zig-napi dependencies always remain under the user's control.
@@ -270,4 +299,12 @@ function resolveDependency(directory, dependency, pkg) {
   if (updated !== source) fs.writeFileSync(manifest, updated);
 }
 
-module.exports = { options, configure, workflow, nodeEngine, resolveDependency };
+module.exports = {
+  options,
+  configure,
+  configureOhos,
+  ohosTargets,
+  workflow,
+  nodeEngine,
+  resolveDependency,
+};
