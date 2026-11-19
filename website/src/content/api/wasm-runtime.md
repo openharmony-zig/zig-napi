@@ -662,9 +662,9 @@ The acceptance recorded for this release, and the parts it does not reach:
   run; and one out-of-memory build whose worker creation reports failure instead
   of trapping. These are recorded results from that environment, not a claim
   that every run reproduces here.
-- Not recorded: a deployment to a workerd-style host. The deferred loader exists
-  for hosts that forbid dynamic compilation and its module handling and
-  lifecycle are exercised in Chromium, but no such deployment was run.
+- The Node addon workflow runs the threadless deferred loader in a local
+  workerd isolate through Miniflare. A request instantiates a precompiled
+  module, calls the addon, disposes it, and creates a fresh instance.
 - Not recorded: browsers other than Chrome, and Node.js 16 or 24 for the WASI
   loaders. This repository does run its native suite on Node 16 and 24; that is
   not evidence that the wasm loaders work there.
