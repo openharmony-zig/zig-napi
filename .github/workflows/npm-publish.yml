@@ -1,38 +1,21 @@
 name: Publish Node CLI
 
 on:
-  push:
+  pull_request:
     branches: [ main ]
+    types: [ closed ]
+    paths: [ '.github/releases/cli-version' ]
 
 permissions:
   contents: read
 
 jobs:
-  candidate:
-    runs-on: ubuntu-latest
-    outputs:
-      publish: ${{ steps.check.outputs.publish }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - id: check
-        name: Detect a CLI version bump or explicit publish commit
-        env:
-          BEFORE: ${{ github.event.before }}
-        run: |
-          file=packages/zig-napi/package.json
-          previous=$(git show "$BEFORE:$file" | jq -er .version)
-          current=$(jq -er .version "$file")
-          subject=$(git log -1 --format=%s)
-          if [[ "$previous" != "$current" || "$subject" =~ ^chore\(npm\):\ publish(\ \(#[0-9]+\))?$ ]]; then
-            echo 'publish=true' >> "$GITHUB_OUTPUT"
-          fi
-
   publish:
     name: Publish zig-napi CLI
-    needs: candidate
-    if: needs.candidate.outputs.publish == 'true'
+    if: >-
+      github.event.pull_request.merged &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'release/cli'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -41,6 +24,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          fetch-depth: 0
+
+      - name: Verify the approved CLI version
+        run: python3 scripts/release/prepare.py merged cli
 
       - name: Setup Zig
         uses: mlugg/setup-zig@v2

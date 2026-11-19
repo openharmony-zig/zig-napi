@@ -24,6 +24,9 @@ class ReleaseTest(unittest.TestCase):
         prepare.PIN.parent.mkdir(parents=True)
         prepare.write_json(prepare.PIN, {"version": "0.2.0", "hash": "previous"})
         prepare.write_json(prepare.MANIFEST, {"version": "0.1.0", "files": ["lib"]})
+        prepare.ZIG_VERSION.parent.mkdir(parents=True)
+        prepare.ZIG_VERSION.write_text("0.2.0\n")
+        prepare.CLI_VERSION.write_text("0.1.0\n")
         Path("src").mkdir()
         Path("src/napi.zig").touch()
         self.commit("initial packages")
@@ -47,9 +50,17 @@ class ReleaseTest(unittest.TestCase):
     def test_new_zig_release_updates_both_cli_version_and_pin(self):
         Path("src/napi.zig").write_text("updated")
         self.commit("fix(napi): fix conversion")
+        prepare.git("switch", "-c", "release/zig-napi")
         self.assertEqual(prepare.prepare_zig()["version"], "0.2.1")
         self.assertIn('.minimum_zig_version = "0.17.0"', prepare.ZON.read_text())
         self.commit("chore(release): zig-napi 0.2.1")
+        prepare.git("switch", "main")
+        self.assertEqual(prepare.ZIG_VERSION.read_text().strip(), "0.2.0")
+        self.assertEqual(prepare.git("tag", "--list", "0.2.1"), "")
+        self.assertEqual(prepare.prepare_cli("0.2.0"), {})
+        prepare.git("merge", "--no-ff", "--no-edit", "release/zig-napi")
+        self.assertEqual(prepare.merged_version("zig"), {"previous": "0.2.0", "version": "0.2.1"})
+        self.assertEqual(prepare.prepare_zig()["changed"], "false")
         prepare.git("tag", "0.2.1")
         self.assertEqual(prepare.prepare_zig()["changed"], "false")
 
@@ -72,15 +83,44 @@ class ReleaseTest(unittest.TestCase):
             json.loads(prepare.PIN.read_text()), {"version": "0.2.1", "hash": "zig_napi-0.2.1-verified_hash"}
         )
         self.commit("publish CLI")
+        self.assertEqual(prepare.merged_version("cli"), {"previous": "0.1.0", "version": "0.1.1"})
         self.assertEqual(prepare.prepare_cli("0.2.1"), {})
 
     def test_breaking_change_and_explicit_version(self):
         Path("src/napi.zig").write_text("updated")
         self.commit("feat(napi)!: change ABI")
         self.assertEqual(prepare.prepare_zig()["version"], "1.0.0")
+        prepare.git("restore", str(prepare.ZIG_VERSION))
         prepare.ZON.write_text(self.zon.replace('"0.2.0"', '"2.0.0"'))
         self.commit("select a version")
+        with self.assertRaises(ValueError):
+            prepare.merged_version("zig")
         self.assertEqual(prepare.prepare_zig()["version"], "2.0.0")
+        self.assertEqual(prepare.ZIG_VERSION.read_text().strip(), "2.0.0")
+
+    def test_cli_manifest_bump_and_publish_subject_still_need_a_release_pr(self):
+        manifest = json.loads(prepare.MANIFEST.read_text())
+        manifest["version"] = "0.3.0"
+        prepare.write_json(prepare.MANIFEST, manifest)
+        self.commit("chore(npm): publish")
+        with self.assertRaises(ValueError):
+            prepare.merged_version("cli")
+        self.assertEqual(prepare.prepare_cli("0.2.0"), {"version": "0.3.0"})
+        self.assertEqual(prepare.git("diff", "--name-only"), str(prepare.CLI_VERSION))
+        self.commit("approve CLI version")
+        Path("README.md").write_text("release notes")
+        self.commit("document the release")
+        self.assertEqual(prepare.merged_version("cli")["version"], "0.3.0")
+        self.assertEqual(prepare.prepare_cli("0.2.0"), {})
+
+    def test_cli_pr_can_approve_a_prerelease(self):
+        manifest = json.loads(prepare.MANIFEST.read_text())
+        manifest["version"] = "0.2.0-beta.1"
+        prepare.write_json(prepare.MANIFEST, manifest)
+        self.commit("select a prerelease")
+        self.assertEqual(prepare.prepare_cli("0.2.0"), {"version": "0.2.0-beta.1"})
+        self.commit("approve prerelease")
+        self.assertEqual(prepare.merged_version("cli")["version"], "0.2.0-beta.1")
 
 
 if __name__ == "__main__":

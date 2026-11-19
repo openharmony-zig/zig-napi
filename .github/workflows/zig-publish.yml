@@ -1,0 +1,54 @@
+name: Publish Zig release
+
+on:
+  pull_request:
+    branches: [ main ]
+    types: [ closed ]
+    paths: [ '.github/releases/zig-version' ]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    if: >-
+      github.event.pull_request.merged &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'release/zig-napi'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          fetch-depth: 0
+      - id: approved
+        run: python3 scripts/release/prepare.py merged zig
+      - name: Tag the approved commit and publish its release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.approved.outputs.version }}
+          PREVIOUS: ${{ steps.approved.outputs.previous }}
+        run: |
+          sha=$(git rev-parse HEAD)
+          if git show-ref --verify --quiet "refs/tags/$VERSION"; then
+            test "$(git rev-parse "refs/tags/$VERSION^{commit}")" = "$sha"
+          else
+            git tag "$VERSION" "$sha"
+            git push origin "refs/tags/$VERSION"
+          fi
+          if draft=$(gh release view "$VERSION" --json isDraft --jq .isDraft); then
+            if [[ "$draft" == true ]]; then
+              gh release edit "$VERSION" --draft=false
+            fi
+          else
+            gh release create "$VERSION" --verify-tag --title "$VERSION" --generate-notes --notes-start-tag "$PREVIOUS"
+          fi
+
+  refresh-proposals:
+    needs: publish
+    permissions:
+      contents: write
+      pull-requests: write
+    uses: ./.github/workflows/release.yml

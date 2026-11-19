@@ -322,11 +322,11 @@ See [`node-test/README.md`](https://github.com/openharmony-zig/zig-napi/blob/mai
 
 ## Releases
 
-After changes to `src/`, `build/`, `build.zig`, or `build.zig.zon` land on `main`, **Prepare releases** updates the Zig package version, pushes the version commit and its numeric tag together, and creates a GitHub Release with generated notes. A breaking change bumps the major version, a `feat` bumps the minor version, and other changes bump the patch. To choose a specific stable Zig version, include the higher version in `build.zig.zon` when merging.
+After changes to `src/`, `build/`, `build.zig`, or `build.zig.zon` land on `main`, **Prepare release PRs** opens or updates the `release/zig-napi` PR with the proposed version. A breaking change bumps the major version, a `feat` bumps the minor version, and other changes bump the patch. Review and merge that PR when ready. **Publish Zig release** tags its exact merge commit and creates a GitHub Release with generated notes.
 
-Changes to files shipped in `@ohos-rs/zig-cli` open or update the `release/cli` PR using the same versioning rules. A new Zig release also updates this PR with the tag and the package hash calculated by `zig fetch` for both addon templates. A template pin update alone bumps the CLI patch version. Merging the CLI version PR runs the existing npm build, package tests, and trusted publish workflow.
+Changes to files shipped in `@ohos-rs/zig-cli` open or update the separate `release/cli` PR using the same versioning rules. Once a Zig GitHub Release is published, this PR also picks up its tag and the package hash calculated by `zig fetch` for both addon templates. A template pin update alone bumps the CLI patch version. Review and merge the CLI PR to test and publish the npm tarball from its merge commit.
 
-Enable **Allow GitHub Actions to create and approve pull requests** in the repository's Actions settings. The release workflow needs write access to `main` and the numeric tags. To resume an interrupted release, run **Prepare releases** on `main` from the Actions tab.
+Enable **Allow GitHub Actions to create and approve pull requests** in the repository's Actions settings. You can rerun **Prepare release PRs** on `main` to refresh proposals. To retry publication, rerun the publish job for the merged release PR.
 
 ## Compatibility with napi-rs
 

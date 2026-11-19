@@ -1,28 +1,23 @@
-name: Prepare releases
+name: Prepare release PRs
 
 on:
   push:
     branches: [ main ]
   workflow_dispatch:
+  workflow_call:
 
 permissions:
-  contents: read
+  contents: write
+  pull-requests: write
 
-# Each run reconciles the current tip against the last release, including pushes
-# that arrived while another run was publishing.
 concurrency:
-  group: zig-napi-release-main
+  group: zig-napi-release-proposals
   cancel-in-progress: false
 
 jobs:
   zig:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    outputs:
-      version: ${{ steps.plan.outputs.version }}
-      revision: ${{ steps.revision.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -30,43 +25,26 @@ jobs:
           fetch-depth: 0
       - id: plan
         run: python3 scripts/release/prepare.py zig
-      - name: Complete any previously interrupted GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PREVIOUS: ${{ steps.plan.outputs.previous }}
-        run: |
-          if [[ "$(git tag -l --format='%(contents:subject)' "$PREVIOUS")" == "Release zig-napi $PREVIOUS" ]]; then
-            gh release view "$PREVIOUS" >/dev/null ||
-              gh release create "$PREVIOUS" --verify-tag --title "$PREVIOUS" --generate-notes
-          fi
-      - name: Publish Zig version and GitHub Release
-        if: steps.plan.outputs.changed == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.plan.outputs.version }}
-          PREVIOUS: ${{ steps.plan.outputs.previous }}
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          if ! git diff --quiet -- build.zig.zon; then
-            git commit -m "chore(release): zig-napi $VERSION" -- build.zig.zon
-          fi
-          git tag -a "$VERSION" -m "Release zig-napi $VERSION"
-          git push --atomic origin HEAD:refs/heads/main "refs/tags/$VERSION"
-          gh release create "$VERSION" --verify-tag --title "$VERSION" --generate-notes --notes-start-tag "$PREVIOUS"
-      - id: revision
-        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7
+        with:
+          base: main
+          branch: release/zig-napi
+          delete-branch: true
+          add-paths: |
+            build.zig.zon
+            .github/releases/zig-version
+          commit-message: 'chore(release): prepare zig-napi ${{ steps.plan.outputs.version }}'
+          title: 'chore(release): zig-napi ${{ steps.plan.outputs.version }}'
+          body: |
+            Merging this PR authorizes tagging the merge commit as `${{ steps.plan.outputs.version }}` and publishing its GitHub Release.
 
   cli:
-    needs: zig
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.zig.outputs.revision }}
+          ref: main
           fetch-depth: 0
       - name: Set up Zig for the template package hash
         uses: mlugg/setup-zig@v2
@@ -74,18 +52,29 @@ jobs:
           version: 0.17.0
       - id: plan
         env:
-          ZIG_VERSION: ${{ needs.zig.outputs.version }}
-        run: python3 scripts/release/prepare.py cli "$ZIG_VERSION"
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(cat .github/releases/zig-version)
+          pin=$(jq -r .version packages/zig-napi/lib/zig-release.json)
+          if [[ "$version" != "$pin" ]]; then
+            published=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" --jq '.[] | select(.draft == false) | .tag_name')
+            if ! grep -Fxq "$version" <<< "$published"; then
+              version=$pin
+            fi
+          fi
+          echo "zig_version=$version" >> "$GITHUB_OUTPUT"
+          python3 scripts/release/prepare.py cli "$version"
       - uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7
         with:
           base: main
           branch: release/cli
           delete-branch: true
           add-paths: |
+            .github/releases/cli-version
             packages/zig-napi/package.json
             packages/zig-napi/lib/zig-release.json
           commit-message: 'chore(npm): publish'
-          title: 'chore(npm): publish'
+          title: 'chore(npm): publish ${{ steps.plan.outputs.version }}'
           body: |
-            Publish `@ohos-rs/zig-cli` `${{ steps.plan.outputs.version }}` with templates pinned to zig-napi `${{ needs.zig.outputs.version }}`.
+            Publish `@ohos-rs/zig-cli` `${{ steps.plan.outputs.version }}` with templates pinned to zig-napi `${{ steps.plan.outputs.zig_version }}`.
             Merging this PR runs the packed CLI acceptance tests and publishes the tested tarball to npm.
