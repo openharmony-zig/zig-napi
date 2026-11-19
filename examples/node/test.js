@@ -7,6 +7,13 @@ async function main() {
   assert.equal(addon.requestedNapiVersion(), 8);
   assert.equal(await addon.fibonacciAsync(10), 55);
 
+  const box = new addon.SymbolBox(2);
+  assert.equal(Object.prototype.toString.call(box), "[object SymbolBox]");
+  box[Symbol.for("pair")] = 7;
+  assert.equal(box[Symbol.for("pair")], 7);
+  assert.equal(box[Symbol.for("zig-napi.value")], 7);
+  assert.equal(box.value, undefined);
+
   const events = [];
   assert.equal(
     await addon.countAsyncProgress(3, (event) => {

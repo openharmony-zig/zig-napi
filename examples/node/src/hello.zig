@@ -43,3 +43,25 @@ pub fn countAsyncProgress(total: u32) napi.AsyncWithEvents(u32, CountProgress, .
 comptime {
     napi.NODE_API_MODULE("hello", @This());
 }
+
+pub const SymbolBox = napi.Class(struct {
+    value: i32,
+    pub const napi_config = .{
+        .value = napi.ExportOptions{ .symbol = .{ .registry = "zig-napi.value" } },
+        .getTag = napi.ExportOptions{ .symbol = .{ .well_known = .toStringTag }, .kind = .getter },
+        .getValue = napi.ExportOptions{ .symbol = .{ .registry = "pair" }, .kind = .getter },
+        .setValue = napi.ExportOptions{ .symbol = .{ .registry = "pair" }, .kind = .setter },
+    };
+    pub fn init(value: i32) @This() {
+        return .{ .value = value };
+    }
+    pub fn getTag(_: *@This()) []const u8 {
+        return "SymbolBox";
+    }
+    pub fn getValue(self: *@This()) i32 {
+        return self.value;
+    }
+    pub fn setValue(self: *@This(), value: i32) void {
+        self.value = value;
+    }
+});

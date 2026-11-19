@@ -14,3 +14,7 @@ export declare function countAsyncProgress(
   total: number,
   onEvent?: (event: CountProgress) => void,
 ): Promise<number>;
+export declare class SymbolBox {
+  constructor(arg: number);
+  get [globalThis.Symbol.toStringTag](): string;
+}

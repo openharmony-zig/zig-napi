@@ -1413,14 +1413,14 @@ fn emitClassDecl(state: *State, comptime ExportName: []const u8, comptime T: typ
     inline for (wrapped_info.field_names, wrapped_info.field_types) |field_name, field_type| {
         const config = comptime Metadata.get(Wrapped, field_name);
         if (comptime config.skip) continue;
-        try appendFmt(&class_text, "  {s}{s}: {s}\n", .{ if (config.readonly) "readonly " else "", Metadata.name(Wrapped, field_name), try emitType(state, field_type) });
+        try appendFmt(&class_text, "  {s}{s}: {s}\n", .{ if (config.readonly) "readonly " else "", comptime Metadata.classDeclarationName(Wrapped, field_name) orelse continue, try emitType(state, field_type) });
     }
 
     inline for (wrapped_info.decl_names) |decl| {
         // Native construction policy is configuration, not a JavaScript static
         // property. Keep declarations consistent with the class export filter.
         if (comptime Metadata.reserved(decl) or Metadata.get(Wrapped, decl).skip) continue;
-        const exported_name = comptime Metadata.name(Wrapped, decl);
+        const exported_name = comptime Metadata.classDeclarationName(Wrapped, decl) orelse continue;
         const value = @field(Wrapped, decl);
         const decl_type = @TypeOf(value);
         if (@typeInfo(decl_type) == .@"fn") {

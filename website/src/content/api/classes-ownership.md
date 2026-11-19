@@ -113,6 +113,16 @@ const Counter = struct {
 pub const CounterClass = napi.Class(Counter);
 ```
 
+### Symbol keys
+
+Class fields, methods, accessors and factories accept `napi.ExportOptions.symbol`.
+Use `.{ .well_known = .toStringTag }` for `Symbol.toStringTag` or
+`.{ .registry = "library.value" }` for `Symbol.for("library.value")`.
+Getter and setter declarations with the same symbol share one descriptor.
+Well-known symbols appear as computed names in TypeScript. A registry key is
+accessible through JavaScript's symbol registry and has no unique-symbol name
+that can be declared in a TypeScript class.
+
 ### Calls, receivers and factories
 
 - A method whose first parameter is `*T` or `T` is an instance method. The

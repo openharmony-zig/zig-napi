@@ -1,6 +1,25 @@
 const std = @import("std");
 pub const MemberKind = enum { method, getter, setter };
+pub const WellKnownSymbol = enum {
+    iterator,
+    asyncIterator,
+    hasInstance,
+    isConcatSpreadable,
+    match,
+    matchAll,
+    replace,
+    search,
+    species,
+    split,
+    toPrimitive,
+    toStringTag,
+    unscopables,
+    dispose,
+    asyncDispose,
+};
+pub const ClassSymbol = union(enum) { registry: []const u8, well_known: WellKnownSymbol };
 pub const ExportOptions = struct {
+    symbol: ?ClassSymbol = null,
     name: ?[:0]const u8 = null,
     namespace: ?[:0]const u8 = null,
     skip: bool = false,
@@ -23,4 +42,13 @@ pub fn name(comptime T: type, comptime member: []const u8) [:0]const u8 {
 }
 pub fn reserved(comptime member: []const u8) bool {
     return std.mem.eql(u8, member, "napi_config") or std.mem.eql(u8, member, "napi_allocator") or std.mem.eql(u8, member, "arg_ownership");
+}
+
+/// Registry symbols have runtime identity and cannot be named as TypeScript
+/// unique symbols. Well-known symbols have standard computed property names.
+pub fn classDeclarationName(comptime T: type, comptime member: []const u8) ?[]const u8 {
+    return if (get(T, member).symbol) |key| switch (key) {
+        .registry => null,
+        .well_known => |symbol| "[globalThis.Symbol." ++ @tagName(symbol) ++ "]",
+    } else name(T, member);
 }
