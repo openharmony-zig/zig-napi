@@ -12,7 +12,8 @@ const Metadata = @import("../metadata.zig");
 const options = @import("../options.zig");
 
 fn setClassKey(env: napi.napi_env, descriptor: *napi.napi_property_descriptor, comptime config: Metadata.ExportOptions) !void {
-    const key = comptime config.symbol orelse return;
+    if (comptime config.symbol == null) return;
+    const key = config.symbol.?;
     if (config.name != null) @compileError("class members must choose a string name or a symbol key");
     const environment = napi_env.Env.from_raw(env);
     const symbol = switch (key) {
