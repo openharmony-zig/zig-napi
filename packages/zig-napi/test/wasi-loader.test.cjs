@@ -912,6 +912,35 @@ test("new creates npm package metadata for every selected native and WASI target
   }
 });
 
+test("regenerating WASI packages preserves an older project's runtime ABI", () => {
+  const project = createProject("legacy-platform-packages", {
+    targets: ["wasm32-wasip1", "wasm32-wasip1-threads"],
+    regenerate: false,
+  });
+  const manifestPath = project.file("package.json");
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  const dependencies = {
+    "@napi-rs/wasm-runtime": "1.2.5",
+    "@emnapi/core": "2.0.0-alpha.5",
+    "@emnapi/runtime": "2.0.0-alpha.5",
+  };
+  Object.assign(manifest.dependencies, dependencies, { emnapi: "2.0.0-alpha.5" });
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest));
+  const result = runCli([
+    "create-npm-dirs",
+    "--cwd",
+    project.projectDir,
+    "--npm-dir",
+    "custom-npm",
+  ]);
+  assert.equal(result.status, 0, result.stderr);
+  for (const flavor of ["wasm32-wasi", "wasm32-wasip1"]) {
+    const pkg = JSON.parse(fs.readFileSync(project.file(`custom-npm/${flavor}/package.json`)));
+    for (const [name, version] of Object.entries(dependencies))
+      assert.equal(pkg.dependencies[name], version);
+  }
+});
+
 test("a native target plus a WASI target scaffolds both flavors' files", () => {
   // This is the invocation the packaged-CLI test uses: default targets stay
   // enabled and an extra `--targets` entry is appended.
@@ -1582,10 +1611,7 @@ process.stdout.write(JSON.stringify({
     true,
     "a threaded browser build must instantiate asynchronously",
   );
-  assert.equal(
-    parsed.reuseWorker.size,
-    parsed.asyncWorkPoolSize + parsed.workerPoolSize,
-  );
+  assert.equal(parsed.reuseWorker.size, parsed.asyncWorkPoolSize + parsed.workerPoolSize);
   assert.ok(parsed.reuseWorker.size >= 6, `pool size ${parsed.reuseWorker.size}`);
   assert.deepEqual(parsed.plugins, ["emnapi-async-work", "emnapi-tsfn"]);
   assert.equal(parsed.destroyed, true);

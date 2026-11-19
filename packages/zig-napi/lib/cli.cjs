@@ -1276,10 +1276,11 @@ async function commandCreateNpmDirs(flags) {
     }),
   );
   if (flags.dryRun) return;
-  // Upstream selects today's registry dist-tag. Ship the runtime tested with
-  // the project's loaders and linked emnapi archive in each WASI package.
-  const runtime = config.packageJson.dependencies?.["@napi-rs/wasm-runtime"];
-  if (!runtime) return;
+  // Upstream uses its own emnapi and the registry's current wasm runtime.
+  // Older Zig projects may still build against a different ABI.
+  const dependencies = config.packageJson.dependencies || {};
+  const runtimeNames = ["@napi-rs/wasm-runtime", "@emnapi/core", "@emnapi/runtime"];
+  const declared = runtimeNames.filter((name) => dependencies[name]);
   for (const flavor of collectWasiFlavors(config.targets)) {
     const manifest = path.resolve(
       cwd,
@@ -1288,10 +1289,10 @@ async function commandCreateNpmDirs(flags) {
       "package.json",
     );
     const pkg = readJson(manifest);
-    if (pkg.dependencies["@napi-rs/wasm-runtime"] !== runtime) {
-      pkg.dependencies["@napi-rs/wasm-runtime"] = runtime;
-      writeJson(manifest, pkg);
-    }
+    const changed = declared.filter((name) => pkg.dependencies[name] !== dependencies[name]);
+    if (changed.length === 0) continue;
+    for (const name of changed) pkg.dependencies[name] = dependencies[name];
+    writeJson(manifest, pkg);
   }
 }
 
