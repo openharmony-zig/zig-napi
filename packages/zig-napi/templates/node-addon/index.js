@@ -144,6 +144,7 @@ function detectPlatformArchABIs() {
   if (process.platform === "freebsd") {
     if (process.arch === "x64") return ["freebsd-x64"];
     if (process.arch === "arm64") return ["freebsd-arm64"];
+    if (process.arch === "ppc64") return ["freebsd-ppc64"];
   }
 
   if (process.platform === "linux") {

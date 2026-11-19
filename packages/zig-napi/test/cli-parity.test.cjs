@@ -687,3 +687,21 @@ api.NapiCli = class extends Original {
   assert.equal(fs.readFileSync(path.join(dir, "removed.txt"), "utf8"), "old");
   assert.equal(fs.existsSync(path.join(dir, "added.txt")), false);
 });
+
+test("FreeBSD targets share the npm, Zig and loader artifact names", (t) => {
+  const cwd = fixture(t);
+  const { zigTarget, platformId } = require("../lib/targets.cjs");
+  for (const [arch, abi] of [
+    ["aarch64", "arm64"],
+    ["powerpc64le", "ppc64"],
+  ]) {
+    const triple = arch + "-unknown-freebsd";
+    const plan = JSON.parse(
+      success(invoke(["new", "addon", "--no-interactive", "--dry-run", "-t", triple], cwd)),
+    );
+    assert.deepEqual(plan.targets, [triple]);
+    assert.equal(zigTarget(triple), arch + "-freebsd");
+    assert.equal(platformId(zigTarget(triple)), "freebsd-" + abi);
+    assert.equal(api.parseTriple(triple).platformArchABI, "freebsd-" + abi);
+  }
+});
