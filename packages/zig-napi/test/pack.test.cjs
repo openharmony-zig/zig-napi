@@ -141,13 +141,12 @@ test(
       run(process.execPath, ["-e", load], project);
 
       // Install the scaffold's real runtime dependencies outside the workspace.
-      // The CLI has not been published yet, so resolve that dev dependency to
-      // the package we just installed, retaining the generated-version check.
-      generated.devDependencies["@ohos-rs/zig-cli"] = `file:${installed}`;
+      // Use the packed CLI as the scaffold's dev dependency before publication.
+      generated.devDependencies["@ohos-rs/zig-cli"] = `file:${path.resolve(archive)}`;
       fs.writeFileSync(path.join(project, "package.json"), JSON.stringify(generated, null, 2));
-      run("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund"], project);
+      run("pnpm", ["install", "--no-frozen-lockfile"], project);
       // Exercise the generated build-and-test workflow with its declared runner.
-      run("npm", ["test"], project);
+      run("pnpm", ["test"], project);
       // Compiler options and relocated output must work with a real addon,
       // including a binding nested below its native artifact.
       run(

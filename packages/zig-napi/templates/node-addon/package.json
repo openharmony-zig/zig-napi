@@ -34,8 +34,8 @@
     "build": "zig-napi build --release",
     "build:debug": "zig-napi build",
     "prepublishOnly": "zig-napi pre-publish --no-gh-release",
-    "test": "npm run build:test && npm run test:run",
-    "build:test": "npm run build",
+    "test": "__PACKAGE_MANAGER__ run build:test && __PACKAGE_MANAGER__ run test:run",
+    "build:test": "__PACKAGE_MANAGER__ run build",
     "test:run": "ava"
   },
   "dependencies": {

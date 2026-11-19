@@ -1091,6 +1091,7 @@ async function commandNew(projectDir, flags) {
 
   copyTemplate(path.join(templatesDir, ohos ? "ohos-addon" : "node-addon"), targetDir, {
     __PACKAGE_NAME__: packageName,
+    __PACKAGE_MANAGER__: projectOptions.packageManager,
     __ADDON_NAME__: addonName,
     __ZIG_PACKAGE_NAME__: sanitizeZigName(packageName),
     __ZIG_NAPI_DEPENDENCY__: dependency,
@@ -1477,7 +1478,7 @@ function createProgram() {
     .argument("[dir]", "project directory")
     .option("-n, --name <package>", "package name")
     .option("-v, --min-node-api <version>", "minimum Node-API version (1–10; default: 4)")
-    .option("--package-manager <manager>", "package manager: yarn or pnpm (default: yarn)")
+    .option("--package-manager <manager>", "package manager: pnpm or yarn (default: pnpm)")
     .option("-l, --license <license>", "package license (default: MIT)")
     .option("--enable-type-def", "generate TypeScript declarations (default: true)")
     .option("--no-enable-type-def", "disable TypeScript declaration generation")

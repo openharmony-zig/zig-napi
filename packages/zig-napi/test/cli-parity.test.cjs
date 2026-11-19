@@ -194,7 +194,7 @@ test("new applies NAPI, license, package manager, declaration and CI choices", (
         "-l",
         "Apache-2.0",
         "--package-manager",
-        "pnpm",
+        "yarn",
         "--enable-type-def=false",
         "--enable-github-actions=false",
         "-t",
@@ -215,8 +215,10 @@ test("new applies NAPI, license, package manager, declaration and CI choices", (
   assert.equal(pkg.zigNapi.managedZigDependency, undefined);
   assert.equal(pkg.license, "Apache-2.0");
   assert.equal(pkg.engines.node, ">= 18.17.0 < 19 || >= 20.3.0 < 21 || >= 21.1.0");
-  assert.equal(pkg.napi.npmClient, "pnpm");
-  assert.match(pkg.packageManager, /^pnpm@/);
+  assert.equal(pkg.napi.npmClient, "yarn");
+  assert.match(pkg.packageManager, /^yarn@/);
+  assert.equal(pkg.scripts.test, "yarn run build:test && yarn run test:run");
+  assert.equal(pkg.scripts["build:test"], "yarn run build");
   assert.equal(pkg.types, undefined);
   assert.equal(fs.existsSync(path.join(project, "index.d.ts")), false);
   assert.equal(fs.existsSync(path.join(project, ".github")), false);
@@ -235,7 +237,14 @@ test("new applies NAPI, license, package manager, declaration and CI choices", (
       preload,
     ),
   );
+  const defaultPkg = JSON.parse(fs.readFileSync(path.join(second, "package.json")));
+  assert.match(defaultPkg.packageManager, /^pnpm@/);
+  assert.equal(defaultPkg.napi.npmClient, "pnpm");
+  assert.equal(defaultPkg.scripts.test, "pnpm run build:test && pnpm run test:run");
+  assert.equal(defaultPkg.scripts["build:test"], "pnpm run build");
+  assert.ok(fs.existsSync(path.join(second, "pnpm-workspace.yaml")));
   const workflow = fs.readFileSync(path.join(second, ".github/workflows/CI.yml"), "utf8");
+  assert.match(workflow, /run: pnpm install/);
   const matrix = JSON.parse(workflow.match(/include: (.*)/)[1]);
   assert.deepEqual(
     matrix.map((row) => row.platform),
