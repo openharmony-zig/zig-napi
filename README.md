@@ -73,7 +73,7 @@ Pass `--targets <triple>` repeatedly or as a comma-separated list to choose the 
 
 The generated CI builds the selected targets with stock Zig 0.17, tests host-compatible/WASI binaries, and collects the platform packages. Pushing a tag that matches the addon version (for example, `v1.2.3`) publishes the platform tarballs first and the root tarball last. Stable releases use `latest` and prereleases use `next`. Configure npm trusted publishing for the generated `CI.yml` on the root and platform packages, or set the repository's `NPM_TOKEN` secret. `new --dry-run` prints the plan without creating files or invoking Zig.
 
-By default, `new` pins the Zig dependency in `build.zig.zon` to the `0.2.0` GitHub archive and its verified package hash. Pass `--zig-napi <checkout>` to use local sources for development or offline generation.
+By default, `new` pins the Zig dependency in `build.zig.zon` to the GitHub release archive and Zig package hash recorded in the installed CLI. Pass `--zig-napi <checkout>` to use local sources for development or offline generation.
 
 ### Scaffold an OpenHarmony ArkTS addon
 
@@ -319,6 +319,14 @@ pnpm test:e2e:node --output zig-out/e2e-node
 ```
 
 See [`node-test/README.md`](https://github.com/openharmony-zig/zig-napi/blob/main/node-test/README.md) for the addon list, the WASI flavor layout, and the native/WASI test commands.
+
+## Releases
+
+After changes to `src/`, `build/`, `build.zig`, or `build.zig.zon` land on `main`, **Prepare releases** updates the Zig package version, pushes the version commit and its numeric tag together, and creates a GitHub Release with generated notes. A breaking change bumps the major version, a `feat` bumps the minor version, and other changes bump the patch. To choose a specific stable Zig version, include the higher version in `build.zig.zon` when merging.
+
+Changes to files shipped in `@ohos-rs/zig-cli` open or update the `release/cli` PR using the same versioning rules. A new Zig release also updates this PR with the tag and the package hash calculated by `zig fetch` for both addon templates. A template pin update alone bumps the CLI patch version. Merging the CLI version PR runs the existing npm build, package tests, and trusted publish workflow.
+
+Enable **Allow GitHub Actions to create and approve pull requests** in the repository's Actions settings. The release workflow needs write access to `main` and the numeric tags. To resume an interrupted release, run **Prepare releases** on `main` from the Actions tab.
 
 ## Compatibility with napi-rs
 

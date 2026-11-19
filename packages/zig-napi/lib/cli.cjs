@@ -570,14 +570,14 @@ function resolveZigNapiPath(targetDir, value) {
   return path.relative(fs.realpathSync(targetDir), fs.realpathSync(source)) || ".";
 }
 
-const zigNapiArchive = "https://github.com/openharmony-zig/zig-napi/archive/refs/tags/0.2.0.tar.gz";
-const zigNapiHash = "zig_napi-0.2.0-H6Owa3v4EABILIXlrpXwo4e18Jg3KGVg9bWK5EgB7Exo";
+const zigRelease = require("./zig-release.json");
 
 function scaffoldDependency(targetDir, source) {
   if (source) {
     return `.{ .path = ${JSON.stringify(normalizePathForZig(resolveZigNapiPath(targetDir, source)))} }`;
   }
-  return `.{ .url = ${JSON.stringify(zigNapiArchive)}, .hash = ${JSON.stringify(zigNapiHash)} }`;
+  const archive = `https://github.com/openharmony-zig/zig-napi/archive/refs/tags/${zigRelease.version}.tar.gz`;
+  return `.{ .url = ${JSON.stringify(archive)}, .hash = ${JSON.stringify(zigRelease.hash)} }`;
 }
 
 async function readZigNapiConfig(cwd, flags) {
