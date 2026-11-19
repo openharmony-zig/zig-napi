@@ -1,6 +1,6 @@
 # napi-rs parity
 
-The baseline for this branch is [napi-rs a713fcb](https://github.com/napi-rs/napi-rs/tree/a713fcb377ee28be5abd7b6a560e3eb4f31444ca), checked on 2026-10-06: `napi` 3.14.1, `napi-derive` 3.6.11, `napi-sys` 3.4.0, CLI 3.10.7 and wasm-runtime 1.2.5. The CLI and runtime are pinned to those versions. The emnapi ABI remains pinned to 2.0.0-alpha.5; updating it independently would change the linked archive/runtime contract.
+The upstream comparison uses [napi-rs cda88ea](https://github.com/napi-rs/napi-rs/tree/cda88ea649a2e182e0b6f7ec9cb8a6db7758b47d), checked on 2026-11-19 with napi 3.16.2, napi-derive 3.7.1 and napi-sys 3.4.1. The Zig CLI uses @napi-rs/cli 3.10.12 and wasm-runtime 1.2.7. WASI projects pin emnapi, @emnapi/core and @emnapi/runtime to 2.0.0-beta.3 so the linked archive matches the runtime.
 
 The CLI executable in `bin/zig-napi.js` loads the maintained CommonJS source modules in `lib/`. Binding-target metadata, declaration handling and worker crash reporting are adapted directly from the corresponding upstream TypeScript source files, with source paths and the pinned revision recorded in each module. Upstream notices ship in `licenses/NAPI-RS-LICENSE`. The CLI handles Node.js/WASI; OHOS builds and SDK HAP signing remain in the separate QEMU pipeline.
 
