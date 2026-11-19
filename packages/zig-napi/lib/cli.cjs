@@ -47,6 +47,8 @@ const availableTargets = [
   "x86_64-unknown-linux-gnu",
   "x86_64-unknown-linux-musl",
   "x86_64-unknown-freebsd",
+  "aarch64-unknown-freebsd",
+  "powerpc64le-unknown-freebsd",
   "i686-pc-windows-msvc",
   "armv7-unknown-linux-gnueabihf",
   "armv7-unknown-linux-musleabihf",
