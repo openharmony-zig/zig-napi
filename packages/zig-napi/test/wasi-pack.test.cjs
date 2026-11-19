@@ -6,8 +6,8 @@
  *
  * No network is used: the extracted CLI resolves its dependencies from the
  * checkout, and the scaffold's runtime packages are linked from the repository
- * install (emnapi / @emnapi/core / @emnapi/runtime 2.0.0-alpha.5 and
- * @napi-rs/wasm-runtime 1.2.5).
+ * install (emnapi / @emnapi/core / @emnapi/runtime 2.0.0-beta.3 and
+ * @napi-rs/wasm-runtime 1.2.7).
  *
  * The build half needs the ABI work that links the emnapi v2 archives
  * (`src/build/napi-build.zig`): without it there is nothing to validate here,
@@ -58,8 +58,8 @@ function abiArchiveIntegrated() {
 
 /**
  * Runtime packages for the scaffold's `node_modules`. The `node-test` install
- * is the one that carries emnapi / @emnapi/core / @emnapi/runtime 2.0.0-alpha.5
- * with @napi-rs/wasm-runtime 1.2.5.
+ * is the one that carries emnapi / @emnapi/core / @emnapi/runtime 2.0.0-beta.3
+ * with @napi-rs/wasm-runtime 1.2.7.
  */
 function runtimePackagesRoot() {
   for (const candidate of [
@@ -102,7 +102,7 @@ function extractPackedCli() {
     "the pack must bundle the Zig sources",
   );
   // An installed package resolves its own dependencies from its own
-  // `node_modules`, so link the CLI package's install (which has the 3.10.7
+  // `node_modules`, so link the CLI package's install (which has the 3.10.12
   // @napi-rs/cli this package depends on) rather than the workspace root.
   const cliDependencies = path.join(packageDir, "node_modules");
   assert.ok(

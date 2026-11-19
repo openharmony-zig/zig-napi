@@ -61,12 +61,12 @@ are present, because it needs no cross-origin isolation.
 
 | Package                     | Version         | Role                                                        |
 | --------------------------- | --------------- | ----------------------------------------------------------- |
-| `emnapi`                    | `2.0.0-alpha.5` | the C archive the module links                               |
-| `@emnapi/core`              | `2.0.0-alpha.5` | async work and thread-safe functions                          |
-| `@emnapi/runtime`           | `2.0.0-alpha.5` | the emnapi context the loaders create                         |
-| `@napi-rs/wasm-runtime`     | `1.2.4`         | the plugins and instantiation API the generated loaders use    |
+| `emnapi`                    | `2.0.0-beta.3` | the C archive the module links                               |
+| `@emnapi/core`              | `2.0.0-beta.3` | async work and thread-safe functions                          |
+| `@emnapi/runtime`           | `2.0.0-beta.3` | the emnapi context the loaders create                         |
+| `@napi-rs/wasm-runtime`     | `1.2.7`         | the plugins and instantiation API the generated loaders use    |
 
-`2.0.0-alpha.5` is a **prerelease**, pinned exactly: it introduced the archive
+`2.0.0-beta.3` is a **prerelease**, pinned exactly: it provides the archive
 layout this build links (`libemnapi-basic-napi-rs.a`, plus the
 `emnapi_create_env` / `emnapi_delete_env` exports that `@emnapi/core` v2 calls
 while initializing the native environment). It is not the stable 2.0 release,
@@ -75,8 +75,8 @@ and the three emnapi packages have to be installed at one and the same version.
 The scaffold installs the four packages as runtime dependencies:
 
 ```bash
-npm install emnapi@2.0.0-alpha.5 @emnapi/core@2.0.0-alpha.5 \
-  @emnapi/runtime@2.0.0-alpha.5 @napi-rs/wasm-runtime@1.2.4
+npm install emnapi@2.0.0-beta.3 @emnapi/core@2.0.0-beta.3 \
+  @emnapi/runtime@2.0.0-beta.3 @napi-rs/wasm-runtime@1.2.7
 ```
 
 The build finds the archive itself:
@@ -592,7 +592,7 @@ Two consequences matter when an addon is embedded:
 | build panic `... does not fit in the imported memory minimum`                   | the stack alone is larger than the configured initial memory                              | raise the initial pages or lower `-Dwasi-stack-size`                                          |
 | build panic `... no headroom for the environment or the async work pool`        | `-Dwasi-initial-memory-pages=65536` leaves the maximum nowhere to grow                    | lower the initial pages                                                                       |
 | `emnapi version mismatch: emnapi@..., @emnapi/core@...`                        | the emnapi packages are not one release                                                  | install one version across `emnapi`, `@emnapi/core` and `@emnapi/runtime`                     |
-| `emnapi archive for <flavor> was not found: expected ...`                       | no `node_modules/emnapi/lib` with a v2 archive was found from the build root upwards      | install emnapi 2.0.0-alpha.5, or point `-Demnapi-link-dir` at the archive directory            |
+| `emnapi archive for <flavor> was not found: expected ...`                       | no `node_modules/emnapi/lib` with a v2 archive was found from the build root upwards      | install emnapi 2.0.0-beta.3, or point `-Demnapi-link-dir` at the archive directory            |
 | an async task rejects with code `Cancelled` during teardown                     | the task was submitted after `napi_prepare_wasm_env_cleanup()`                            | finish submissions before disposal; this rejection is the documented shutdown behavior        |
 | `... N queued settlement(s) after 128 event-loop turns` (`ERR_NAPI_WASI_CLEANUP_PENDING`) | `dispose()` ran while work was still producing events                             | await the pending promises, then call `dispose()` again                                       |
 | `ERR_NAPI_WASI_LIFECYCLE_REENTRY`                                              | the deferred loader's `instantiate()` or `dispose()` ran while a `Context.destroy()` was still active | await the original cleanup promise                                                  |

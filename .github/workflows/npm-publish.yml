@@ -44,7 +44,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
           registry-url: https://registry.npmjs.org/
           cache: pnpm
 
@@ -77,12 +77,19 @@ jobs:
           NAPI_RS_FORCE_WASI: 'error'
         run: npm run test:run
 
-      - name: Check package contents
+      - name: Pack the release candidate
         working-directory: packages/zig-napi
-        run: npm pack --dry-run
+        run: |
+          filename=$(npm pack --json --pack-destination "$RUNNER_TEMP" | jq -er '.[0].filename')
+          echo "ZIG_NAPI_CLI_TARBALL=$RUNNER_TEMP/$filename" >> "$GITHUB_ENV"
+
+      - name: Install and test the release candidate
+        run: pnpm run test:cli-pack
 
       - name: Publish to npm
         working-directory: packages/zig-napi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --provenance --access public
+        run: |
+          tag=$(node -p "const v = require('./package.json').version.split('+')[0]; v.includes('-') ? (v.split('-')[1].match(/^[a-z]+/i)?.[0] || 'next') : 'latest'")
+          npm publish "$ZIG_NAPI_CLI_TARBALL" --ignore-scripts --provenance --access public --tag "$tag"

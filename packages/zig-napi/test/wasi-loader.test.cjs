@@ -330,7 +330,7 @@ ${footer}
 `;
 }
 
-const STUB_EMNAPI_VERSION = "2.0.0-alpha.5";
+const STUB_EMNAPI_VERSION = "2.0.0-beta.3";
 
 function writePackageStub(projectDir, name, version, extra = {}) {
   const directory = path.join(projectDir, "node_modules", ...name.split("/"));
@@ -891,8 +891,8 @@ test("new creates npm package metadata for every selected native and WASI target
       libc: ["musl"],
     },
     "win32-x64-msvc": { main: "probe_addon.win32-x64-msvc.node", os: ["win32"], cpu: ["x64"] },
-    "wasm32-wasi": { main: "probe_addon.wasi.cjs" },
-    "wasm32-wasip1": { main: "probe_addon.wasip1.cjs" },
+    "wasm32-wasi": { main: "probe_addon.wasi.cjs", cpu: ["wasm32"] },
+    "wasm32-wasip1": { main: "probe_addon.wasip1.cjs", cpu: ["wasm32"] },
   };
   assert.deepEqual(fs.readdirSync(project.file("npm")).sort(), Object.keys(expected).sort());
   for (const [platform, fields] of Object.entries(expected)) {
@@ -909,6 +909,35 @@ test("new creates npm package metadata for every selected native and WASI target
       !fs.existsSync(path.join(directory, manifest.main)),
       "new does not compile artifacts",
     );
+  }
+});
+
+test("regenerating WASI packages preserves an older project's runtime ABI", () => {
+  const project = createProject("legacy-platform-packages", {
+    targets: ["wasm32-wasip1", "wasm32-wasip1-threads"],
+    regenerate: false,
+  });
+  const manifestPath = project.file("package.json");
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  const dependencies = {
+    "@napi-rs/wasm-runtime": "1.2.5",
+    "@emnapi/core": "2.0.0-alpha.5",
+    "@emnapi/runtime": "2.0.0-alpha.5",
+  };
+  Object.assign(manifest.dependencies, dependencies, { emnapi: "2.0.0-alpha.5" });
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest));
+  const result = runCli([
+    "create-npm-dirs",
+    "--cwd",
+    project.projectDir,
+    "--npm-dir",
+    "custom-npm",
+  ]);
+  assert.equal(result.status, 0, result.stderr);
+  for (const flavor of ["wasm32-wasi", "wasm32-wasip1"]) {
+    const pkg = JSON.parse(fs.readFileSync(project.file(`custom-npm/${flavor}/package.json`)));
+    for (const [name, version] of Object.entries(dependencies))
+      assert.equal(pkg.dependencies[name], version);
   }
 });
 
@@ -1060,9 +1089,11 @@ test("a WASI build refuses a mismatched emnapi install instead of linking it", (
     },
   );
   assert.notEqual(result.status, 0);
-  assert.match(
+  assert.ok(
+    result.stderr.includes(
+      `emnapi version mismatch: emnapi@${STUB_EMNAPI_VERSION}, @emnapi/core@2.0.0-alpha.4`,
+    ),
     result.stderr,
-    /emnapi version mismatch: emnapi@2\.0\.0-alpha\.5, @emnapi\/core@2\.0\.0-alpha\.4/,
   );
   assert.deepEqual(project.zig.lastBuildArgs(), undefined);
 });
@@ -1580,10 +1611,7 @@ process.stdout.write(JSON.stringify({
     true,
     "a threaded browser build must instantiate asynchronously",
   );
-  assert.equal(
-    parsed.reuseWorker.size,
-    parsed.asyncWorkPoolSize + parsed.workerPoolSize,
-  );
+  assert.equal(parsed.reuseWorker.size, parsed.asyncWorkPoolSize + parsed.workerPoolSize);
   assert.ok(parsed.reuseWorker.size >= 6, `pool size ${parsed.reuseWorker.size}`);
   assert.deepEqual(parsed.plugins, ["emnapi-async-work", "emnapi-tsfn"]);
   assert.equal(parsed.destroyed, true);

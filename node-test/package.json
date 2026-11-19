@@ -12,11 +12,11 @@
     "test:napi": "ava --serial \"napi/__tests__/**/*.spec.js\""
   },
   "devDependencies": {
-    "@emnapi/core": "2.0.0-alpha.5",
-    "@emnapi/runtime": "2.0.0-alpha.5",
-    "@napi-rs/wasm-runtime": "1.2.5",
+    "@emnapi/core": "2.0.0-beta.3",
+    "@emnapi/runtime": "2.0.0-beta.3",
+    "@napi-rs/wasm-runtime": "1.2.7",
     "ava": "3.15.0",
-    "emnapi": "2.0.0-alpha.5",
+    "emnapi": "2.0.0-beta.3",
     "vite": "^8.1.0"
   },
   "napi": {

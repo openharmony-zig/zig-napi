@@ -1264,16 +1264,36 @@ async function commandDts(flags, passthrough = []) {
 }
 
 async function commandCreateNpmDirs(flags) {
-  await readZigNapiConfig(path.resolve(process.cwd(), flags.cwd || "."), flags);
+  const cwd = path.resolve(flags.cwd || ".");
+  const config = await readZigNapiConfig(cwd, flags);
   await napiCli.createNpmDirs(
     cleanOptions({
-      cwd: path.resolve(process.cwd(), flags.cwd || "."),
+      cwd,
       configPath: flags.configPath,
       packageJsonPath: flags.packageJsonPath,
       npmDir: flags.npmDir,
       dryRun: flags.dryRun,
     }),
   );
+  if (flags.dryRun) return;
+  // Upstream uses its own emnapi and the registry's current wasm runtime.
+  // Older Zig projects may still build against a different ABI.
+  const dependencies = config.packageJson.dependencies || {};
+  const runtimeNames = ["@napi-rs/wasm-runtime", "@emnapi/core", "@emnapi/runtime"];
+  const declared = runtimeNames.filter((name) => dependencies[name]);
+  for (const flavor of collectWasiFlavors(config.targets)) {
+    const manifest = path.resolve(
+      cwd,
+      flags.npmDir || "npm",
+      flavor.platformArchABI,
+      "package.json",
+    );
+    const pkg = readJson(manifest);
+    const changed = declared.filter((name) => pkg.dependencies[name] !== dependencies[name]);
+    if (changed.length === 0) continue;
+    for (const name of changed) pkg.dependencies[name] = dependencies[name];
+    writeJson(manifest, pkg);
+  }
 }
 
 async function commandArtifacts(flags) {
@@ -1301,15 +1321,7 @@ async function commandPackage(flags) {
     );
     return;
   }
-  await napiCli.createNpmDirs(
-    cleanOptions({
-      cwd,
-      configPath: flags.configPath,
-      packageJsonPath: flags.packageJsonPath,
-      npmDir: flags.npmDir,
-      dryRun: flags.dryRun,
-    }),
-  );
+  await commandCreateNpmDirs(flags);
   await commandBuild({ ...flags, cwd, platform: true });
   const buildOutputDir = flags.buildOutputDir || flags.outputDir || ".";
   await napiCli.artifacts(

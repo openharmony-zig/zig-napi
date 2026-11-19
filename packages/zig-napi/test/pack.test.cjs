@@ -33,12 +33,16 @@ test(
       const packageDir = path.resolve(__dirname, "..");
       const tooling = path.join(scratch, "tooling");
       fs.mkdirSync(tooling);
-      run("npm", ["pack", "--pack-destination", scratch], packageDir);
-      const archive = fs.readdirSync(scratch).find((name) => name.endsWith(".tgz"));
-      assert.ok(archive);
+      let archive = process.env.ZIG_NAPI_CLI_TARBALL;
+      if (!archive) {
+        run("npm", ["pack", "--pack-destination", scratch], packageDir);
+        const filename = fs.readdirSync(scratch).find((name) => name.endsWith(".tgz"));
+        assert.ok(filename);
+        archive = path.join(scratch, filename);
+      }
       run(
         "npm",
-        ["install", "--ignore-scripts", "--no-audit", "--no-fund", path.join(scratch, archive)],
+        ["install", "--ignore-scripts", "--no-audit", "--no-fund", path.resolve(archive)],
         tooling,
       );
       const installed = path.join(tooling, "node_modules", "@ohos-rs", "zig-cli");
@@ -103,6 +107,12 @@ test(
           fs.readFileSync(path.join(project, "npm", platform, "package.json"), "utf8"),
         );
         assert.equal(manifest.name, `test-addon-${platform}`);
+        if (platform === "wasm32-wasi") {
+          assert.deepEqual(manifest.cpu, ["wasm32"]);
+          const rootDeps = require(path.join(project, "package.json")).dependencies;
+          for (const name of ["@emnapi/core", "@emnapi/runtime", "@napi-rs/wasm-runtime"])
+            assert.equal(manifest.dependencies[name], rootDeps[name]);
+        }
         assert.equal(manifest.version, "0.1.0");
         assert.equal(
           manifest.main,
