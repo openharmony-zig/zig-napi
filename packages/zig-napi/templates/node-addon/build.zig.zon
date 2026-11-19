@@ -4,9 +4,7 @@
     .minimum_zig_version = "0.17.0",
     .fingerprint = __FINGERPRINT__,
     .dependencies = .{
-        .@"zig-napi" = .{
-            .path = "__ZIG_NAPI_ZIG_PATH__",
-        },
+        .@"zig-napi" = __ZIG_NAPI_DEPENDENCY__,
     },
     .paths = .{
         "build.zig",

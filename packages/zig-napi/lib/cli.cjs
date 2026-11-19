@@ -565,6 +565,15 @@ function resolveZigNapiPath(targetDir, value) {
   return path.relative(fs.realpathSync(targetDir), fs.realpathSync(source)) || ".";
 }
 
+const zigNapiArchive = "https://github.com/openharmony-zig/zig-napi/archive/refs/tags/0.2.0.tar.gz";
+
+function scaffoldDependency(targetDir, source) {
+  if (source) {
+    return `.{ .path = ${JSON.stringify(normalizePathForZig(resolveZigNapiPath(targetDir, source)))} }`;
+  }
+  return `.{ .url = ${JSON.stringify(zigNapiArchive)} }`;
+}
+
 async function readZigNapiConfig(cwd, flags) {
   const packageJsonPath = path.resolve(cwd, flags.packageJsonPath || "package.json");
   const packageJson = readJson(packageJsonPath);
@@ -1043,13 +1052,13 @@ async function commandNew(projectDir, flags) {
   const packageName = options.packageName;
   const addonName = options.addonName;
   fs.mkdirSync(targetDir, { recursive: true });
-  const zigNapiZigPath = resolveZigNapiPath(targetDir, flags.zigNapi);
+  const dependency = scaffoldDependency(targetDir, flags.zigNapi);
 
   copyTemplate(templateDir, targetDir, {
     __PACKAGE_NAME__: packageName,
     __ADDON_NAME__: addonName,
     __ZIG_PACKAGE_NAME__: sanitizeZigName(packageName),
-    __ZIG_NAPI_ZIG_PATH__: JSON.stringify(normalizePathForZig(zigNapiZigPath)).slice(1, -1),
+    __ZIG_NAPI_DEPENDENCY__: dependency,
     '      "__NAPI_TARGETS__"': formatJsonStringArrayItems(options.targets, "      "),
     __FINGERPRINT__: "0x0",
     __CLI_VERSION__: readJson(path.join(packageDir, "package.json")).version,

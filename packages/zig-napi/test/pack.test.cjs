@@ -95,6 +95,8 @@ test(
           "test-addon",
           "--addon",
           "test_addon",
+          "--zig-napi",
+          path.join(installed, "zig"),
           "--targets",
           `${hostTarget},wasm32-wasip1-threads`,
         ],

@@ -220,7 +220,7 @@ function configure(directory, flags, targets, binaryName) {
     targets.every((t) => parseTriple(t).platform === "wasi") && flags.minNodeApiVersion < 10
       ? "^20.19.0 || ^22.13.0 || >=23.5.0"
       : nodeEngine(flags.minNodeApiVersion);
-  pkg.zigNapi = { typeDef: flags.enableTypeDef, managedZigDependency: !flags.zigNapi };
+  pkg.zigNapi = { typeDef: flags.enableTypeDef };
   pkg.scripts.build = "zig-napi build --platform --release";
   pkg.scripts["build:debug"] = "zig-napi build --platform";
   if (!flags.enableTypeDef) {
