@@ -891,8 +891,8 @@ test("new creates npm package metadata for every selected native and WASI target
       libc: ["musl"],
     },
     "win32-x64-msvc": { main: "probe_addon.win32-x64-msvc.node", os: ["win32"], cpu: ["x64"] },
-    "wasm32-wasi": { main: "probe_addon.wasi.cjs" },
-    "wasm32-wasip1": { main: "probe_addon.wasip1.cjs" },
+    "wasm32-wasi": { main: "probe_addon.wasi.cjs", cpu: ["wasm32"] },
+    "wasm32-wasip1": { main: "probe_addon.wasip1.cjs", cpu: ["wasm32"] },
   };
   assert.deepEqual(fs.readdirSync(project.file("npm")).sort(), Object.keys(expected).sort());
   for (const [platform, fields] of Object.entries(expected)) {
@@ -1060,9 +1060,11 @@ test("a WASI build refuses a mismatched emnapi install instead of linking it", (
     },
   );
   assert.notEqual(result.status, 0);
-  assert.match(
+  assert.ok(
+    result.stderr.includes(
+      `emnapi version mismatch: emnapi@${STUB_EMNAPI_VERSION}, @emnapi/core@2.0.0-alpha.4`,
+    ),
     result.stderr,
-    /emnapi version mismatch: emnapi@2\.0\.0-alpha\.5, @emnapi\/core@2\.0\.0-alpha\.4/,
   );
   assert.deepEqual(project.zig.lastBuildArgs(), undefined);
 });
