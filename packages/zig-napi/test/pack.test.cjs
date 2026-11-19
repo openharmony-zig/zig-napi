@@ -33,12 +33,16 @@ test(
       const packageDir = path.resolve(__dirname, "..");
       const tooling = path.join(scratch, "tooling");
       fs.mkdirSync(tooling);
-      run("npm", ["pack", "--pack-destination", scratch], packageDir);
-      const archive = fs.readdirSync(scratch).find((name) => name.endsWith(".tgz"));
-      assert.ok(archive);
+      let archive = process.env.ZIG_NAPI_CLI_TARBALL;
+      if (!archive) {
+        run("npm", ["pack", "--pack-destination", scratch], packageDir);
+        const filename = fs.readdirSync(scratch).find((name) => name.endsWith(".tgz"));
+        assert.ok(filename);
+        archive = path.join(scratch, filename);
+      }
       run(
         "npm",
-        ["install", "--ignore-scripts", "--no-audit", "--no-fund", path.join(scratch, archive)],
+        ["install", "--ignore-scripts", "--no-audit", "--no-fund", path.resolve(archive)],
         tooling,
       );
       const installed = path.join(tooling, "node_modules", "@ohos-rs", "zig-cli");
