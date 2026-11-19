@@ -318,6 +318,20 @@ test(
       );
       const elf = path.join(project, "renamed_addon.linux-x64-gnu.node");
       assert.equal(fs.readFileSync(elf).subarray(0, 4).toString("hex"), "7f454c46");
+      for (const [target, abi, machine] of [
+        ["aarch64-unknown-freebsd", "freebsd-arm64", 183],
+        ["powerpc64le-unknown-freebsd", "freebsd-ppc64", 21],
+      ]) {
+        run(
+          process.execPath,
+          [cli, "build", "--platform", "--cwd", project, "--target", target],
+          tooling,
+        );
+        // Check the ELF class, byte order and machine code in the actual shared object.
+        const binary = fs.readFileSync(path.join(project, `renamed_addon.${abi}.node`));
+        assert.equal(binary.subarray(0, 6).toString("hex"), "7f454c460201", abi);
+        assert.equal(binary.readUInt16LE(18), machine, abi);
+      }
       const sourcePathZig = path.join(project, "src", "lib.zig");
       const sourceBefore = fs.readFileSync(sourcePathZig, "utf8");
       const watcher = spawn(
