@@ -103,6 +103,12 @@ test(
           fs.readFileSync(path.join(project, "npm", platform, "package.json"), "utf8"),
         );
         assert.equal(manifest.name, `test-addon-${platform}`);
+        if (platform === "wasm32-wasi") {
+          assert.deepEqual(manifest.cpu, ["wasm32"]);
+          const rootDeps = require(path.join(project, "package.json")).dependencies;
+          for (const name of ["@emnapi/core", "@emnapi/runtime", "@napi-rs/wasm-runtime"])
+            assert.equal(manifest.dependencies[name], rootDeps[name]);
+        }
         assert.equal(manifest.version, "0.1.0");
         assert.equal(
           manifest.main,

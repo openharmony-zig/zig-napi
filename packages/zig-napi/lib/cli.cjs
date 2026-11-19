@@ -1264,16 +1264,35 @@ async function commandDts(flags, passthrough = []) {
 }
 
 async function commandCreateNpmDirs(flags) {
-  await readZigNapiConfig(path.resolve(process.cwd(), flags.cwd || "."), flags);
+  const cwd = path.resolve(flags.cwd || ".");
+  const config = await readZigNapiConfig(cwd, flags);
   await napiCli.createNpmDirs(
     cleanOptions({
-      cwd: path.resolve(process.cwd(), flags.cwd || "."),
+      cwd,
       configPath: flags.configPath,
       packageJsonPath: flags.packageJsonPath,
       npmDir: flags.npmDir,
       dryRun: flags.dryRun,
     }),
   );
+  if (flags.dryRun) return;
+  // Upstream selects today's registry dist-tag. Ship the runtime tested with
+  // the project's loaders and linked emnapi archive in each WASI package.
+  const runtime = config.packageJson.dependencies?.["@napi-rs/wasm-runtime"];
+  if (!runtime) return;
+  for (const flavor of collectWasiFlavors(config.targets)) {
+    const manifest = path.resolve(
+      cwd,
+      flags.npmDir || "npm",
+      flavor.platformArchABI,
+      "package.json",
+    );
+    const pkg = readJson(manifest);
+    if (pkg.dependencies["@napi-rs/wasm-runtime"] !== runtime) {
+      pkg.dependencies["@napi-rs/wasm-runtime"] = runtime;
+      writeJson(manifest, pkg);
+    }
+  }
 }
 
 async function commandArtifacts(flags) {
@@ -1301,15 +1320,7 @@ async function commandPackage(flags) {
     );
     return;
   }
-  await napiCli.createNpmDirs(
-    cleanOptions({
-      cwd,
-      configPath: flags.configPath,
-      packageJsonPath: flags.packageJsonPath,
-      npmDir: flags.npmDir,
-      dryRun: flags.dryRun,
-    }),
-  );
+  await commandCreateNpmDirs(flags);
   await commandBuild({ ...flags, cwd, platform: true });
   const buildOutputDir = flags.buildOutputDir || flags.outputDir || ".";
   await napiCli.artifacts(

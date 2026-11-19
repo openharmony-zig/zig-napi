@@ -330,7 +330,7 @@ ${footer}
 `;
 }
 
-const STUB_EMNAPI_VERSION = "2.0.0-alpha.5";
+const STUB_EMNAPI_VERSION = "2.0.0-beta.3";
 
 function writePackageStub(projectDir, name, version, extra = {}) {
   const directory = path.join(projectDir, "node_modules", ...name.split("/"));

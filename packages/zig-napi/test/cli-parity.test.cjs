@@ -65,7 +65,7 @@ function writeEmnapiPackages(dir, names) {
     fs.mkdirSync(directory, { recursive: true });
     fs.writeFileSync(
       path.join(directory, "package.json"),
-      JSON.stringify({ name, version: "2.0.0-alpha.5" }),
+      JSON.stringify({ name, version: "2.0.0-beta.3" }),
     );
   }
 }

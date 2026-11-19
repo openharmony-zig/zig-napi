@@ -85,9 +85,9 @@ in [WASM Runtime](./wasm-runtime).
 ### Runtime Prerequisites
 
 WASI addons link emnapi's archive, so the project needs matching runtime
-packages — `emnapi` `2.0.0-alpha.5` (a prerelease, pin the exact version),
+packages — `emnapi` `2.0.0-beta.3` (a prerelease, pin the exact version),
 `@emnapi/core` and `@emnapi/runtime` at that same version, and
-`@napi-rs/wasm-runtime` `1.2.4` for the loaders. The build finds
+`@napi-rs/wasm-runtime` `1.2.7` for the loaders. The build finds
 `node_modules/emnapi/lib` from the addon project upwards; `-Demnapi-link-dir=<dir>`
 (or `EMNAPI_LINK_DIR`) selects another archive directory, `-Demnapi-archive=<name-or-path>`
 another archive. A missing archive fails the build with the searched paths and

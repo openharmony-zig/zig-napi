@@ -44,7 +44,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
           registry-url: https://registry.npmjs.org/
           cache: pnpm
 
@@ -85,4 +85,6 @@ jobs:
         working-directory: packages/zig-napi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --provenance --access public
+        run: |
+          tag=$(node -p "const v = require('./package.json').version.split('+')[0]; v.includes('-') ? (v.split('-')[1].match(/^[a-z]+/i)?.[0] || 'next') : 'latest'")
+          npm publish --provenance --access public --tag "$tag"
